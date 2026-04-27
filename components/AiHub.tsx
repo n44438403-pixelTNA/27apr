@@ -245,7 +245,6 @@ export const AiHub: React.FC<Props> = ({ user, onTabChange, settings }) => {
               else if (link === "PDF") onTabChange("OPEN_CATALOG_DEEP_DIVE" as any);
               else if (link === "VIDEO") onTabChange("OPEN_CATALOG_VIDEO" as any);
               else if (link === "AUDIO") onTabChange("OPEN_CATALOG_AUDIO" as any);
-              else if (link === "MCQ") onTabChange("OPEN_CATALOG_MCQ" as any);
               else if (link === "STORE") onTabChange("STORE");
               else if (link) window.open(link, "_blank");
             }}

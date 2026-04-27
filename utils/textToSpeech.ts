@@ -79,6 +79,92 @@ export const stripHtml = (html: string): string => {
     return clean;
 };
 
+// ---------------------------------------------------------------------------
+// HINDI NUMBER → WORDS
+// Reads digits the way a human Hindi speaker would: 2019 → "do hazaar unnees".
+// Used as a TTS preprocessor when lang starts with "hi".
+// ---------------------------------------------------------------------------
+const HINDI_ONES_TEENS_TO_99 = [
+    'shunya', 'ek', 'do', 'teen', 'chaar', 'paanch', 'chhah', 'saat', 'aath', 'nau',
+    'das', 'gyaarah', 'baarah', 'terah', 'chaudah', 'pandrah', 'solah', 'satrah', 'athaarah', 'unnees',
+    'bees', 'ikkees', 'baees', 'teiees', 'chaubees', 'pachchees', 'chhabbees', 'sattaees', 'atthaees', 'unatees',
+    'tees', 'ikatees', 'battees', 'taintees', 'chautees', 'paintees', 'chhattees', 'sentees', 'adhtees', 'untaalees',
+    'chaalees', 'iktaalees', 'bayaalees', 'taintaalees', 'chavaalees', 'paintaalees', 'chhiyaalees', 'saintaalees', 'adhtaalees', 'unchaas',
+    'pachaas', 'ikyaavan', 'baavan', 'tirepan', 'chauvan', 'pachpan', 'chhappan', 'sattaavan', 'atthaavan', 'unsath',
+    'saath', 'iksath', 'baasath', 'tirsath', 'chausath', 'paisath', 'chhiyaasath', 'sadsath', 'adhsath', 'unhattar',
+    'sattar', 'ikahattar', 'bahattar', 'tihattar', 'chauhattar', 'pachhattar', 'chhihattar', 'satahattar', 'athahattar', 'unaasee',
+    'assee', 'ikyaasee', 'bayaasee', 'tirasee', 'chauraasee', 'pachaasee', 'chhiyaasee', 'sataasee', 'athaasee', 'navaasee',
+    'nabbe', 'ikyaanave', 'banaave', 'tiraanave', 'chauraanave', 'pachaanave', 'chhiyaanave', 'sataanave', 'athaanave', 'ninyaanave'
+];
+
+const numBelow1000ToHindi = (n: number): string => {
+    if (n < 0) return '';
+    if (n < 100) return HINDI_ONES_TEENS_TO_99[n];
+    const hundreds = Math.floor(n / 100);
+    const rest = n % 100;
+    const head = `${HINDI_ONES_TEENS_TO_99[hundreds]} sau`;
+    return rest === 0 ? head : `${head} ${HINDI_ONES_TEENS_TO_99[rest]}`;
+};
+
+export const numberToHindiWords = (input: number | string): string => {
+    let s = String(input).trim();
+    if (!s) return '';
+    const negative = s.startsWith('-');
+    if (negative) s = s.slice(1);
+
+    // Decimal handling: read digits after the point one-by-one ("point ek do teen")
+    let decimalPart = '';
+    if (s.includes('.')) {
+        const [intPartRaw, decRaw] = s.split('.');
+        s = intPartRaw || '0';
+        if (decRaw) {
+            decimalPart = ' point ' + decRaw.split('').map(d => HINDI_ONES_TEENS_TO_99[parseInt(d, 10)] || d).join(' ');
+        }
+    }
+
+    // Strip non-digits (commas, spaces) before parsing
+    s = s.replace(/[^0-9]/g, '');
+    if (!s) return '';
+
+    let n = parseInt(s, 10);
+    if (!Number.isFinite(n)) return s;
+
+    // Cap at crore-level. Anything beyond ~99,99,99,999 falls back to digit-by-digit.
+    if (n > 9999999999) {
+        const digitWise = s.split('').map(d => HINDI_ONES_TEENS_TO_99[parseInt(d, 10)] || d).join(' ');
+        return (negative ? 'rina ' : '') + digitWise + decimalPart;
+    }
+
+    if (n === 0) return (negative ? 'rina ' : '') + 'shunya' + decimalPart;
+
+    const parts: string[] = [];
+    const crore = Math.floor(n / 10000000); n %= 10000000;
+    const lakh  = Math.floor(n / 100000);   n %= 100000;
+    const hazaar = Math.floor(n / 1000);    n %= 1000;
+    const remainder = n;
+
+    if (crore > 0) parts.push(`${numBelow1000ToHindi(crore)} crore`);
+    if (lakh > 0)  parts.push(`${numBelow1000ToHindi(lakh)} laakh`);
+    if (hazaar > 0) parts.push(`${numBelow1000ToHindi(hazaar)} hazaar`);
+    if (remainder > 0) parts.push(numBelow1000ToHindi(remainder));
+
+    return (negative ? 'rina ' : '') + parts.join(' ') + decimalPart;
+};
+
+/**
+ * Replace every numeric token (e.g. "2019", "1,250", "7.5") in the input with its
+ * spoken Hindi-words equivalent. Leaves non-numeric text untouched.
+ */
+export const replaceNumbersWithHindiWords = (text: string): string => {
+    if (!text) return text;
+    // Match optional minus, digits with optional commas, optional .decimals
+    return text.replace(/-?\d+(?:,\d+)*(?:\.\d+)?/g, (match) => {
+        const cleaned = match.replace(/,/g, '');
+        const words = numberToHindiWords(cleaned);
+        return words || match;
+    });
+};
+
 // Track the active TTS session so chunked playback can be cancelled cleanly.
 let activeTtsSessionId = 0;
 
@@ -165,10 +251,22 @@ export const speakText = async (
         console.error("Error canceling speech:", e);
     }
 
-    const cleanText = stripHtml(text);
+    let cleanText = stripHtml(text);
     if (!cleanText.trim()) {
         if (onEnd) onEnd();
         return null;
+    }
+
+    // For Hindi reading, convert digit sequences to Hindi words so the engine
+    // pronounces "2019" as "do hazaar unnees" instead of spelling it out
+    // ("two zero one nine") which sounds robotic. Applied before chunking so
+    // expanded text still respects the chunk boundaries.
+    if ((lang || '').toLowerCase().startsWith('hi')) {
+        try {
+            cleanText = replaceNumbersWithHindiWords(cleanText);
+        } catch (e) {
+            console.warn('Hindi number normalization failed:', e);
+        }
     }
 
     // Resolve preferred voice

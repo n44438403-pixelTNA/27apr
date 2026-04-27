@@ -33,6 +33,7 @@ import {
 } from "../constants";
 import { ALL_FEATURES } from "../utils/featureRegistry";
 import { checkFeatureAccess } from "../utils/permissionUtils";
+import { downloadAsMHTML } from "../utils/downloadUtils";
 import { SubscriptionEngine } from "../utils/engines/subscriptionEngine";
 import { RewardEngine } from "../utils/engines/rewardEngine";
 import { Button } from "./ui/Button"; // Design System
@@ -276,11 +277,6 @@ export const StudentDashboard: React.FC<Props> = ({
     }
     if (tab === "OPEN_CATALOG_AUDIO") {
       setShowAllNotesCatalog("AUDIO");
-      onTabChange("AI_HUB");
-      return;
-    }
-    if (tab === "OPEN_CATALOG_MCQ") {
-      setShowAllNotesCatalog("MCQ");
       onTabChange("AI_HUB");
       return;
     }
@@ -697,7 +693,7 @@ export const StudentDashboard: React.FC<Props> = ({
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
   const [showAllNotesCatalog, setShowAllNotesCatalog] = useState<
-    "PREMIUM" | "DEEP_DIVE" | "VIDEO" | "AUDIO" | "MCQ" | false
+    "PREMIUM" | "DEEP_DIVE" | "VIDEO" | "AUDIO" | false
   >(false);
   const [catalogChapterCounts, setCatalogChapterCounts] = useState<
     Record<string, number>
@@ -882,11 +878,30 @@ export const StudentDashboard: React.FC<Props> = ({
   const [compMcqIndex, setCompMcqIndex] = useState(0);
   const [compMcqSelected, setCompMcqSelected] = useState<number | null>(null);
 
+  // ---- PER-TAB STATE PRESERVATION ----
+  // Each bottom-nav tab keeps its own snapshot of overlays/positions so the
+  // student returns to exactly where they were when they tap that tab again.
+  // Eg: creating an MCQ on Home → tap Profile → tap Home → MCQ creator restores.
+  // Reading a homework note → tap GK → tap Homework → same note reopens.
+  type LogicalTab = 'HOME' | 'HOMEWORK' | 'GK' | 'VIDEO' | 'PROFILE' | 'APP_STORE';
+  const [currentLogicalTab, setCurrentLogicalTab] = useState<LogicalTab>('HOME');
+  const [tabSnapshots, setTabSnapshots] = useState<Record<string, any>>({});
+  // Last-read line index per homework note id (for tap-to-resume after tab switch).
+  const [hwNotePositions, setHwNotePositions] = useState<Record<string, number>>({});
+
   // ---- HOMEWORK HIERARCHY (Year → Month → Week → Day → Note) ----
   const [hwYear, setHwYear] = useState<number | null>(null);
   const [hwMonth, setHwMonth] = useState<number | null>(null);
   const [hwWeek, setHwWeek] = useState<number | null>(null);
   const [hwActiveHwId, setHwActiveHwId] = useState<string | null>(null);
+  // Notes/MCQ split view: 'choose' shows a chooser overlay, 'notes' shows notes (with optional MCQ switch button),
+  // 'mcq' shows MCQ-only view. Defaults to 'notes' when only notes exist, 'mcq' when only MCQ.
+  const [hwViewMode, setHwViewMode] = useState<'notes' | 'mcq' | 'choose'>('notes');
+  // When the user taps a "Today" subject banner card with multiple items, this picker shows the list.
+  const [hwTodayPickerSub, setHwTodayPickerSub] = useState<string | null>(null);
+  // True when the active homework was opened directly from the Homework page (today banner / today picker).
+  // In that case, Back should jump straight back to the Homework page (not into the Year/Month hierarchy).
+  const [hwOpenedDirect, setHwOpenedDirect] = useState<boolean>(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
 
   // ---- HOMEWORK MCQ FULL-SCREEN PLAYER STATE ----
@@ -1069,6 +1084,8 @@ export const StudentDashboard: React.FC<Props> = ({
   const [gkExpandedYear, setGkExpandedYear] = useState<string | null>(null);
   const [gkExpandedMonth, setGkExpandedMonth] = useState<string | null>(null);
   const [gkExpandedWeek, setGkExpandedWeek] = useState<string | null>(null);
+  // GK page: today's banner is collapsed by default. Tap the banner to reveal today's Q&A.
+  const [gkTodayExpanded, setGkTodayExpanded] = useState<boolean>(false);
   const [activeChallenges20, setActiveChallenges20] = useState<Challenge20[]>(
     [],
   );
@@ -1634,6 +1651,9 @@ export const StudentDashboard: React.FC<Props> = ({
     };
 
     const onPopState = () => {
+      if (document.fullscreenElement) {
+          document.exitFullscreen().catch(err => console.log(err));
+      }
       const s = navStateRef.current;
 
       // 1. Close any open overlays first (one back press = one overlay close)
@@ -1843,6 +1863,9 @@ export const StudentDashboard: React.FC<Props> = ({
     type: "VIDEO" | "PDF" | "MCQ" | "AUDIO" | "GENERIC",
   ) => {
     const goBack = () => {
+      if (document.fullscreenElement) {
+          document.exitFullscreen().catch(err => console.log(err));
+      }
       if (contentViewStep === "PLAYER") {
         setContentViewStep("CHAPTERS");
         setFullScreen(false);
@@ -1892,7 +1915,20 @@ export const StudentDashboard: React.FC<Props> = ({
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
       const goBack = () => {
-        if (hwActiveHwId) { setHwActiveHwId(null); return; }
+        if (hwActiveHwId) {
+          // If the note was opened directly from the Homework page (today banner / today picker),
+          // Back should jump straight back to that page — not into the Year/Month hierarchy.
+          if (hwOpenedDirect) {
+            setHwActiveHwId(null);
+            setHwOpenedDirect(false);
+            setHomeworkSubjectView(null);
+            setSelectedSubject(null);
+            setShowHomeworkHistory(true);
+            return;
+          }
+          setHwActiveHwId(null);
+          return;
+        }
         if (hwWeek !== null) { setHwWeek(null); return; }
         if (hwMonth !== null) { setHwMonth(null); return; }
         if (hwYear !== null) { setHwYear(null); return; }
@@ -1941,18 +1977,35 @@ export const StudentDashboard: React.FC<Props> = ({
         const prevHw = flatIdx > 0 ? filteredHw[flatIdx - 1] : null;
         const hwKey = activeHw.id || String(flatIdx);
 
+        const hasNotes = !!(activeHw.notes && activeHw.notes.trim());
+        const hasMcq = !!(activeHw.parsedMcqs && activeHw.parsedMcqs.length > 0);
+        const hasMedia = !!(activeHw.audioUrl || activeHw.videoUrl);
+        // Effective view mode — guard against stale state if content lacks the requested mode.
+        const effectiveMode: 'notes' | 'mcq' | 'choose' =
+          hwViewMode === 'choose' && (!hasNotes || !hasMcq)
+            ? (hasMcq && !hasNotes ? 'mcq' : 'notes')
+            : (hwViewMode === 'mcq' && !hasMcq ? 'notes'
+              : hwViewMode === 'notes' && !hasNotes && hasMcq ? 'mcq'
+              : hwViewMode);
+
         const goToHw = (target: typeof activeHw) => {
           const d = new Date(target.date);
           setHwYear(d.getFullYear());
           setHwMonth(d.getMonth());
           setHwWeek(getWeekOfMonth(d));
           setHwActiveHwId(target.id || '');
+          // Reset view mode for the new item.
+          const tNotes = !!(target.notes && target.notes.trim());
+          const tMcq = !!(target.parsedMcqs && target.parsedMcqs.length > 0);
+          if (tNotes && tMcq) setHwViewMode('choose');
+          else if (tMcq) setHwViewMode('mcq');
+          else setHwViewMode('notes');
         };
 
         return (
           <div className="fixed inset-0 z-[150] bg-white flex flex-col animate-in fade-in">
             {/* Sticky header */}
-            <div className={`${theme.btn} text-white px-4 py-3 flex items-center gap-3 shrink-0`}>
+            <div className={`${theme.btn} text-white px-4 py-3 flex items-center gap-2 shrink-0`}>
               <button onClick={goBack} className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors">
                 <ChevronRight size={18} className="rotate-180" />
               </button>
@@ -1960,52 +2013,150 @@ export const StudentDashboard: React.FC<Props> = ({
                 <p className="text-[10px] font-bold opacity-75 uppercase tracking-widest truncate">{crumb}</p>
                 <p className="font-black text-sm leading-tight truncate">{activeHw.title}</p>
               </div>
+              {/* Save offline (HTML) — works for notes + MCQs in any mode incl. Competition */}
+              <button
+                onClick={async () => {
+                  try {
+                    const safeTitle = (activeHw.title || 'Homework').replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
+                    await downloadAsMHTML('hw-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                    showAlert('📥 Offline save ho gaya!', 'SUCCESS');
+                  } catch (e) {
+                    showAlert('Download fail ho gaya. Phir try karein.', 'ERROR');
+                  }
+                }}
+                className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors"
+                aria-label="Save this lesson offline"
+                title="Save offline (HTML)"
+              >
+                <Download size={16} />
+              </button>
               <span className="bg-white/20 text-white text-[11px] font-black px-2.5 py-1 rounded-full shrink-0">
                 {flatIdx + 1}/{filteredHw.length}
               </span>
             </div>
 
+            {/* CHOOSER OVERLAY — appears when both notes and MCQ exist and user hasn't picked yet */}
+            {effectiveMode === 'choose' && (
+              <div className="flex-1 overflow-y-auto flex items-center justify-center p-6 bg-gradient-to-br from-slate-50 via-white to-slate-50">
+                <div className="w-full max-w-md">
+                  {/* App logo (no heading text) */}
+                  <div className="flex justify-center mb-8">
+                    {settings?.appLogo ? (
+                      <img
+                        src={settings.appLogo}
+                        alt="App logo"
+                        className="w-24 h-24 rounded-3xl object-cover shadow-md"
+                      />
+                    ) : (
+                      <img
+                        src="/pwa-192x192.png"
+                        alt="App logo"
+                        className="w-24 h-24 rounded-3xl object-cover shadow-md"
+                      />
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => setHwViewMode('notes')}
+                      className={`bg-white border-2 ${theme.border} rounded-2xl p-5 flex flex-col items-center justify-center gap-2 hover:shadow-md active:scale-[0.98] transition-all`}
+                    >
+                      <div className={`w-14 h-14 rounded-2xl ${theme.bgSoft} ${theme.text} flex items-center justify-center`}>
+                        <BookOpen size={26} />
+                      </div>
+                      <p className={`font-black text-base ${theme.textDeep}`}>Notes</p>
+                    </button>
+                    <button
+                      onClick={() => setHwViewMode('mcq')}
+                      className="bg-white border-2 border-emerald-200 rounded-2xl p-5 flex flex-col items-center justify-center gap-2 hover:shadow-md active:scale-[0.98] transition-all"
+                    >
+                      <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                        <CheckSquare size={26} />
+                      </div>
+                      <p className="font-black text-base text-emerald-800">MCQ</p>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Scrollable content */}
+            {effectiveMode !== 'choose' && (
             <div className="flex-1 overflow-y-auto">
-              {/* Notes */}
-              {activeHw.notes && (
-                <div className="px-4 pb-2">
-                  <ChunkedNotesReader
-                    content={activeHw.notes}
-                    topBarLabel={activeHw.title}
-                  />
-                </div>
+              {/* NOTES MODE */}
+              {effectiveMode === 'notes' && (
+                <>
+                  {/* Top header row with switch-to-MCQ button (mirrors MCQ mode's top row) */}
+                  <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+                    <p className={`text-[10px] font-black ${theme.text} uppercase tracking-widest flex items-center gap-1`}>
+                      <BookOpen size={11} /> Notes
+                    </p>
+                    {hasMcq && (
+                      <button
+                        onClick={() => setHwViewMode('mcq')}
+                        className="text-[11px] font-black text-emerald-700 bg-emerald-100 px-3 py-1.5 rounded-full flex items-center gap-1 hover:opacity-80 active:scale-95 transition-all"
+                      >
+                        MCQ ({activeHw.parsedMcqs!.length}) <ChevronRight size={12} />
+                      </button>
+                    )}
+                  </div>
+
+                  {hasNotes && (
+                    <div className="px-4 pb-2">
+                      <ChunkedNotesReader
+                        content={activeHw.notes!}
+                        topBarLabel={activeHw.title}
+                        initialIndex={activeHw.id ? hwNotePositions[activeHw.id] ?? null : null}
+                        onPositionChange={(idx) => {
+                          if (!activeHw.id) return;
+                          setHwNotePositions(prev =>
+                            prev[activeHw.id!] === idx ? prev : { ...prev, [activeHw.id!]: idx }
+                          );
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Audio */}
+                  {activeHw.audioUrl && (
+                    <div className="mx-4 mb-3 bg-purple-50 border border-purple-100 rounded-2xl p-3">
+                      <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-2 flex items-center gap-1">
+                        <Volume2 size={11} /> Audio
+                      </p>
+                      <audio controls src={activeHw.audioUrl} className="w-full h-8" />
+                    </div>
+                  )}
+
+                  {/* Video */}
+                  {activeHw.videoUrl && (
+                    <div className="mx-4 mb-3 bg-rose-50 border border-rose-100 rounded-2xl p-3 flex items-center justify-between gap-3">
+                      <p className="text-sm font-bold text-rose-700">Video lesson available</p>
+                      <a href={activeHw.videoUrl} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-700 active:scale-95 transition-all">
+                        <Play size={12} /> Watch
+                      </a>
+                    </div>
+                  )}
+                </>
               )}
 
-              {/* Audio */}
-              {activeHw.audioUrl && (
-                <div className="mx-4 mb-3 bg-purple-50 border border-purple-100 rounded-2xl p-3">
-                  <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-2 flex items-center gap-1">
-                    <Volume2 size={11} /> Audio
-                  </p>
-                  <audio controls src={activeHw.audioUrl} className="w-full h-8" />
-                </div>
-              )}
-
-              {/* Video */}
-              {activeHw.videoUrl && (
-                <div className="mx-4 mb-3 bg-rose-50 border border-rose-100 rounded-2xl p-3 flex items-center justify-between gap-3">
-                  <p className="text-sm font-bold text-rose-700">Video lesson available</p>
-                  <a href={activeHw.videoUrl} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-700 active:scale-95 transition-all">
-                    <Play size={12} /> Watch
-                  </a>
-                </div>
-              )}
-
-              {/* MCQ */}
-              {activeHw.parsedMcqs && activeHw.parsedMcqs.length > 0 && (
-                <div className="px-4 pb-4">
-                  <p className={`text-[10px] font-black ${theme.text} uppercase tracking-widest mb-3 flex items-center gap-1`}>
-                    <CheckSquare size={11} /> MCQ Practice · {activeHw.parsedMcqs.length} questions
-                  </p>
+              {/* MCQ MODE */}
+              {effectiveMode === 'mcq' && hasMcq && (
+                <div className="px-4 pt-3 pb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className={`text-[10px] font-black ${theme.text} uppercase tracking-widest flex items-center gap-1`}>
+                      <CheckSquare size={11} /> MCQ Practice · {activeHw.parsedMcqs!.length} questions
+                    </p>
+                    {hasNotes && (
+                      <button
+                        onClick={() => setHwViewMode('notes')}
+                        className={`text-[11px] font-black ${theme.text} ${theme.bgSoft} px-3 py-1.5 rounded-full flex items-center gap-1 hover:opacity-80 active:scale-95 transition-all`}
+                      >
+                        <ChevronRight size={12} className="rotate-180" /> Notes
+                      </button>
+                    )}
+                  </div>
                   <div className="space-y-3">
-                    {activeHw.parsedMcqs.map((mcq, qi) => {
+                    {activeHw.parsedMcqs!.map((mcq, qi) => {
                       const ansKey = `${hwKey}_${qi}`;
                       const selected = hwAnswers[ansKey];
                       return (
@@ -2037,12 +2188,15 @@ export const StudentDashboard: React.FC<Props> = ({
                   </div>
                 </div>
               )}
+
               {!nextHw && (
                 <p className="text-center text-xs text-slate-400 font-bold py-6">🎉 Saare notes complete!</p>
               )}
             </div>
+            )}
 
-            {/* Fixed bottom nav */}
+            {/* Fixed bottom nav (hidden in chooser mode) */}
+            {effectiveMode !== 'choose' && (
             <div className="shrink-0 border-t border-slate-100 bg-white px-4 py-3 flex items-center gap-3">
               <button
                 disabled={!prevHw}
@@ -2059,6 +2213,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 Next <ChevronRight size={16} />
               </button>
             </div>
+            )}
           </div>
         );
       }
@@ -4540,17 +4695,6 @@ export const StudentDashboard: React.FC<Props> = ({
           const d = new Date(hw.date); d.setHours(0, 0, 0, 0);
           return d.toISOString().split('T')[0] === todayKey;
         });
-        const bySubject: Record<string, typeof allHw> = {};
-        allHw.forEach(hw => {
-          const sub = hw.targetSubject && SUBJECT_INFO[hw.targetSubject] ? hw.targetSubject : 'other';
-          if (!bySubject[sub]) bySubject[sub] = [];
-          bySubject[sub].push(hw);
-        });
-        const subjectKeys = Object.keys(bySubject).sort((a, b) => {
-          const order = ['mcq', 'sarSangrah', 'speedySocialScience', 'speedyScience', 'other'];
-          return order.indexOf(a) - order.indexOf(b);
-        });
-
         const openSubject = (subId: string) => {
           setShowHomeworkHistory(false);
           setHomeworkSubjectView(subId);
@@ -4561,7 +4705,44 @@ export const StudentDashboard: React.FC<Props> = ({
           setHwMonth(null);
           setHwWeek(null);
           setHwActiveHwId(null);
+          setHwOpenedDirect(false);
           onTabChange('COURSES');
+        };
+
+        // Open a single homework directly (skip year/month/date hierarchy entirely).
+        // Used by today-banner taps and the today-picker modal so the student lands
+        // straight on the notes/MCQ chooser screen.
+        const openHomeworkDirect = (hw: typeof allHw[number], subId: string) => {
+          const hasNotes = !!(hw.notes && hw.notes.trim());
+          const hasMcq = !!(hw.parsedMcqs && hw.parsedMcqs.length > 0);
+          // Pre-set the view mode so the chooser overlay (or single-mode view) shows correctly.
+          if (hasNotes && hasMcq) setHwViewMode('choose');
+          else if (hasMcq) setHwViewMode('mcq');
+          else setHwViewMode('notes');
+
+          setShowHomeworkHistory(false);
+          setHwTodayPickerSub(null);
+          setHomeworkSubjectView(subId);
+          setSelectedSubject({ id: subId, name: SUBJECT_INFO[subId]?.label || subId, icon: 'Book', color: 'bg-slate-100' } as any);
+          setContentViewStep('SUBJECTS');
+          setLucentCategoryView(false);
+          // Leave year/month/week null so "Back" goes straight back to the homework page,
+          // not into the year/month hierarchy.
+          setHwYear(null);
+          setHwMonth(null);
+          setHwWeek(null);
+          setHwActiveHwId(hw.id || '');
+          setHwOpenedDirect(true);
+          onTabChange('COURSES');
+        };
+
+        // Tap on a today-banner subject card.
+        const onTapTodaySubject = (subId: string, hws: typeof todaysHw) => {
+          if (hws.length === 1) {
+            openHomeworkDirect(hws[0], subId);
+          } else {
+            setHwTodayPickerSub(subId);
+          }
         };
 
         return (
@@ -4616,7 +4797,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           return Object.entries(todayBySub).map(([sub, hws]) => (
                             <button
                               key={sub}
-                              onClick={() => openSubject(sub)}
+                              onClick={() => onTapTodaySubject(sub, hws)}
                               className="bg-white hover:bg-slate-50 rounded-xl p-3 border border-slate-200 text-left active:scale-95 transition-all shadow-sm"
                             >
                               <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mb-1">
@@ -4654,57 +4835,6 @@ export const StudentDashboard: React.FC<Props> = ({
                     <GraduationCap size={40} className="mx-auto mb-3 opacity-40" />
                     <p className="font-bold text-sm">Aaj koi homework nahi hai</p>
                     <p className="text-xs mt-1">Admin ke add karne ka intezaar karein</p>
-                  </div>
-                )}
-
-                {/* SUBJECT-WISE HISTORY */}
-                {subjectKeys.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest px-1">
-                      Subject-wise History
-                    </h4>
-                    {subjectKeys.map((subId) => {
-                      const info = SUBJECT_INFO[subId] || SUBJECT_INFO.other;
-                      const subHw = bySubject[subId] || [];
-                      if (subHw.length === 0) return null;
-                      const sortedHw = [...subHw].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                      const latest = sortedHw[0];
-                      const totalMcqs = subHw.reduce((s, h) => s + (h.parsedMcqs?.length || 0), 0);
-                      return (
-                        <button
-                          key={subId}
-                          onClick={() => openSubject(subId)}
-                          className="w-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md active:scale-[0.99] transition-all text-left"
-                        >
-                          <div className={`h-1.5 w-full bg-gradient-to-r ${info.gradient}`} />
-                          <div className="p-4 flex items-center gap-3">
-                            <div className={`w-12 h-12 rounded-2xl ${info.iconBg} ${info.iconText} flex items-center justify-center shrink-0`}>
-                              {subId === 'mcq' ? <CheckSquare size={20} /> : subId === 'sarSangrah' ? <BookOpen size={20} /> : subId === 'speedySocialScience' ? <Globe size={20} /> : subId === 'speedyScience' ? <BookOpenText size={20} /> : <BookOpen size={20} />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-black text-slate-800 text-sm">{info.label}</p>
-                              <p className="text-[11px] text-slate-500 font-medium truncate">
-                                Latest: {latest.title}
-                              </p>
-                              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                                <span className={`text-[10px] font-bold ${info.chipBg} ${info.chipText} px-2 py-0.5 rounded-full`}>
-                                  {subHw.length} {subHw.length === 1 ? 'note' : 'notes'}
-                                </span>
-                                {totalMcqs > 0 && (
-                                  <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
-                                    {totalMcqs} MCQs
-                                  </span>
-                                )}
-                                <span className="text-[10px] font-bold text-slate-400">
-                                  • {new Date(latest.date).toLocaleDateString('default', { day: 'numeric', month: 'short' })}
-                                </span>
-                              </div>
-                            </div>
-                            <ChevronRight size={20} className="text-slate-400 shrink-0" />
-                          </div>
-                        </button>
-                      );
-                    })}
                   </div>
                 )}
 
@@ -4760,6 +4890,70 @@ export const StudentDashboard: React.FC<Props> = ({
                 })()}
               </div>
             </div>
+
+            {/* TODAY PICKER MODAL — shown when a today-banner subject has multiple items */}
+            {hwTodayPickerSub && (() => {
+              const pickHws = todaysHw.filter(hw => {
+                const sub = hw.targetSubject && SUBJECT_INFO[hw.targetSubject] ? hw.targetSubject : 'other';
+                return sub === hwTodayPickerSub;
+              });
+              const info = SUBJECT_INFO[hwTodayPickerSub] || SUBJECT_INFO.other;
+              return (
+                <div
+                  className="fixed inset-0 z-[160] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center animate-in fade-in"
+                  onClick={() => setHwTodayPickerSub(null)}
+                >
+                  <div
+                    className="bg-white w-full sm:max-w-md max-h-[80vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-4 shadow-2xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center gap-3 mb-4 sticky top-0 bg-white pb-2 border-b border-slate-100">
+                      <div className={`w-11 h-11 rounded-2xl ${info.iconBg} ${info.iconText} flex items-center justify-center shrink-0`}>
+                        <GraduationCap size={20} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Aaj ka homework</p>
+                        <h3 className="text-base font-black text-slate-800 truncate">{info.label}</h3>
+                      </div>
+                      <button
+                        onClick={() => setHwTodayPickerSub(null)}
+                        className="p-2 hover:bg-slate-100 rounded-full text-slate-600"
+                        aria-label="Close"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {pickHws.map((hw, idx) => {
+                        const hasNotes = !!(hw.notes && hw.notes.trim());
+                        const hasMcq = !!(hw.parsedMcqs && hw.parsedMcqs.length > 0);
+                        return (
+                          <button
+                            key={hw.id || idx}
+                            onClick={() => openHomeworkDirect(hw, hwTodayPickerSub)}
+                            className={`w-full text-left bg-white border-2 ${info.ring} rounded-2xl p-3 flex items-center gap-3 hover:shadow-md active:scale-[0.98] transition-all`}
+                          >
+                            <div className={`w-10 h-10 rounded-xl ${info.iconBg} ${info.iconText} flex items-center justify-center shrink-0 font-black`}>
+                              {idx + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-black text-slate-800 text-sm leading-snug truncate">{hw.title}</p>
+                              <div className="flex gap-1 mt-1 flex-wrap">
+                                {hasNotes && <span className="text-[9px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">NOTES</span>}
+                                {hasMcq && <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">{hw.parsedMcqs!.length} MCQ</span>}
+                                {hw.audioUrl && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">AUDIO</span>}
+                                {hw.videoUrl && <span className="text-[9px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded">VIDEO</span>}
+                              </div>
+                            </div>
+                            <ChevronRight size={18} className="text-slate-400 shrink-0" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}
@@ -4827,6 +5021,23 @@ export const StudentDashboard: React.FC<Props> = ({
                   <h3 className="text-base font-black text-slate-800">Practice MCQ Maker</h3>
                   <p className="text-[11px] text-slate-500 font-medium">Competition ke liye apna MCQ banaye + practice karein</p>
                 </div>
+                {allMcqs.length > 0 && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await downloadAsMHTML('comp-mcq-printable', `Competition_MCQs_${new Date().toISOString().slice(0,10)}`);
+                        showAlert(`📥 ${allMcqs.length} MCQs offline save ho gaye!`, 'SUCCESS');
+                      } catch (e) {
+                        showAlert('Download fail ho gaya. Phir try karein.', 'ERROR');
+                      }
+                    }}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md active:scale-95 transition-all"
+                    aria-label="Download all MCQs as HTML for offline use"
+                  >
+                    <Download size={14} />
+                    <span>Save Offline</span>
+                  </button>
+                )}
               </div>
               {/* Tabs */}
               <div className="max-w-2xl mx-auto px-4 pb-3">
@@ -5529,25 +5740,46 @@ export const StudentDashboard: React.FC<Props> = ({
 
             <div className="flex-1 overflow-y-auto">
               <div className="max-w-2xl mx-auto px-4 py-4 space-y-5">
-                {/* TODAY'S GK BANNER (only if today has GK) */}
+                {/* TODAY'S GK BANNER — tappable card. Tap to reveal today's Q&A. */}
                 {todaysGks.length > 0 && (
-                  <div className="rounded-2xl p-4 bg-gradient-to-br from-teal-50 via-emerald-50 to-cyan-50 border border-slate-200 shadow-sm relative overflow-hidden">
-                    <div className="absolute -top-8 -right-8 w-32 h-32 bg-emerald-100/60 rounded-full blur-2xl" />
-                    <div className="relative z-10">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-[10px] font-black bg-white text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-widest border border-emerald-200 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                          Today
-                        </span>
-                        <span className="text-[11px] text-slate-600 font-semibold">
-                          {today.toLocaleDateString("default", {
-                            weekday: "long",
-                            day: "numeric",
-                            month: "short",
-                          })}
-                        </span>
+                  <div className="rounded-2xl bg-gradient-to-br from-teal-50 via-emerald-50 to-cyan-50 border border-slate-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute -top-8 -right-8 w-32 h-32 bg-emerald-100/60 rounded-full blur-2xl pointer-events-none" />
+                    <button
+                      onClick={() => setGkTodayExpanded(v => !v)}
+                      className="relative z-10 w-full p-4 flex items-center gap-3 hover:bg-white/30 active:scale-[0.99] transition-all text-left"
+                      aria-expanded={gkTodayExpanded}
+                    >
+                      <div className="w-11 h-11 rounded-2xl bg-white text-emerald-700 border border-emerald-200 flex items-center justify-center shrink-0 shadow-sm">
+                        <BookOpen size={20} />
                       </div>
-                      <div className="space-y-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-black bg-white text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-widest border border-emerald-200 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                            Today
+                          </span>
+                          <span className="text-[10px] text-slate-600 font-semibold">
+                            {today.toLocaleDateString("default", {
+                              weekday: "short",
+                              day: "numeric",
+                              month: "short",
+                            })}
+                          </span>
+                        </div>
+                        <p className="font-black text-slate-800 text-sm truncate">
+                          Aaj ka GK · {todaysGks.length} {todaysGks.length === 1 ? "question" : "questions"}
+                        </p>
+                        <p className="text-[11px] text-slate-500 font-medium">
+                          {gkTodayExpanded ? "Tap to hide" : "Tap to view"}
+                        </p>
+                      </div>
+                      <ChevronRight
+                        size={20}
+                        className={`text-emerald-600 shrink-0 transition-transform ${gkTodayExpanded ? "rotate-90" : ""}`}
+                      />
+                    </button>
+                    {gkTodayExpanded && (
+                      <div className="relative z-10 px-4 pb-4 space-y-3 animate-in fade-in slide-in-from-top-2">
                         {todaysGks.map((gk, i) => (
                           <div
                             key={gk.id || `today-${i}`}
@@ -5562,7 +5794,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           </div>
                         ))}
                       </div>
-                    </div>
+                    )}
                   </div>
                 )}
 
@@ -5917,6 +6149,125 @@ export const StudentDashboard: React.FC<Props> = ({
         {renderMainContent()}
       </div>
 
+      {/* Hidden printable container used by the Competition MCQ Hub "Download" button.
+          Rendered off-screen so html-to-MHTML can capture it without showing it on-screen. */}
+      <div
+        id="comp-mcq-printable"
+        style={{ position: 'fixed', left: '-99999px', top: 0, width: '1100px', background: '#ffffff', padding: '32px', color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif' }}
+        aria-hidden="true"
+      >
+        <h1 style={{ fontSize: '28px', fontWeight: 900, marginBottom: '4px' }}>
+          {settings?.appName || 'IIC'} — Competition MCQs
+        </h1>
+        <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '24px' }}>
+          Downloaded: {new Date().toLocaleString()}
+        </p>
+        {(() => {
+          const adminMcqs = (settings?.competitionMcqs || []);
+          const userMcqs = (user.customMcqs || []);
+          const all = [
+            ...adminMcqs.map((m) => ({ m, src: 'Official' as const })),
+            ...userMcqs.map((m) => ({ m, src: 'My MCQ' as const })),
+          ];
+          if (all.length === 0) return <p style={{ fontSize: '14px', color: '#64748b' }}>No MCQs available.</p>;
+          return all.map(({ m, src }, i) => (
+            <div key={i} style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', marginBottom: '14px', background: '#f8fafc' }}>
+              <div style={{ fontSize: '11px', color: src === 'Official' ? '#1d4ed8' : '#047857', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>
+                Q{i + 1} · {src}
+              </div>
+              <div style={{ fontSize: '15px', fontWeight: 700, marginBottom: '10px', whiteSpace: 'pre-wrap' }}>
+                {m.question}
+              </div>
+              <div>
+                {(m.options || []).map((opt, oi) => (
+                  <div
+                    key={oi}
+                    style={{
+                      fontSize: '13px',
+                      padding: '8px 12px',
+                      marginBottom: '6px',
+                      borderRadius: '8px',
+                      background: oi === m.correctAnswer ? '#d1fae5' : '#ffffff',
+                      border: oi === m.correctAnswer ? '1px solid #34d399' : '1px solid #e2e8f0',
+                      fontWeight: oi === m.correctAnswer ? 700 : 500,
+                    }}
+                  >
+                    <span style={{ fontWeight: 800, marginRight: '8px' }}>{String.fromCharCode(65 + oi)}.</span>
+                    {opt}
+                    {oi === m.correctAnswer && <span style={{ marginLeft: '8px', color: '#047857', fontWeight: 700 }}>✓ Answer</span>}
+                  </div>
+                ))}
+              </div>
+              {(m as any).explanation && (
+                <div style={{ marginTop: '10px', padding: '10px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '8px', fontSize: '12px', color: '#78350f' }}>
+                  <strong>Explanation:</strong> {(m as any).explanation}
+                </div>
+              )}
+            </div>
+          ));
+        })()}
+      </div>
+
+      {/* Hidden printable container for the currently-open homework note (notes + MCQs). */}
+      <div
+        id="hw-note-printable"
+        style={{ position: 'fixed', left: '-99999px', top: 0, width: '1100px', background: '#ffffff', padding: '32px', color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif' }}
+        aria-hidden="true"
+      >
+        {(() => {
+          const allHw = (settings?.homework || []);
+          const hw = allHw.find(h => h.id === hwActiveHwId);
+          if (!hw) return null;
+          return (
+            <>
+              <h1 style={{ fontSize: '28px', fontWeight: 900, marginBottom: '4px' }}>{hw.title}</h1>
+              <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '24px' }}>
+                {new Date(hw.date).toLocaleDateString('default', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {settings?.appName || 'IIC'}
+              </p>
+              {hw.notes && (
+                <div style={{ fontSize: '14px', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginBottom: '24px' }}>
+                  {hw.notes}
+                </div>
+              )}
+              {hw.parsedMcqs && hw.parsedMcqs.length > 0 && (
+                <>
+                  <h2 style={{ fontSize: '20px', fontWeight: 800, margin: '20px 0 12px', borderTop: '2px solid #e2e8f0', paddingTop: '16px' }}>
+                    MCQ Practice ({hw.parsedMcqs.length} questions)
+                  </h2>
+                  {hw.parsedMcqs.map((mcq, qi) => (
+                    <div key={qi} style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px', marginBottom: '12px', background: '#f8fafc' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 700, marginBottom: '8px', whiteSpace: 'pre-wrap' }}>
+                        {qi + 1}. {mcq.question}
+                      </div>
+                      {mcq.options.map((opt, oi) => (
+                        <div
+                          key={oi}
+                          style={{
+                            fontSize: '13px', padding: '6px 10px', marginBottom: '4px', borderRadius: '6px',
+                            background: oi === mcq.correctAnswer ? '#d1fae5' : '#ffffff',
+                            border: oi === mcq.correctAnswer ? '1px solid #34d399' : '1px solid #e2e8f0',
+                            fontWeight: oi === mcq.correctAnswer ? 700 : 500,
+                          }}
+                        >
+                          <span style={{ fontWeight: 800, marginRight: '6px' }}>{String.fromCharCode(65 + oi)}.</span>
+                          {opt}
+                          {oi === mcq.correctAnswer && <span style={{ marginLeft: '6px', color: '#047857', fontWeight: 700 }}>✓</span>}
+                        </div>
+                      ))}
+                      {mcq.explanation && (
+                        <div style={{ marginTop: '6px', padding: '8px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '6px', fontSize: '12px' }}>
+                          <strong>Explanation:</strong> {mcq.explanation}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
+            </>
+          );
+        })()}
+      </div>
+
       {/* MINI PLAYER */}
       <MiniPlayer
         track={currentAudioTrack}
@@ -5925,13 +6276,133 @@ export const StudentDashboard: React.FC<Props> = ({
 
       {/* FIXED BOTTOM NAVIGATION */}
       <nav
-        className={`fixed bottom-0 left-0 right-0 w-full mx-auto bg-white/95 backdrop-blur-md border-t border-slate-200/70 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.18)] z-[300] pb-safe ${mcqAppOpen || activeExternalApp || showAllNotesCatalog || viewingUserHistory || homeworkPlayerHwId || isDocFullscreen ? "hidden" : ""}`}
+        className={`fixed bottom-0 left-0 right-0 w-full mx-auto bg-white/95 backdrop-blur-md border-t border-slate-200/70 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.18)] z-[300] pb-safe ${activeExternalApp || isDocFullscreen ? "hidden" : ""}`}
         aria-label="Primary"
       >
         <div className="flex justify-around items-stretch h-[64px] max-w-3xl mx-auto px-1">
           {(() => {
+            // ---- PER-TAB SNAPSHOT / RESTORE ----
+            // Capture every overlay/position state for the tab the user is leaving,
+            // and restore the snapshot for the tab they tap (or apply tab defaults
+            // on first visit). TTS is stopped on every switch so audio doesn't bleed
+            // between tabs, but ALL navigation/draft/scroll state is preserved.
+            const captureSnapshot = () => ({
+              activeTab,
+              showHomeworkHistory,
+              homeworkSubjectView,
+              hwActiveHwId,
+              hwYear,
+              hwMonth,
+              hwWeek,
+              hwOpenedDirect,
+              hwTodayPickerSub,
+              hwViewMode,
+              homeworkPlayerHwId,
+              showDailyGkHistory,
+              gkExpandedYear,
+              gkExpandedMonth,
+              gkExpandedWeek,
+              showCompMcqHub,
+              compMcqTab,
+              compMcqIndex,
+              compMcqSelected,
+              mcqAppOpen,
+              activeExternalApp,
+              showAllNotesCatalog,
+              viewingUserHistory,
+              selectedSubject,
+              contentViewStep,
+              lucentCategoryView,
+            });
+
+            const applySnapshot = (s: any) => {
+              if (s.activeTab !== undefined) onTabChange(s.activeTab);
+              setShowHomeworkHistory(!!s.showHomeworkHistory);
+              setHomeworkSubjectView(s.homeworkSubjectView ?? null);
+              setHwActiveHwId(s.hwActiveHwId ?? null);
+              setHwYear(s.hwYear ?? null);
+              setHwMonth(s.hwMonth ?? null);
+              setHwWeek(s.hwWeek ?? null);
+              setHwOpenedDirect(!!s.hwOpenedDirect);
+              setHwTodayPickerSub(s.hwTodayPickerSub ?? null);
+              setHwViewMode(s.hwViewMode ?? 'notes');
+              setHomeworkPlayerHwId(s.homeworkPlayerHwId ?? null);
+              setShowDailyGkHistory(!!s.showDailyGkHistory);
+              setGkExpandedYear(s.gkExpandedYear ?? null);
+              setGkExpandedMonth(s.gkExpandedMonth ?? null);
+              setGkExpandedWeek(s.gkExpandedWeek ?? null);
+              setShowCompMcqHub(!!s.showCompMcqHub);
+              setCompMcqTab(s.compMcqTab ?? 'PRACTICE');
+              setCompMcqIndex(s.compMcqIndex ?? 0);
+              setCompMcqSelected(s.compMcqSelected ?? null);
+              setMcqAppOpen(!!s.mcqAppOpen);
+              setActiveExternalApp(s.activeExternalApp ?? null);
+              setShowAllNotesCatalog(s.showAllNotesCatalog ?? null);
+              setViewingUserHistory(s.viewingUserHistory ?? null);
+              setSelectedSubject(s.selectedSubject ?? null);
+              setContentViewStep(s.contentViewStep ?? 'SUBJECTS');
+              setLucentCategoryView(!!s.lucentCategoryView);
+            };
+
+            // Default state for a tab the user is opening for the first time.
+            const defaultSnapshotForTab = (tab: LogicalTab) => {
+              const empty = {
+                activeTab: 'HOME' as any,
+                showHomeworkHistory: false,
+                homeworkSubjectView: null,
+                hwActiveHwId: null,
+                hwYear: null,
+                hwMonth: null,
+                hwWeek: null,
+                hwOpenedDirect: false,
+                hwTodayPickerSub: null,
+                hwViewMode: 'notes',
+                homeworkPlayerHwId: null,
+                showDailyGkHistory: false,
+                gkExpandedYear: null,
+                gkExpandedMonth: null,
+                gkExpandedWeek: null,
+                showCompMcqHub: false,
+                compMcqTab: 'PRACTICE',
+                compMcqIndex: 0,
+                compMcqSelected: null,
+                mcqAppOpen: false,
+                activeExternalApp: null,
+                showAllNotesCatalog: null,
+                viewingUserHistory: null,
+                selectedSubject: null,
+                contentViewStep: 'SUBJECTS',
+                lucentCategoryView: false,
+              };
+              switch (tab) {
+                case 'HOME':     return { ...empty, activeTab: 'HOME' };
+                case 'HOMEWORK': return { ...empty, activeTab: 'HOME', showHomeworkHistory: true };
+                case 'GK':       return { ...empty, activeTab: 'HOME', showDailyGkHistory: true };
+                case 'VIDEO':    return { ...empty, activeTab: 'UNIVERSAL_VIDEO' };
+                case 'PROFILE':  return { ...empty, activeTab: 'PROFILE' };
+                case 'APP_STORE':return { ...empty, activeTab: 'APP_STORE' };
+                default:         return empty;
+              }
+            };
+
+            const switchToLogicalTab = (target: LogicalTab) => {
+              if (target === currentLogicalTab) {
+                // Re-tap of the active tab → just stop any audio, leave state alone.
+                try { stopSpeech(); } catch (_) {}
+                setSpeakingId(null);
+                return;
+              }
+              try { stopSpeech(); } catch (_) {}
+              setSpeakingId(null);
+              const snap = captureSnapshot();
+              setTabSnapshots(prev => ({ ...prev, [currentLogicalTab]: snap }));
+              const restore = tabSnapshots[target];
+              applySnapshot(restore ?? defaultSnapshotForTab(target));
+              setCurrentLogicalTab(target);
+            };
+
             const tabs: Array<{
-              id: "HOME" | "HOMEWORK" | "GK" | "VIDEO" | "MCQ" | "PROFILE" | "APP_STORE";
+              id: LogicalTab;
               label: string;
               Icon: any;
               featureId?: string;
@@ -5945,20 +6416,8 @@ export const StudentDashboard: React.FC<Props> = ({
                 Icon: Home,
                 featureId: "NAV_HOME",
                 filledOnActive: true,
-                isActive:
-                  activeTab === "HOME" &&
-                  !mcqAppOpen &&
-                  !showDailyGkHistory &&
-                  !showHomeworkHistory &&
-                  !activeExternalApp,
-                onClick: () => {
-                  setMcqAppOpen(false);
-                  setShowDailyGkHistory(false);
-                  setShowHomeworkHistory(false);
-                  setActiveExternalApp(null);
-                  onTabChange("HOME");
-                  setContentViewStep("SUBJECTS");
-                },
+                isActive: currentLogicalTab === "HOME",
+                onClick: () => switchToLogicalTab("HOME"),
               },
               ...(() => {
                 const today = new Date();
@@ -5977,17 +6436,8 @@ export const StudentDashboard: React.FC<Props> = ({
                         id: "HOMEWORK" as const,
                         label: "Homework",
                         Icon: GraduationCap,
-                        isActive:
-                          showHomeworkHistory &&
-                          !mcqAppOpen &&
-                          !showDailyGkHistory &&
-                          !activeExternalApp,
-                        onClick: () => {
-                          setMcqAppOpen(false);
-                          setShowDailyGkHistory(false);
-                          setActiveExternalApp(null);
-                          setShowHomeworkHistory(true);
-                        },
+                        isActive: currentLogicalTab === "HOMEWORK",
+                        onClick: () => switchToLogicalTab("HOMEWORK"),
                       },
                     ]
                   : [];
@@ -5996,38 +6446,16 @@ export const StudentDashboard: React.FC<Props> = ({
                 id: "GK",
                 label: "GK",
                 Icon: Newspaper,
-                isActive:
-                  showDailyGkHistory &&
-                  !mcqAppOpen &&
-                  !activeExternalApp,
-                onClick: () => {
-                  setMcqAppOpen(false);
-                  setActiveExternalApp(null);
-                  setShowHomeworkHistory(false);
-                  setGkExpandedYear(null);
-                  setGkExpandedMonth(null);
-                  setGkExpandedWeek(null);
-                  setShowDailyGkHistory(true);
-                },
+                isActive: currentLogicalTab === "GK",
+                onClick: () => switchToLogicalTab("GK"),
               },
               {
                 id: "VIDEO",
                 label: "Video",
                 Icon: Video,
                 featureId: "VIDEO_ACCESS",
-                isActive:
-                  activeTab === "UNIVERSAL_VIDEO" &&
-                  !mcqAppOpen &&
-                  !showDailyGkHistory &&
-                  !showHomeworkHistory &&
-                  !activeExternalApp,
-                onClick: () => {
-                  setMcqAppOpen(false);
-                  setShowDailyGkHistory(false);
-                  setShowHomeworkHistory(false);
-                  setActiveExternalApp(null);
-                  onTabChange("UNIVERSAL_VIDEO");
-                },
+                isActive: currentLogicalTab === "VIDEO",
+                onClick: () => switchToLogicalTab("VIDEO"),
               },
               {
                 id: "PROFILE",
@@ -6035,19 +6463,8 @@ export const StudentDashboard: React.FC<Props> = ({
                 Icon: UserIconOutline,
                 featureId: "PROFILE_PAGE",
                 filledOnActive: true,
-                isActive:
-                  activeTab === "PROFILE" &&
-                  !mcqAppOpen &&
-                  !showDailyGkHistory &&
-                  !showHomeworkHistory &&
-                  !activeExternalApp,
-                onClick: () => {
-                  setMcqAppOpen(false);
-                  setShowDailyGkHistory(false);
-                  setShowHomeworkHistory(false);
-                  setActiveExternalApp(null);
-                  onTabChange("PROFILE");
-                },
+                isActive: currentLogicalTab === "PROFILE",
+                onClick: () => switchToLogicalTab("PROFILE"),
               },
               ...(!settings?.appStorePageHidden
                 ? [
@@ -6056,19 +6473,8 @@ export const StudentDashboard: React.FC<Props> = ({
                       label: "Apps",
                       Icon: ShoppingBag,
                       filledOnActive: true,
-                      isActive:
-                        (activeTab as string) === "APP_STORE" &&
-                        !mcqAppOpen &&
-                        !showDailyGkHistory &&
-                        !showHomeworkHistory &&
-                        !activeExternalApp,
-                      onClick: () => {
-                        setMcqAppOpen(false);
-                        setShowDailyGkHistory(false);
-                        setShowHomeworkHistory(false);
-                        setActiveExternalApp(null);
-                        onTabChange("APP_STORE" as any);
-                      },
+                      isActive: currentLogicalTab === "APP_STORE",
+                      onClick: () => switchToLogicalTab("APP_STORE"),
                     },
                   ]
                 : []),
@@ -6537,8 +6943,6 @@ export const StudentDashboard: React.FC<Props> = ({
                 <Youtube className="text-rose-600" />
               ) : showAllNotesCatalog === "AUDIO" ? (
                 <Headphones className="text-purple-600" />
-              ) : showAllNotesCatalog === "MCQ" ? (
-                <CheckSquare className="text-emerald-600" />
               ) : (
                 <BookOpen className="text-blue-600" />
               )}
@@ -6548,9 +6952,7 @@ export const StudentDashboard: React.FC<Props> = ({
                   ? "Deep Dive Concept Notes"
                   : showAllNotesCatalog === "VIDEO"
                     ? "Video Lectures Library"
-                    : showAllNotesCatalog === "AUDIO"
-                      ? "Audio Podcasts Library"
-                      : "MCQ Practice Hub"}
+                    : "Audio Podcasts Library"}
             </h2>
             <button
               onClick={() => setShowAllNotesCatalog(false)}
@@ -6662,9 +7064,7 @@ export const StudentDashboard: React.FC<Props> = ({
                                 ? "Watch Videos"
                                 : showAllNotesCatalog === "AUDIO"
                                   ? "Listen Audio"
-                                  : showAllNotesCatalog === "MCQ"
-                                    ? "Practice MCQ"
-                                    : "Premium Notes"}
+                                  : "Premium Notes"}
                           </button>
                         </div>
                       ))}

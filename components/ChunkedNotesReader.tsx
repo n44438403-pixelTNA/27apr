@@ -14,23 +14,48 @@ interface Props {
   onComplete?: () => void;
   /** When true, hides the sticky "Read All" top bar (use when parent renders controls externally). */
   hideTopBar?: boolean;
+  /** Topic index to scroll to / highlight on mount (used to restore reading position
+   *  after a tab switch unmounts and remounts the reader). */
+  initialIndex?: number | null;
+  /** Fired with the latest topic index the user is at (tap-to-read or auto-advance)
+   *  so the parent can persist it for later restoration. */
+  onPositionChange?: (idx: number) => void;
 }
 
 
-export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, hideTopBar }) => {
+export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, hideTopBar, initialIndex, onPositionChange }) => {
   const topics = useMemo(() => splitIntoTopics(content), [content]);
 
-  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [activeIdx, setActiveIdx] = useState<number | null>(initialIndex ?? null);
   const [isReading, setIsReading] = useState(false);
   const isReadingRef = useRef(false);
   useEffect(() => { isReadingRef.current = isReading; }, [isReading]);
+
+  const itemRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  // Notify parent whenever the active line changes so position can be persisted.
+  const onPositionChangeRef = useRef(onPositionChange);
+  useEffect(() => { onPositionChangeRef.current = onPositionChange; }, [onPositionChange]);
+  useEffect(() => {
+    if (activeIdx !== null && onPositionChangeRef.current) {
+      onPositionChangeRef.current(activeIdx);
+    }
+  }, [activeIdx]);
+
+  // On first mount, scroll the saved line into view (without auto-playing).
+  useEffect(() => {
+    if (initialIndex == null) return;
+    const t = setTimeout(() => {
+      itemRefs.current[initialIndex]?.scrollIntoView({ behavior: 'auto', block: 'center' });
+    }, 80);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep a stable ref to the latest onComplete so playFrom (memoised) always
   // calls the freshest version without retriggering its dependencies.
   const onCompleteRef = useRef(onComplete);
   useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
-
-  const itemRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   const playFrom = useCallback((idx: number) => {
     if (!isReadingRef.current) return;
@@ -81,8 +106,14 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     };
   }, []);
 
+  // Reset position only when content actually changes after the first render
+  // (so a fresh mount with restored initialIndex isn't immediately wiped).
+  const contentChangedOnce = useRef(false);
   useEffect(() => {
-    // Reset when content changes
+    if (!contentChangedOnce.current) {
+      contentChangedOnce.current = true;
+      return;
+    }
     stopAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);
@@ -131,53 +162,58 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
         </button>
       </div>
 
-      {/* Topic list */}
+      {/* Topic list — tap any line to start TTS from that line */}
       <div className="space-y-1.5">
         {topics.map((topic, idx) => {
           const isActive = isReading && activeIdx === idx;
-          return (
-            <React.Fragment key={`tp-${idx}`}>
+          // Headings are non-readable so keep them as static blocks.
+          if (topic.isHeading) {
+            return (
               <div
+                key={`tp-${idx}`}
                 ref={(el) => { itemRefs.current[idx] = el; }}
-                className={`group relative rounded-lg transition-colors ${
-                  topic.isHeading
-                    ? 'mt-4 mb-2 px-3 py-2 bg-gradient-to-r from-indigo-50 to-transparent border-l-4 border-indigo-400'
-                    : `pl-4 pr-10 py-2 ${isActive ? 'bg-yellow-50 ring-2 ring-yellow-300' : 'hover:bg-slate-50'}`
+                className="mt-4 mb-2 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-50 to-transparent border-l-4 border-indigo-400"
+              >
+                <p className="text-sm sm:text-base font-black text-indigo-800 uppercase tracking-wide">
+                  {topic.text}
+                </p>
+              </div>
+            );
+          }
+
+          // Whole topic is a button so taps anywhere on the line start/stop TTS.
+          return (
+            <button
+              key={`tp-${idx}`}
+              ref={(el) => { itemRefs.current[idx] = el as any; }}
+              type="button"
+              onClick={() => {
+                if (isActive) stopAll();
+                else startFromIndex(idx);
+              }}
+              aria-label={isActive ? 'Stop reading this line' : 'Read from this line'}
+              title={isActive ? 'Tap to stop' : 'Tap to read from here'}
+              className={`group relative w-full text-left rounded-lg transition-colors pl-4 pr-10 py-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
+                isActive
+                  ? 'bg-yellow-50 ring-2 ring-yellow-300'
+                  : 'hover:bg-slate-50 active:bg-indigo-50'
+              }`}
+            >
+              <p className={`text-sm sm:text-[15px] leading-relaxed ${isActive ? 'text-yellow-900 font-semibold' : 'text-slate-800'}`}>
+                <span className="text-indigo-400 font-bold mr-1.5">•</span>
+                {topic.text}
+              </p>
+              {/* Inline indicator: pulsing red while reading, subtle play icon otherwise (always visible on touch) */}
+              <span
+                className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all pointer-events-none ${
+                  isActive
+                    ? 'opacity-100 bg-red-100 text-red-600 animate-pulse'
+                    : 'opacity-60 group-hover:opacity-100 bg-slate-100 text-slate-500'
                 }`}
               >
-                {topic.isHeading ? (
-                  <p className="text-sm sm:text-base font-black text-indigo-800 uppercase tracking-wide">
-                    {topic.text}
-                  </p>
-                ) : (
-                  <p className={`text-sm sm:text-[15px] leading-relaxed ${isActive ? 'text-yellow-900 font-semibold' : 'text-slate-800'}`}>
-                    <span className="text-indigo-400 font-bold mr-1.5">•</span>
-                    {topic.text}
-                  </p>
-                )}
-
-                {/* Per-topic TTS icon: hidden by default, visible only when this topic is active */}
-                {!topic.isHeading && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isActive) stopAll();
-                      else startFromIndex(idx);
-                    }}
-                    aria-label={isActive ? 'Stop reading' : 'Read this topic'}
-                    title={isActive ? 'Stop' : 'Read this topic'}
-                    className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all ${
-                      isActive
-                        ? 'opacity-100 bg-red-100 text-red-600 animate-pulse'
-                        : 'opacity-0 group-hover:opacity-100 bg-slate-100 text-slate-500 hover:bg-indigo-100 hover:text-indigo-600'
-                    }`}
-                  >
-                    {isActive ? <Square size={12} fill="currentColor" /> : <Volume2 size={12} />}
-                  </button>
-                )}
-              </div>
-
-            </React.Fragment>
+                {isActive ? <Square size={12} fill="currentColor" /> : <Volume2 size={12} />}
+              </span>
+            </button>
           );
         })}
       </div>

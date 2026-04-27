@@ -36,6 +36,75 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
 - Removed MonthlyMarksheet full-screen rendering trigger
 - Removed "Premium Revision Hub" feature banner from AI Hub event slides
 
+## Recent Changes (Apr 27 — Session 7)
+- **MCQ Practice Hub removed entirely** (`components/AiHub.tsx`, `components/StudentDashboard.tsx`):
+  - Removed the AI Hub banner click handler that fired `OPEN_CATALOG_MCQ`.
+  - Removed the matching `OPEN_CATALOG_MCQ` branch from `handleTabChangeWrapper` (no more way to open it).
+  - Narrowed the `showAllNotesCatalog` type from `"PREMIUM" | "DEEP_DIVE" | "VIDEO" | "AUDIO" | "MCQ" | false` to drop `"MCQ"`.
+  - Removed every `"MCQ"` conditional branch from the All-Notes-Catalog modal (header icon, title, subject-row CTA label) so `"MCQ Practice Hub"` no longer appears anywhere.
+- **Tap-to-read TTS on every notes line** (`components/ChunkedNotesReader.tsx`):
+  - Each non-heading topic is now a full-width `<button>`. Tapping anywhere on a line starts TTS from that line; tapping the active line stops. The little speaker icon at the right end stays as a visual indicator (always 60% visible on touch, pulses red when active).
+  - Headings remain non-tappable static blocks.
+- **Per-tab state preservation** (`components/StudentDashboard.tsx`):
+  - Replaced the Session-6 `closeAllStudentOverlays()` (which wiped overlays on every tab tap) with a snapshot/restore system. Each bottom-nav tap captures the leaving tab's state (activeTab, all homework hierarchy + active note, GK expansion path, Comp MCQ Hub + index/selected, mcq player, all-notes catalog, viewed user, etc.) into a `tabSnapshots` map keyed by `currentLogicalTab` (HOME / HOMEWORK / GK / VIDEO / PROFILE / APP_STORE), then either restores the saved snapshot for the tapped tab or applies that tab's defaults on first visit.
+  - Re-tapping the active tab is a no-op (just stops TTS) — preserves position rather than resetting.
+  - All tab `isActive` predicates collapsed to `currentLogicalTab === <id>` (single source of truth).
+  - Result: creating an MCQ on Home → tap Profile → tap Home → MCQ creator restores with same draft/index/selected. Reading a homework note → tap GK → tap Homework → lands back on the same note (Year/Month/Week/HwId all preserved).
+- **Notes line resume after tab switch** (`components/ChunkedNotesReader.tsx`, `components/StudentDashboard.tsx`):
+  - Reader now accepts `initialIndex` + `onPositionChange`. The homework note view stores last-read line per `hw.id` in `hwNotePositions` and feeds it back on remount, scrolling that line into view (no auto-play). The internal "reset on content change" effect now skips the first render so a restored index isn't immediately wiped.
+
+## Recent Changes (Apr 27 — Session 6)
+- **Bottom-nav tabs always navigate** (`StudentDashboard.tsx`):
+  - Added a `closeAllStudentOverlays()` helper inside the bottom-nav IIFE that resets every overlay screen (mcqAppOpen, showDailyGkHistory, showHomeworkHistory, hwActiveHwId, hwTodayPickerSub, homeworkSubjectView, hwOpenedDirect, hwYear/Month/Week, homeworkPlayerHwId, showCompMcqHub, showAllNotesCatalog, viewingUserHistory, selectedSubject, lucentCategoryView), stops TTS and clears `speakingId`.
+  - Every bottom-nav tab onClick now calls this helper FIRST, then sets its own target (e.g. GK tab opens `setShowDailyGkHistory(true)` afterwards). So a tap on Profile/Home/Video/Apps from inside a notes/MCQ/competition overlay always lands directly on that tab.
+  - Each tab's `isActive` predicate now also requires `!hwActiveHwId && !showCompMcqHub` so tab highlighting stays correct while overlays are open.
+  - Reduced the nav `hidden` condition to only `activeExternalApp || isDocFullscreen`. Previously it also hid for `mcqAppOpen / showAllNotesCatalog / viewingUserHistory / homeworkPlayerHwId`, which prevented the user from leaving those screens via tabs. The MCQ player and catalog still have their own back/X buttons.
+- **Hindi-human number TTS** (`utils/textToSpeech.ts`):
+  - Added `numberToHindiWords(n)` and `replaceNumbersWithHindiWords(text)`. Covers 0–9,999,999,999 with proper Hindi composition (`crore` → `laakh` → `hazaar` → `sau` → 0–99 word table). Decimals read digit-by-digit ("point ek do teen"), commas in numbers (`1,250`) are handled, beyond-crore numbers fall back to digit-wise.
+  - `speakText()` now applies this preprocessor whenever `lang` starts with `hi` (after `stripHtml`, before chunking). Result: "2019" is read as "do hazaar unnees", "1.5 lakh" → "ek point paanch laakh", etc. — sounds like a human reading.
+- **Competition mode: Save Offline / Download (HTML / MHTML)** (`StudentDashboard.tsx`, `utils/downloadUtils.ts`):
+  - Imported existing `downloadAsMHTML` from `utils/downloadUtils`.
+  - Added two off-screen printable containers (`#comp-mcq-printable` and `#hw-note-printable`) rendered at `position: fixed; left: -99999px;` with full-quality formatting (titles, options highlighted with the correct answer, explanations).
+  - **Competition MCQ Hub header** now has a green "📥 Save Offline" button (only when MCQs exist). Tap → downloads all admin + user MCQs as a self-contained HTML file (named `Competition_MCQs_YYYY-MM-DD.html`).
+  - **Homework note view header** (used for both school + competition homework, since both go through the same `hwActiveHwId` flow) now has a Download icon next to the page-counter pill. Tap → downloads the current lesson's notes + MCQs as `<lesson_title>_YYYY-MM-DD.html`. Works whether the user is in Notes mode, MCQ mode, or the chooser.
+
+## Recent Changes (Apr 27 — Session 5)
+- **Notes view: switch button moved to TOP** (`StudentDashboard.tsx`):
+  - The big bottom "MCQ Practice par jao" button has been removed.
+  - Notes view now shows a small top header row (mirrors MCQ view): a "NOTES" label on the left and a small `MCQ (n)` pill on the right when MCQ also exists. Tapping it switches to the MCQ view (same UX as the MCQ→Notes switch button).
+- **GK page: today's banner is now tappable + collapsible** (`StudentDashboard.tsx`):
+  - Added `gkTodayExpanded` state (default false).
+  - The "Today's GK" card on the GK page now renders as a single tappable button: shows a count ("Aaj ka GK · N questions") and a chevron. Tapping it expands to reveal today's Q&A inline; tapping again collapses.
+- **Offline support — app no longer locks out** (`App.tsx`, `index.tsx`):
+  - Removed the full-screen "Internet Not Connected" lockout in `App.tsx`. Cached Firestore data (already enabled via `enableMultiTabIndexedDbPersistence`) keeps working offline.
+  - Added a thin amber top banner ("Offline mode — saved content available") that appears whenever `navigator.onLine` is false. It's `pointer-events-none` so it never blocks UI.
+  - Added global `unhandledrejection` and `error` listeners in `index.tsx` that suppress Firebase / network errors (codes `unavailable`, `failed-precondition`, `deadline-exceeded`, `cancelled`, `AbortError`, etc., and messages mentioning "network"/"offline"/"failed to fetch"/"client is offline"). This prevents the app from crashing into the ErrorBoundary when the connection drops.
+
+## Recent Changes (Apr 27 — Session 4)
+- **Notes/MCQ chooser screen redesigned** (`StudentDashboard.tsx`):
+  - Removed the Hindi heading text ("Kya kholna chahte hain?") and the subtitle.
+  - Now shows the **app logo** (`settings.appLogo`, falling back to `/pwa-192x192.png`) at the top.
+  - Two big square buttons in a 2-column grid: **Notes** and **MCQ**. Tap either to open that view directly.
+- **Direct Back from notes → straight back to Homework page** (`StudentDashboard.tsx`):
+  - Added `hwOpenedDirect` state. Set to `true` whenever a homework is opened via the today banner / today picker.
+  - When pressing Back inside the active note view, if `hwOpenedDirect` is true, the app jumps straight back to the Homework page instead of the Year/Month hierarchy.
+  - The flag is reset whenever a subject is opened via the year hierarchy (so the original course flow keeps its existing back behavior).
+
+## Recent Changes (Apr 27 — Session 3)
+- **Homework page cleanup + new tap flow** (`StudentDashboard.tsx`):
+  - **Removed "Subject-wise History"** section from the Homework page entirely (with the now-unused `bySubject` / `subjectKeys` aggregations).
+  - **Today banner cards now skip the year/month/date hierarchy.** Tapping a subject card on the "Aaj ka Homework" banner:
+    - If the subject has only **1** homework today → opens the note directly (`hwActiveHwId` set, `hwYear/Month/Week` left null so Back returns to homework page).
+    - If the subject has **multiple** today → opens a new bottom-sheet **Today Picker modal** listing those notes; tapping one opens it directly.
+  - **Year/Month-wise hierarchy is preserved** when entering homework via the home-page Course flow (catalog/subject route is unchanged).
+- **Notes / MCQ chooser + switch button** (`StudentDashboard.tsx`, `hwActiveHwId` view):
+  - New `hwViewMode` state (`'notes' | 'mcq' | 'choose'`).
+  - When opening a homework that has **both notes and MCQ**, a chooser screen appears asking *"Kya kholna chahte hain? — Notes Padhein / MCQ Practice"* before any content is shown.
+  - When viewing **Notes**, a prominent "MCQ Practice par jao" button appears at the bottom (only if MCQ exists).
+  - When viewing **MCQ**, a "← Notes" pill appears in the header (only if notes exist).
+  - Defaults sensibly when only one of the two exists (no chooser, no switch button).
+  - `goToHw()` (Prev/Next nav inside the reader) re-evaluates view mode for the new item.
+
 ## Recent Changes (Apr 27 — Session 2)
 - **TTS fix — reads full notes now (not just 2 lines)**:
   - `MAX_CHUNK_LENGTH` increased from 180 → 500 chars. Fewer chunk-chain links = far fewer failure points, especially on Android WebView / Chrome.

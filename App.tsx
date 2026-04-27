@@ -2232,6 +2232,10 @@ const App: React.FC = () => {
   };
 
   const goBack = () => {
+    if (document.fullscreenElement) {
+        document.exitFullscreen().catch(err => console.log(err));
+    }
+
     // Exit Full Screen if active
     if (isFullScreen) {
         setIsFullScreen(false);
@@ -2299,21 +2303,11 @@ const App: React.FC = () => {
     });
   };
 
-  // --- OFFLINE SCREEN ---
-  if (!isOnline) {
-      return (
-          <div className="min-h-[100dvh] bg-slate-900 flex flex-col items-center justify-center text-white p-8 text-center animate-in fade-in">
-              <WifiOff size={80} className="text-red-500 mb-6 animate-pulse" />
-              <h1 className="text-3xl font-black mb-2">Internet Not Connected</h1>
-              <p className="text-slate-400 mb-8 w-full">
-                  Please check your internet connection to load data.
-              </p>
-              <div className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                  {state.settings.footerText || ''}
-              </div>
-          </div>
-      );
-  }
+  // --- OFFLINE INDICATOR (non-blocking) ---
+  // Earlier the entire app was locked behind a full-screen "Internet Not Connected"
+  // screen, which made cached content unusable. We now keep the app running on
+  // cached Firebase data and show only a thin top banner so the user knows.
+  // The banner is rendered alongside the rest of the app (see top-of-tree below).
 
   // --- MAINTENANCE SCREEN ---
   const isMaintenanceBypassed = sessionStorage.getItem('nst_maintenance_bypassed') === 'true';
@@ -2413,6 +2407,13 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
     <div className="min-h-[100dvh] flex flex-col bg-white font-sans relative pt-[env(safe-area-inset-top,24px)] pb-[env(safe-area-inset-bottom,0px)]">
+      {/* OFFLINE INDICATOR — non-blocking thin banner. App keeps running on cached data. */}
+      {!isOnline && (
+        <div className="fixed top-0 inset-x-0 z-[9998] bg-amber-500 text-white text-[11px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center justify-center gap-2 shadow-md pointer-events-none animate-in slide-in-from-top">
+          <WifiOff size={12} />
+          <span>Offline mode — saved content available</span>
+        </div>
+      )}
       {/* LOGOUT OVERLAY */}
       {logoutPending && (
           <div className="fixed inset-0 z-[9999] bg-slate-900/90 backdrop-blur-sm flex flex-col items-center justify-center text-white">
