@@ -41,6 +41,7 @@ import { getActiveChallenges } from "../services/questionBank";
 import { generateDailyChallengeQuestions } from "../utils/challengeGenerator";
 import { generateMorningInsight } from "../services/morningInsight";
 import { LessonActionModal } from "./LessonActionModal";
+import { PullToRefresh } from "./PullToRefresh";
 import pLimit from "p-limit";
 import { RedeemSection } from "./RedeemSection";
 import { Store } from "./Store";
@@ -260,23 +261,13 @@ export const StudentDashboard: React.FC<Props> = ({
   const isGameEnabled = settings?.isGameEnabled !== false;
 
   const handleTabChangeWrapper = (tab: any) => {
-    if (tab === "OPEN_CATALOG_PREMIUM_NOTES") {
-      setShowAllNotesCatalog("PREMIUM");
-      onTabChange("AI_HUB");
-      return;
-    }
-    if (tab === "OPEN_CATALOG_DEEP_DIVE") {
-      setShowAllNotesCatalog("DEEP_DIVE");
-      onTabChange("AI_HUB");
-      return;
-    }
-    if (tab === "OPEN_CATALOG_VIDEO") {
-      setShowAllNotesCatalog("VIDEO");
-      onTabChange("AI_HUB");
-      return;
-    }
-    if (tab === "OPEN_CATALOG_AUDIO") {
-      setShowAllNotesCatalog("AUDIO");
+    if (
+      tab === "OPEN_CATALOG_PREMIUM_NOTES" ||
+      tab === "OPEN_CATALOG_DEEP_DIVE" ||
+      tab === "OPEN_CATALOG_VIDEO" ||
+      tab === "OPEN_CATALOG_AUDIO"
+    ) {
+      setShowAllNotesCatalog(false);
       onTabChange("AI_HUB");
       return;
     }
@@ -897,6 +888,10 @@ export const StudentDashboard: React.FC<Props> = ({
   // Notes/MCQ split view: 'choose' shows a chooser overlay, 'notes' shows notes (with optional MCQ switch button),
   // 'mcq' shows MCQ-only view. Defaults to 'notes' when only notes exist, 'mcq' when only MCQ.
   const [hwViewMode, setHwViewMode] = useState<'notes' | 'mcq' | 'choose'>('notes');
+  const [hwScrollProgress, setHwScrollProgress] = useState(0);
+  const hwScrollContainerRef = useRef<HTMLDivElement>(null);
+  const hwScrollSaveTimerRef = useRef<number | null>(null);
+  const hwScrollRestoredRef = useRef(false);
   // When the user taps a "Today" subject banner card with multiple items, this picker shows the list.
   const [hwTodayPickerSub, setHwTodayPickerSub] = useState<string | null>(null);
   // True when the active homework was opened directly from the Homework page (today banner / today picker).
@@ -912,6 +907,33 @@ export const StudentDashboard: React.FC<Props> = ({
   const playerScrollRefs = React.useRef<Record<number, HTMLDivElement | null>>({});
   const playerIsReadingAllRef = React.useRef<boolean>(false);
   React.useEffect(() => { playerIsReadingAllRef.current = playerIsReadingAll; }, [playerIsReadingAll]);
+
+  // Restore last-read scroll position for the active homework note
+  React.useEffect(() => {
+    if (!hwActiveHwId || hwViewMode !== 'notes') return;
+    hwScrollRestoredRef.current = false;
+    let saved = 0;
+    try {
+      saved = parseInt(localStorage.getItem(`nst_hw_scroll_${hwActiveHwId}`) || '0', 10) || 0;
+    } catch {}
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        const node = hwScrollContainerRef.current;
+        if (node && saved > 0 && node.scrollHeight > node.clientHeight) {
+          node.scrollTop = Math.min(saved, node.scrollHeight - node.clientHeight);
+          const max = node.scrollHeight - node.clientHeight;
+          setHwScrollProgress(max > 0 ? Math.min(100, (node.scrollTop / max) * 100) : 0);
+        }
+        hwScrollRestoredRef.current = true;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+      if (hwScrollSaveTimerRef.current) window.clearTimeout(hwScrollSaveTimerRef.current);
+    };
+  }, [hwActiveHwId, hwViewMode]);
 
   // Active homework being played
   const activePlayerHw = React.useMemo(() => {
@@ -1994,6 +2016,8 @@ export const StudentDashboard: React.FC<Props> = ({
           setHwMonth(d.getMonth());
           setHwWeek(getWeekOfMonth(d));
           setHwActiveHwId(target.id || '');
+          setHwScrollProgress(0);
+          hwScrollRestoredRef.current = false;
           // Reset view mode for the new item.
           const tNotes = !!(target.notes && target.notes.trim());
           const tMcq = !!(target.parsedMcqs && target.parsedMcqs.length > 0);
@@ -2004,6 +2028,15 @@ export const StudentDashboard: React.FC<Props> = ({
 
         return (
           <div className="fixed inset-0 z-[150] bg-white flex flex-col animate-in fade-in">
+            {/* Reading progress bar (notes mode only) */}
+            {effectiveMode === 'notes' && (
+              <div className="absolute top-0 left-0 right-0 h-1 bg-slate-200/60 z-[60] pointer-events-none">
+                <div
+                  className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-[width] duration-150 ease-out"
+                  style={{ width: `${hwScrollProgress}%` }}
+                />
+              </div>
+            )}
             {/* Sticky header */}
             <div className={`${theme.btn} text-white px-4 py-3 flex items-center gap-2 shrink-0`}>
               <button onClick={goBack} className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors">
@@ -2039,8 +2072,8 @@ export const StudentDashboard: React.FC<Props> = ({
             {effectiveMode === 'choose' && (
               <div className="flex-1 overflow-y-auto flex items-center justify-center p-6 bg-gradient-to-br from-slate-50 via-white to-slate-50">
                 <div className="w-full max-w-md">
-                  {/* App logo (no heading text) */}
-                  <div className="flex justify-center mb-8">
+                  {/* App logo + name + developer + version */}
+                  <div className="flex flex-col items-center mb-8">
                     {settings?.appLogo ? (
                       <img
                         src={settings.appLogo}
@@ -2054,6 +2087,15 @@ export const StudentDashboard: React.FC<Props> = ({
                         className="w-24 h-24 rounded-3xl object-cover shadow-md"
                       />
                     )}
+                    <h2 className="mt-4 text-xl font-black text-slate-800 tracking-tight text-center">
+                      {settings?.appName || 'IIC'}
+                    </h2>
+                    <p className="mt-1 text-[11px] text-slate-500 font-semibold">
+                      Developed by Nadim Anwar
+                    </p>
+                    <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                      v{APP_VERSION}
+                    </span>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button
@@ -2081,7 +2123,27 @@ export const StudentDashboard: React.FC<Props> = ({
 
             {/* Scrollable content */}
             {effectiveMode !== 'choose' && (
-            <div className="flex-1 overflow-y-auto">
+            <div
+              ref={hwScrollContainerRef}
+              className="flex-1 overflow-y-auto"
+              onScroll={(e) => {
+                const t = e.currentTarget;
+                const max = t.scrollHeight - t.clientHeight;
+                const pct = max > 0 ? Math.min(100, Math.max(0, (t.scrollTop / max) * 100)) : 0;
+                setHwScrollProgress(pct);
+                if (hwScrollRestoredRef.current && activeHw.id && effectiveMode === 'notes') {
+                  if (hwScrollSaveTimerRef.current) window.clearTimeout(hwScrollSaveTimerRef.current);
+                  const yNow = t.scrollTop;
+                  const key = `nst_hw_scroll_${activeHw.id}`;
+                  hwScrollSaveTimerRef.current = window.setTimeout(() => {
+                    try {
+                      if (yNow > 20) localStorage.setItem(key, String(Math.round(yNow)));
+                      else localStorage.removeItem(key);
+                    } catch {}
+                  }, 400);
+                }
+              }}
+            >
               {/* NOTES MODE */}
               {effectiveMode === 'notes' && (
                 <>
@@ -2802,6 +2864,7 @@ export const StudentDashboard: React.FC<Props> = ({
     // 1. HOME TAB
     if (activeTab === "HOME") {
       return (
+        <PullToRefresh onRefresh={() => window.location.reload()}>
         <div className="space-y-4 pb-4">
           <DashboardSectionWrapper
             id="section_main_actions"
@@ -3058,6 +3121,7 @@ export const StudentDashboard: React.FC<Props> = ({
             </div>
           </DashboardSectionWrapper>
         </div>
+        </PullToRefresh>
       );
     }
 
@@ -4763,7 +4827,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 <div className="flex-1 min-w-0">
                   <h3 className="text-base font-black text-slate-800">Homework</h3>
                   <p className="text-[11px] text-slate-500 font-medium">
-                    Aaj ka homework
+                    Today's Homework
                   </p>
                 </div>
               </div>
@@ -4779,7 +4843,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       <div className="flex items-center gap-2 mb-3">
                         <span className="text-[10px] font-black bg-white text-indigo-700 px-2 py-0.5 rounded-full uppercase tracking-widest border border-indigo-200 flex items-center gap-1">
                           <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
-                          Aaj ka Homework
+                          Today's Homework
                         </span>
                         <span className="text-[11px] text-slate-600 font-semibold">
                           {todayD.toLocaleDateString('default', { weekday: 'long', day: 'numeric', month: 'short' })}
@@ -4912,7 +4976,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         <GraduationCap size={20} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Aaj ka homework</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Today's Homework</p>
                         <h3 className="text-base font-black text-slate-800 truncate">{info.label}</h3>
                       </div>
                       <button
@@ -6139,14 +6203,21 @@ export const StudentDashboard: React.FC<Props> = ({
       {/* MAIN CONTENT AREA */}
       <div
         className={`relative ${
-          activeTab === "REVISION" || activeTab === "AI_HUB"
-            ? ""
-            : activeTab === "HOME"
-              ? "px-4 pt-0 pb-20"
-              : "p-4 pb-20"
+          contentViewStep === "PLAYER" && selectedChapter
+            ? "fixed inset-0 z-[150] bg-white overflow-hidden"
+            : activeTab === "REVISION" || activeTab === "AI_HUB"
+              ? ""
+              : activeTab === "HOME"
+                ? "px-4 pt-0 pb-20"
+                : "p-4 pb-20"
         }`}
       >
-        {renderMainContent()}
+        <div
+          key={activeTab}
+          className={`${contentViewStep === "PLAYER" && selectedChapter ? "h-full" : "animate-in fade-in duration-300 ease-out"}`}
+        >
+          {renderMainContent()}
+        </div>
       </div>
 
       {/* Hidden printable container used by the Competition MCQ Hub "Download" button.
@@ -6276,7 +6347,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
       {/* FIXED BOTTOM NAVIGATION */}
       <nav
-        className={`fixed bottom-0 left-0 right-0 w-full mx-auto bg-white/95 backdrop-blur-md border-t border-slate-200/70 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.18)] z-[300] pb-safe ${activeExternalApp || isDocFullscreen ? "hidden" : ""}`}
+        className={`fixed bottom-0 left-0 right-0 w-full mx-auto bg-white/95 backdrop-blur-md border-t border-slate-200/70 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.18)] z-[300] pb-safe ${activeExternalApp || isDocFullscreen || (contentViewStep === "PLAYER" && selectedChapter) ? "hidden" : ""}`}
         aria-label="Primary"
       >
         <div className="flex justify-around items-stretch h-[64px] max-w-3xl mx-auto px-1">
@@ -6337,7 +6408,7 @@ export const StudentDashboard: React.FC<Props> = ({
               setCompMcqSelected(s.compMcqSelected ?? null);
               setMcqAppOpen(!!s.mcqAppOpen);
               setActiveExternalApp(s.activeExternalApp ?? null);
-              setShowAllNotesCatalog(s.showAllNotesCatalog ?? null);
+              setShowAllNotesCatalog(false);
               setViewingUserHistory(s.viewingUserHistory ?? null);
               setSelectedSubject(s.selectedSubject ?? null);
               setContentViewStep(s.contentViewStep ?? 'SUBJECTS');
@@ -6500,7 +6571,7 @@ export const StudentDashboard: React.FC<Props> = ({
                   }}
                   aria-label={tab.label}
                   aria-current={tab.isActive ? "page" : undefined}
-                  className={`group relative flex-1 flex flex-col items-center justify-center gap-1 pt-1.5 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 rounded-xl transition-colors ${
+                  className={`group relative flex-1 flex flex-col items-center justify-center gap-1 pt-1.5 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 rounded-xl transition-[color,transform] duration-150 ease-out active:scale-[0.92] ${
                     isLocked ? "opacity-50" : ""
                   }`}
                 >
@@ -6515,9 +6586,9 @@ export const StudentDashboard: React.FC<Props> = ({
 
                   {/* Icon container with pill highlight on active */}
                   <span
-                    className={`relative inline-flex items-center justify-center h-9 w-12 rounded-2xl transition-all duration-300 ease-out ${
+                    className={`relative inline-flex items-center justify-center h-9 w-12 rounded-2xl transition-all duration-300 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] ${
                       tab.isActive
-                        ? "bg-gradient-to-br from-blue-50 to-indigo-50 scale-105"
+                        ? "bg-gradient-to-br from-blue-50 to-indigo-50 scale-110"
                         : "bg-transparent group-active:bg-slate-100 scale-100"
                     }`}
                   >
@@ -6934,148 +7005,6 @@ export const StudentDashboard: React.FC<Props> = ({
         );
       })()}
 
-      {/* ALL NOTES CATALOG MODAL */}
-      {showAllNotesCatalog !== false && (
-        <div className="fixed inset-0 bg-white z-[200] overflow-y-auto animate-in fade-in slide-in-from-bottom-4">
-          <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 py-4 flex items-center justify-between z-10">
-            <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
-              {showAllNotesCatalog === "VIDEO" ? (
-                <Youtube className="text-rose-600" />
-              ) : showAllNotesCatalog === "AUDIO" ? (
-                <Headphones className="text-purple-600" />
-              ) : (
-                <BookOpen className="text-blue-600" />
-              )}
-              {showAllNotesCatalog === "PREMIUM"
-                ? "Premium Notes Library"
-                : showAllNotesCatalog === "DEEP_DIVE"
-                  ? "Deep Dive Concept Notes"
-                  : showAllNotesCatalog === "VIDEO"
-                    ? "Video Lectures Library"
-                    : "Audio Podcasts Library"}
-            </h2>
-            <button
-              onClick={() => setShowAllNotesCatalog(false)}
-              className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"
-            >
-              <X size={20} className="text-slate-600" />
-            </button>
-          </div>
-
-          <div className="p-4 space-y-8 pb-24">
-            {["6", "7", "8", "9", "10", "11", "12", "COMPETITION"].map(
-              (cls) => {
-                const classSubjects = getSubjectsList(
-                  cls,
-                  user.stream || "Science",
-                  activeSessionBoard || user.board,
-                ).filter(
-                  (s) => !(settings?.hiddenSubjects || []).includes(s.id),
-                );
-                if (classSubjects.length === 0) return null;
-
-                return (
-                  <div key={cls} className="space-y-3">
-                    <h3 className="font-bold text-lg text-slate-700 uppercase tracking-widest border-b-2 border-slate-100 pb-2">
-                      {cls === "COMPETITION" ? "Govt. Exams" : `Class ${cls}`}
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {classSubjects.map((sub) => (
-                        <div
-                          key={sub.id}
-                          className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex items-center justify-between group hover:border-blue-300 hover:shadow-md transition-all"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-black">
-                              {sub.name.charAt(0)}
-                            </div>
-                            <div>
-                              <h4 className="font-bold text-slate-800">
-                                {sub.name}
-                              </h4>
-                              <p className="text-xs text-slate-500">
-                                {catalogChapterCounts[`${cls}_${sub.id}`] !==
-                                undefined
-                                  ? catalogChapterCounts[`${cls}_${sub.id}`]
-                                  : "..."}{" "}
-                                Chapters
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => {
-                              if (
-                                showAllNotesCatalog !== "DEEP_DIVE" &&
-                                !user.isPremium
-                              ) {
-                                onTabChange("STORE");
-                                return;
-                              }
-                              setDirectActionTarget(showAllNotesCatalog);
-                              setActiveSessionClass(cls);
-                              setActiveSessionBoard(
-                                activeSessionBoard || user.board || "CBSE",
-                              );
-                              setSelectedSubject(sub);
-                              setContentViewStep("CHAPTERS");
-                              setSelectedChapter(null);
-
-                              // Trigger Chapter Fetch manually since handleContentSubjectSelect expects standard flow
-                              setLoadingChapters(true);
-                              const lang =
-                                (activeSessionBoard || user.board) === "BSEB"
-                                  ? "Hindi"
-                                  : "English";
-                              fetchChapters(
-                                activeSessionBoard || user.board || "CBSE",
-                                cls,
-                                user.stream || "Science",
-                                sub,
-                                lang,
-                              ).then((data) => {
-                                const sortedData = [...data].sort((a, b) => {
-                                  const matchA = a.title.match(/(\d+)/);
-                                  const matchB = b.title.match(/(\d+)/);
-                                  if (matchA && matchB) {
-                                    return (
-                                      parseInt(matchA[1], 10) -
-                                      parseInt(matchB[1], 10)
-                                    );
-                                  }
-                                  return a.title.localeCompare(b.title);
-                                });
-                                setChapters(sortedData);
-                                setLoadingChapters(false);
-                              });
-
-                              setShowAllNotesCatalog(false);
-                              onTabChange("COURSES");
-                            }}
-                            className={`font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition-colors ${showAllNotesCatalog === "DEEP_DIVE" ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-yellow-400 hover:bg-yellow-500 text-slate-900"}`}
-                          >
-                            {showAllNotesCatalog === "DEEP_DIVE" ? (
-                              <BookOpen size={14} className="text-white" />
-                            ) : (
-                              <Crown size={14} className="text-slate-900" />
-                            )}
-                            {showAllNotesCatalog === "DEEP_DIVE"
-                              ? "Deep Dive"
-                              : showAllNotesCatalog === "VIDEO"
-                                ? "Watch Videos"
-                                : showAllNotesCatalog === "AUDIO"
-                                  ? "Listen Audio"
-                                  : "Premium Notes"}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              },
-            )}
-          </div>
-        </div>
-      )}
 
       {/* HOMEWORK MCQ FULL-SCREEN PLAYER */}
       {homeworkPlayerHwId && activePlayerHw && (

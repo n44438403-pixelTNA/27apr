@@ -173,7 +173,12 @@ export const PdfView: React.FC<Props> = ({
 
   // SCROLL TO HIDE HEADER STATE
   const [showHeader, setShowHeader] = useState(true);
+  const [scrollProgress, setScrollProgress] = useState(0);
   const lastScrollY = useRef(0);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollSaveTimerRef = useRef<number | null>(null);
+  const scrollRestoredRef = useRef(false);
+  const SCROLL_STORAGE_KEY = `nst_chapter_scroll_${chapter.id}`;
 
   // Swipe handling state
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
@@ -322,14 +327,63 @@ export const PdfView: React.FC<Props> = ({
   };
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-      const currentScrollY = e.currentTarget.scrollTop;
+      const target = e.currentTarget;
+      const currentScrollY = target.scrollTop;
       if (currentScrollY > lastScrollY.current + 10 && currentScrollY > 50) {
           setShowHeader(false); // Scrolling down
       } else if (currentScrollY < lastScrollY.current - 10 || currentScrollY < 50) {
           setShowHeader(true); // Scrolling up
       }
       lastScrollY.current = currentScrollY;
+
+      // Reading progress (0-100)
+      const maxScroll = target.scrollHeight - target.clientHeight;
+      const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (currentScrollY / maxScroll) * 100)) : 0;
+      setScrollProgress(pct);
+
+      // Persist last-read scroll position (debounced) so reopening the chapter restores it
+      if (scrollRestoredRef.current) {
+          if (scrollSaveTimerRef.current) window.clearTimeout(scrollSaveTimerRef.current);
+          scrollSaveTimerRef.current = window.setTimeout(() => {
+              try {
+                  if (currentScrollY > 20) {
+                      localStorage.setItem(SCROLL_STORAGE_KEY, String(Math.round(currentScrollY)));
+                  } else {
+                      localStorage.removeItem(SCROLL_STORAGE_KEY);
+                  }
+              } catch {}
+          }, 400);
+      }
   };
+
+  // Restore last-read scroll position when chapter content is ready
+  useEffect(() => {
+      scrollRestoredRef.current = false;
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      let saved = 0;
+      try {
+          saved = parseInt(localStorage.getItem(SCROLL_STORAGE_KEY) || '0', 10) || 0;
+      } catch {}
+      // Wait two frames so the rendered tabs/content have measurable height
+      const raf1 = requestAnimationFrame(() => {
+          const raf2 = requestAnimationFrame(() => {
+              const node = scrollContainerRef.current;
+              if (node && saved > 0 && node.scrollHeight > node.clientHeight) {
+                  node.scrollTop = Math.min(saved, node.scrollHeight - node.clientHeight);
+                  lastScrollY.current = node.scrollTop;
+                  const max = node.scrollHeight - node.clientHeight;
+                  setScrollProgress(max > 0 ? Math.min(100, (node.scrollTop / max) * 100) : 0);
+              }
+              scrollRestoredRef.current = true;
+          });
+          (raf1 as any)._next = raf2;
+      });
+      return () => {
+          cancelAnimationFrame(raf1);
+          if (scrollSaveTimerRef.current) window.clearTimeout(scrollSaveTimerRef.current);
+      };
+  }, [chapter.id, contentData]);
 
   // PREMIUM TTS STATE
   const [premiumChunks, setPremiumChunks] = useState<string[]>([]);
@@ -1222,7 +1276,14 @@ export const PdfView: React.FC<Props> = ({
 
   // --- NEW TABBED VIEW ---
   return (
-    <div onScroll={handleScroll} className={`bg-slate-50 h-screen overflow-y-auto pb-6 animate-in fade-in slide-in-from-right-8 ${isFullscreen ? 'm-0 p-0' : ''}`}>
+    <div ref={scrollContainerRef} onScroll={handleScroll} className={`bg-slate-50 h-screen overflow-y-auto pb-6 animate-in fade-in slide-in-from-right-8 ${isFullscreen ? 'm-0 p-0' : ''}`}>
+       {/* Reading progress bar */}
+       <div className="fixed top-0 left-0 right-0 h-1 bg-slate-200/60 z-[60] pointer-events-none">
+           <div
+               className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-[width] duration-150 ease-out"
+               style={{ width: `${scrollProgress}%` }}
+           />
+       </div>
        <CustomAlert
            isOpen={alertConfig.isOpen}
            message={alertConfig.message}

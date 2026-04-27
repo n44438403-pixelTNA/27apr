@@ -193,7 +193,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               }}
               aria-label={isActive ? 'Stop reading this line' : 'Read from this line'}
               title={isActive ? 'Tap to stop' : 'Tap to read from here'}
-              className={`group relative w-full text-left rounded-lg transition-colors pl-4 pr-10 py-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
+              className={`group relative w-full text-left rounded-lg transition-colors pl-4 ${isActive ? 'pr-10' : 'pr-4'} py-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
                 isActive
                   ? 'bg-yellow-50 ring-2 ring-yellow-300'
                   : 'hover:bg-slate-50 active:bg-indigo-50'
@@ -203,16 +203,15 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                 <span className="text-indigo-400 font-bold mr-1.5">•</span>
                 {topic.text}
               </p>
-              {/* Inline indicator: pulsing red while reading, subtle play icon otherwise (always visible on touch) */}
-              <span
-                className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all pointer-events-none ${
-                  isActive
-                    ? 'opacity-100 bg-red-100 text-red-600 animate-pulse'
-                    : 'opacity-60 group-hover:opacity-100 bg-slate-100 text-slate-500'
-                }`}
-              >
-                {isActive ? <Square size={12} fill="currentColor" /> : <Volume2 size={12} />}
-              </span>
+              {/* Inline indicator: only visible while THIS line is being read; tapping the line itself triggers TTS */}
+              {isActive && (
+                <span
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-red-100 text-red-600 animate-pulse pointer-events-none"
+                  aria-hidden="true"
+                >
+                  <Square size={12} fill="currentColor" />
+                </span>
+              )}
             </button>
           );
         })}

@@ -711,3 +711,80 @@ model-viewer {
 .bg-slate-50 model-viewer {
   background-color: #f1f5f9; /* Light background for light mode */
 }
+
+/* === GLOBAL MICRO-INTERACTIONS (safe, opt-out via [data-no-press]) === */
+@media (prefers-reduced-motion: no-preference) {
+  /* Smooth color/shadow transitions for any button — purely cosmetic */
+  button {
+    transition: transform 130ms cubic-bezier(0.4, 0, 0.2, 1),
+                background-color 200ms ease,
+                color 200ms ease,
+                border-color 200ms ease,
+                box-shadow 220ms ease,
+                opacity 200ms ease;
+  }
+
+  /* Subtle press feedback for ALL non-disabled buttons.
+     Uses :active (only while finger/mouse is down) so layout never shifts at rest,
+     and the transform is on the button itself — does not affect position:fixed
+     descendants because buttons don't typically contain fixed overlays. */
+  button:not(:disabled):not([data-no-press]):active {
+    transform: scale(0.96);
+  }
+
+  /* Tap feedback for clickable role=button divs */
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: scale(0.98);
+    transition: transform 120ms ease-out;
+  }
+
+  /* Anchor tap feedback */
+  a:active {
+    transition: transform 120ms ease-out;
+  }
+
+  /* Pleasant pop-in animation utility for any newly mounted element */
+  @keyframes microPopIn {
+    0%   { transform: scale(0.94); opacity: 0; }
+    60%  { transform: scale(1.02); opacity: 1; }
+    100% { transform: scale(1);    opacity: 1; }
+  }
+  .micro-pop-in {
+    animation: microPopIn 280ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  /* Soft slide-up entry */
+  @keyframes microSlideUp {
+    from { transform: translateY(8px); opacity: 0; }
+    to   { transform: translateY(0);   opacity: 1; }
+  }
+  .micro-slide-up {
+    animation: microSlideUp 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Inputs — gentle focus glow */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    transition: border-color 180ms ease,
+                box-shadow 180ms ease,
+                background-color 180ms ease;
+  }
+}
+
+/* Respect users who prefer reduced motion: kill all the above transforms */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  [role="button"],
+  a {
+    transition: none !important;
+  }
+  button:active,
+  [role="button"]:active {
+    transform: none !important;
+  }
+  .micro-pop-in,
+  .micro-slide-up {
+    animation: none !important;
+  }
+}
