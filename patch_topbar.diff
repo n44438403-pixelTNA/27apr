@@ -1,0 +1,48 @@
+<<<<<<< SEARCH
+                <div className="flex flex-col items-end">
+                    <button
+                        onClick={() => onTabChange('STORE')}
+                        className="flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-[10px] font-black hover:scale-105 transition-transform bg-white text-slate-800"
+                    >
+                         <Crown size={12} className="fill-slate-800" /> {user.credits} CR
+                    </button>
+                    <span className="text-[8px] font-bold mt-0.5 uppercase tracking-widest text-white/90">
+                        {user.isPremium ? (user.subscriptionTier || 'PREMIUM') : 'FREE'}
+                    </span>
+                    {user.isPremium && user.subscriptionEndDate && user.subscriptionTier !== 'LIFETIME' && (
+                        <span className="text-[8px] font-bold text-white/90 uppercase tracking-widest mt-0.5">
+                            EXP: {(new Date(user.subscriptionEndDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) || '').replace(/ /g, ' ').toUpperCase()}
+                        </span>
+                    )}
+                </div>
+=======
+                <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-2">
+                        {/* Streak Badge */}
+                        <div className="flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-[10px] font-black bg-orange-500/20 text-orange-100 border border-orange-400/30 backdrop-blur-sm relative group cursor-help">
+                            🔥 {user.streak || 0}
+                            <div className="absolute top-full mt-2 right-0 w-32 bg-slate-900 text-white text-[10px] font-bold p-2 rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-xl pointer-events-none">
+                                Login consecutive days to increase your streak! Current: {user.streak || 0} Days
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => onTabChange('STORE')}
+                            className="flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-[10px] font-black hover:scale-105 transition-transform bg-white text-slate-800"
+                        >
+                            <Crown size={12} className="fill-slate-800" /> {user.credits} CR
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 opacity-90">
+                        <span className="text-[8px] font-bold uppercase tracking-widest text-white">
+                            {user.isPremium ? (user.subscriptionTier || 'PREMIUM') : 'FREE'}
+                        </span>
+                        {user.isPremium && user.subscriptionEndDate && user.subscriptionTier !== 'LIFETIME' && !isNaN(new Date(user.subscriptionEndDate).getTime()) && (
+                            <span className="text-[8px] font-bold text-white uppercase tracking-widest bg-black/20 px-1 py-0.5 rounded-sm">
+                                EXP: {(new Date(user.subscriptionEndDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })).replace(/ /g, ' ').toUpperCase()}
+                            </span>
+                        )}
+                    </div>
+                </div>
+>>>>>>> REPLACE

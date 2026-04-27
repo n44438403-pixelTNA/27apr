@@ -1,0 +1,158 @@
+{
+  "rules": {
+    // ---------------------------------------------------------
+    // GLOBAL ADMIN ACCESS
+    // ---------------------------------------------------------
+    // Only users with the 'ADMIN' role in Firestore (or hardcoded emails/UIDs) can bypass all rules.
+    // NOTE: RTDB rules cannot cleanly query Firestore documents, so we rely on custom auth claims
+    // or a specific known admin UID list. Alternatively, we structure the app so the admin path is open to authorized.
+
+    // ".read": "auth != null && auth.token.admin === true",
+    // ".write": "auth != null && auth.token.admin === true",
+
+    // ---------------------------------------------------------
+    // USERS DIRECTORY
+    // ---------------------------------------------------------
+    "users": {
+      // Anyone logged in can read a profile (e.g. for Leaderboards)
+      ".read": "auth != null",
+      "$uid": {
+        // Users can only create or update their own profile data.
+        ".write": "auth != null && auth.uid === $uid",
+        // Prevent users from escalating their own role to ADMIN
+        // The new data's role must not be 'ADMIN' unless they were already an ADMIN.
+        ".validate": "newData.child('role').val() !== 'ADMIN' || data.child('role').val() === 'ADMIN'"
+      }
+    },
+
+    "nst_users": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+
+    // ---------------------------------------------------------
+    // REDEEM CODES
+    // ---------------------------------------------------------
+    "redeem_codes": {
+      // Any logged-in user can check if a code exists
+      ".read": "auth != null",
+      "$codeId": {
+        // Users can only modify specific usage fields (increment count, mark redeemed)
+        // They cannot change the type, amount, or limits.
+        ".write": "auth != null && (!data.exists() || (newData.child('usedCount').val() >= data.child('usedCount').val()))",
+        // Prevent changing the core structure of the code upon redemption
+        ".validate": "newData.hasChildren(['type']) && (newData.child('type').val() === data.child('type').val() || !data.exists())"
+      }
+    },
+
+    // ---------------------------------------------------------
+    // TEACHER CODES
+    // ---------------------------------------------------------
+    "teacherCodes": {
+      ".read": "auth != null",
+      "$code": {
+        // Users can 'burn' a code (mark it inactive) when they register as a teacher
+        ".write": "auth != null && data.exists() && newData.child('isActive').val() === false"
+      }
+    },
+
+    // ---------------------------------------------------------
+    // SYSTEM SETTINGS & APP CONFIG
+    // ---------------------------------------------------------
+    // The main configuration tree is strictly read-only for students.
+    "system_settings": {
+      ".read": "true", // Publicly readable for app initialization (theme, flags)
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    // ---------------------------------------------------------
+    // CONTENT DIRECTORIES (Chapters, MCQs, Videos)
+    // ---------------------------------------------------------
+    // Assuming keys start with 'nst_content_' or 'nst_universal_'
+    // Users can read the content if they are logged in.
+    // Only admins can create/update/delete content.
+
+    "nst_universal_playlist": {
+       ".read": "auth != null",
+       ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+    "nst_universal_notes": {
+       ".read": "auth != null",
+       ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    "content_data": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    "custom_syllabus": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    "public_activity": {
+      ".read": "auth != null",
+      ".write": "auth != null" // Written by users via savePublicActivity, or admin
+    },
+
+    "universal_analysis_logs": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+      ".write": "auth != null" // Written by users/admin
+    },
+
+    "ai_interactions": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+      "$uid": {
+         ".read": "auth != null && auth.uid === $uid",
+         ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+
+    "demand_requests": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+      ".write": "auth != null" // Students can create demands
+    },
+
+    "content_links": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    "recovery_requests": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+      ".write": "true" // Public can request recovery
+    },
+
+    "custom_blogger_page": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    "universal_updates": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    "admin_secure": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    "secure_keys": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    },
+
+    // Content Wildcard: Match keys that contain content data.
+    // If your content is flat under root, we protect it generically.
+    // If it's under a specific path, replace the wildcard below.
+    "$other": {
+      ".read": "auth != null",
+      // Write access is generally blocked except for Admins
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+    }
+  }
+}

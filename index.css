@@ -1,0 +1,582 @@
+
+/* Vercel Toast Hide */
+.vercel-toast {
+    display: none !important;
+}
+
+/* TEACHING STRATEGY STYLES */
+.teacher-guide, .teacher-guide-container {
+  max-width: 100%;
+  width: 100%;
+  margin: auto;
+  font-family: 'Inter', sans-serif;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
+.teacher-guide img, .teacher-guide-container img, .teacher-guide table, .teacher-guide-container table {
+  max-width: 100%;
+  height: auto;
+  overflow-x: auto;
+  display: block;
+}
+
+.teacher-guide pre, .teacher-guide-container pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.teacher-section, .teacher-guide section, .teacher-guide-container section {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 18px;
+  border: 1px solid #f1f5f9;
+  border-left: 6px solid #7c3aed;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.teacher-section h2, .teacher-guide h2, .teacher-guide h3, .teacher-guide-container h2, .teacher-guide-container h3 {
+  font-size: 16px;
+  color: #1e293b !important;
+  margin-top: 24px;
+  margin-bottom: 12px;
+  font-weight: 900;
+  border-bottom: 2px solid #f1f5f9;
+  padding-bottom: 8px;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px 18px;
+  border: 1px solid #e2e8f0;
+  border-left: 6px solid #7c3aed;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+
+.teacher-section p, .teacher-guide p, .teacher-guide-container p {
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.6;
+  font-weight: 500;
+  margin-bottom: 16px;
+  padding: 0 10px;
+}
+
+.teacher-section ul, .teacher-guide ul, .teacher-guide ol, .teacher-guide-container ul, .teacher-guide-container ol {
+  padding-left: 20px;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.teacher-section li, .teacher-guide li, .teacher-guide-container li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.teacher-guide header, .teacher-guide-container header {
+  background: #7c3aed;
+  color: white;
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.teacher-guide header p, .teacher-guide-container header p {
+  color: white;
+  margin: 0;
+}
+
+.teacher-guide strong, .teacher-guide-container strong {
+  color: #334155;
+  font-weight: 800;
+}
+
+/* Ensure inline block styles from user input format nicely */
+.teacher-guide-container div[style*="background"] {
+    border-radius: 8px;
+    margin-top: 12px;
+    margin-bottom: 12px;
+}
+
+/* EXTENDED/ADDITIONAL NOTES STYLES */
+.student-extended-notes section {
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 18px;
+    border: 1px solid #334155;
+    border-left: 6px solid #e67e22;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.prose-invert.student-extended-notes section {
+    background: #1e293b;
+    border-color: #334155;
+    color: #e2e8f0;
+}
+
+.prose-invert.student-extended-notes h3 {
+    color: #fbbf24 !important;
+    border-bottom-color: #334155;
+}
+
+.prose-invert.student-extended-notes,
+.prose-invert.student-extended-notes p,
+.prose-invert.student-extended-notes ul,
+.prose-invert.student-extended-notes ol,
+.prose-invert.student-extended-notes span,
+.prose-invert.student-extended-notes div {
+    color: #cbd5e1;
+}
+
+.prose-invert.student-extended-notes strong,
+.prose-invert.student-extended-notes b {
+    color: #f8fafc;
+}
+
+/* Ensure inline styles from WYSIWYG editors don't break dark mode contrast */
+.prose-invert.student-extended-notes [style*="color"] {
+    color: inherit !important;
+}
+
+.prose-invert.student-extended-notes [style*="background"] {
+    background-color: transparent !important;
+}
+
+.student-extended-notes h3 {
+    font-size: 16px;
+    color: #b45f06 !important;
+    margin-bottom: 12px;
+    font-weight: 900;
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 8px;
+}
+
+.student-extended-notes p {
+    font-size: 14px;
+    color: #475569;
+    line-height: 1.6;
+    margin-bottom: 10px;
+}
+
+.student-extended-notes ul, .student-extended-notes ol {
+    padding-left: 24px;
+    color: #475569;
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+
+.student-extended-notes li {
+    margin-bottom: 8px;
+}
+
+.student-extended-notes strong {
+    color: #1e293b;
+    font-weight: 800;
+}
+
+@media (max-width: 600px) {
+  .teacher-guide { padding: 12px; }
+  .teacher-section, .teacher-guide section { padding: 14px; }
+  .teacher-section h2, .teacher-guide h2, .teacher-guide h3 { font-size: 16px; }
+  .student-extended-notes section { padding: 14px; }
+}
+
+/* Custom Animations for Chat & UI */
+@keyframes glow {
+    0% { box-shadow: 0 0 5px rgba(255, 255, 255, 0.5); }
+    50% { box-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 0 0 10px rgba(255, 215, 0, 0.5); }
+    100% { box-shadow: 0 0 5px rgba(255, 255, 255, 0.5); }
+}
+
+.animate-glow {
+    animation: glow 2s infinite;
+}
+
+/* Hide scrollbar for clean UI */
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* Dark Mode - Fully Black (AMOLED) */
+.dark-mode {
+    background-color: #000000 !important;
+    color: #ffffff !important;
+}
+
+.dark-mode .bg-white {
+    background-color: #000000 !important;
+    border-color: #333333 !important;
+}
+
+.dark-mode .bg-slate-50, 
+.dark-mode .bg-slate-100 {
+    background-color: #111111 !important;
+    border-color: #333333 !important;
+}
+
+.dark-mode .text-slate-900,
+.dark-mode .text-slate-800,
+.dark-mode .text-slate-700,
+.dark-mode .text-slate-600 {
+    color: #e2e8f0 !important;
+}
+
+.dark-mode .text-slate-500,
+.dark-mode .text-slate-400 {
+    color: #94a3b8 !important;
+}
+
+/* Ensure inputs are visible */
+.dark-mode input, 
+.dark-mode select, 
+.dark-mode textarea {
+    background-color: #222222 !important;
+    color: #ffffff !important;
+    border-color: #444444 !important;
+}
+
+/* Dialogs & Modals */
+.dark-mode .bg-white.rounded-2xl,
+.dark-mode .bg-white.rounded-3xl {
+    background-color: #111111 !important;
+    border: 1px solid #333333 !important;
+}
+
+/* Shadows */
+.dark-mode .shadow-sm,
+.dark-mode .shadow-md,
+.dark-mode .shadow-lg,
+.dark-mode .shadow-xl,
+.dark-mode .shadow-2xl {
+    box-shadow: none !important;
+    border: 1px solid #333333 !important;
+}
+
+/* GLOBAL UI STABILITY FIXES */
+button {
+  cursor: pointer;
+  white-space: normal; /* Force wrapping */
+  overflow-wrap: break-word; /* Prevent overflow */
+}
+
+/* Prevent layout shifts */
+.min-h-screen {
+  min-height: 100vh;
+  overflow-x: hidden; /* Prevent horizontal scroll */
+}
+
+/* App Logo Watermark positioning */
+.app-watermark {
+  z-index: -1;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Premium Notes UI Styles */
+.topic-card {
+  background: white;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid #e2e8f0;
+}
+.topic-card h2 {
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid #f1f5f9;
+  padding-bottom: 0.5rem;
+  font-size: 1rem;
+}
+.definition {
+  background: #eff6ff;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+.definition h3 {
+  color: #1e3a8a;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.explanation {
+  background: transparent;
+  padding: 0;
+  margin-bottom: 1rem;
+}
+.explanation h3 {
+  color: #334155;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.example {
+  background: #dcfce7;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+.example h3 {
+  color: #166534;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.exam {
+  background: #eff6ff;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+.exam h3 {
+  color: #1e40af;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.mistake {
+  background: #fee2e2;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+.mistake h3 {
+  color: #991b1b;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.memory {
+  background: #f0fdf4;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+.memory h3 {
+  color: #166534;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.recap {
+  background: transparent;
+  padding: 0;
+  margin-bottom: 1rem;
+}
+.recap h3 {
+  color: #334155;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.quick-revision {
+  background: #ffffff;
+  color: #334155;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  border: 1px dashed #cbd5e1;
+}
+.quick-revision h2 {
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+}
+.quick-revision ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+}
+.quick-revision li {
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+.brain-map, .memory-anchors {
+  background: white;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px dashed #e2e8f0;
+}
+
+/* Exception for Colored Note Cards in Dark/Blue Modes and Prose Invert Notes */
+.dark-mode .definition, .dark-mode-blue .definition, .prose-invert.student-extended-notes .definition { background-color: #eff6ff !important; color: #1e3a8a !important; }
+.dark-mode .definition *, .dark-mode-blue .definition *, .prose-invert.student-extended-notes .definition *, .dark-mode .definition h3, .dark-mode-blue .definition h3, .prose-invert.student-extended-notes .definition h3, .dark-mode .definition p, .dark-mode-blue .definition p, .prose-invert.student-extended-notes .definition p { color: #1e3a8a !important; }
+
+.dark-mode .example, .dark-mode-blue .example, .prose-invert.student-extended-notes .example { background-color: #dcfce7 !important; color: #166534 !important; }
+.dark-mode .example *, .dark-mode-blue .example *, .prose-invert.student-extended-notes .example *, .dark-mode .example h3, .dark-mode-blue .example h3, .prose-invert.student-extended-notes .example h3, .dark-mode .example p, .dark-mode-blue .example p, .prose-invert.student-extended-notes .example p { color: #166534 !important; }
+
+.dark-mode .exam, .dark-mode-blue .exam, .prose-invert.student-extended-notes .exam { background-color: #eff6ff !important; color: #1e40af !important; }
+.dark-mode .exam *, .dark-mode-blue .exam *, .prose-invert.student-extended-notes .exam *, .dark-mode .exam h3, .dark-mode-blue .exam h3, .prose-invert.student-extended-notes .exam h3, .dark-mode .exam p, .dark-mode-blue .exam p, .prose-invert.student-extended-notes .exam p { color: #1e40af !important; }
+
+.dark-mode .mistake, .dark-mode-blue .mistake, .prose-invert.student-extended-notes .mistake { background-color: #fee2e2 !important; color: #991b1b !important; }
+.dark-mode .mistake *, .dark-mode-blue .mistake *, .prose-invert.student-extended-notes .mistake *, .dark-mode .mistake h3, .dark-mode-blue .mistake h3, .prose-invert.student-extended-notes .mistake h3, .dark-mode .mistake p, .dark-mode-blue .mistake p, .prose-invert.student-extended-notes .mistake p { color: #991b1b !important; }
+
+.dark-mode .memory, .dark-mode-blue .memory, .prose-invert.student-extended-notes .memory { background-color: #f0fdf4 !important; color: #166534 !important; }
+.dark-mode .memory *, .dark-mode-blue .memory *, .prose-invert.student-extended-notes .memory *, .dark-mode .memory h3, .dark-mode-blue .memory h3, .prose-invert.student-extended-notes .memory h3, .dark-mode .memory p, .dark-mode-blue .memory p, .prose-invert.student-extended-notes .memory p { color: #166534 !important; }
+
+.dark-mode .explanation, .dark-mode-blue .explanation, .prose-invert.student-extended-notes .explanation { color: #f8fafc !important; }
+.dark-mode .explanation *, .dark-mode-blue .explanation *, .prose-invert.student-extended-notes .explanation *, .dark-mode .explanation h3, .dark-mode-blue .explanation h3, .prose-invert.student-extended-notes .explanation h3 { color: #f8fafc !important; }
+
+.dark-mode .recap, .dark-mode-blue .recap, .prose-invert.student-extended-notes .recap { color: #f8fafc !important; }
+.dark-mode .recap *, .dark-mode-blue .recap *, .prose-invert.student-extended-notes .recap *, .dark-mode .recap h3, .dark-mode-blue .recap h3, .prose-invert.student-extended-notes .recap h3 { color: #f8fafc !important; }
+
+/* Dark Mode - Dark Blue Theme */
+.dark-mode-blue {
+    background-color: #0f172a !important; /* Tailwind slate-900 */
+    color: #f8fafc !important; /* Tailwind slate-50 */
+}
+
+.dark-mode-blue .bg-white {
+    background-color: #1e293b !important; /* Tailwind slate-800 */
+    border-color: #334155 !important; /* Tailwind slate-700 */
+}
+
+.dark-mode-blue .bg-slate-50,
+.dark-mode-blue .bg-slate-100 {
+    background-color: #0f172a !important;
+    border-color: #334155 !important;
+}
+
+.dark-mode-blue .text-slate-900,
+.dark-mode-blue .text-slate-800,
+.dark-mode-blue .text-slate-700,
+.dark-mode-blue .text-slate-600 {
+    color: #f1f5f9 !important; /* Tailwind slate-100 */
+}
+
+.dark-mode-blue .text-slate-500,
+.dark-mode-blue .text-slate-400 {
+    color: #94a3b8 !important; /* Tailwind slate-400 */
+}
+
+.dark-mode-blue input,
+.dark-mode-blue select,
+.dark-mode-blue textarea {
+    background-color: #1e293b !important;
+    color: #f8fafc !important;
+    border-color: #475569 !important; /* Tailwind slate-600 */
+}
+
+.dark-mode-blue .bg-white.rounded-2xl,
+.dark-mode-blue .bg-white.rounded-3xl {
+    background-color: #1e293b !important;
+    border: 1px solid #334155 !important;
+}
+
+.dark-mode-blue .shadow-sm,
+.dark-mode-blue .shadow-md,
+.dark-mode-blue .shadow-lg,
+.dark-mode-blue .shadow-xl,
+.dark-mode-blue .shadow-2xl {
+    box-shadow: none !important;
+    border: 1px solid #334155 !important;
+}
+
+/* Force readability for .explanation in dark modes */
+.dark-mode .explanation,
+.dark-mode-blue .explanation,
+.prose-invert.student-extended-notes .explanation {
+    color: #e2e8f0 !important; /* text-slate-200 */
+    background-color: rgba(30, 41, 59, 0.5) !important;
+}
+
+.dark-mode .explanation p,
+.dark-mode-blue .explanation p,
+.prose-invert.student-extended-notes .explanation p,
+.dark-mode .explanation span,
+.dark-mode-blue .explanation span,
+.prose-invert.student-extended-notes .explanation span,
+.dark-mode .explanation strong,
+.dark-mode-blue .explanation strong,
+.prose-invert.student-extended-notes .explanation strong {
+    color: #f1f5f9 !important; /* text-slate-100 */
+}
+
+/* Custom Page CSS overrides for dark/blue mode */
+.custom-html-content * {
+    color: inherit;
+}
+.dark-mode .custom-html-content * {
+    color: #f1f5f9 !important; /* slate-100 */
+}
+.dark-mode-blue .custom-html-content * {
+    color: #f1f5f9 !important; /* slate-100 */
+}
+.dark-mode .dark-mode-text {
+    color: #f1f5f9 !important;
+}
+.dark-mode-blue .blue-mode-text {
+    color: #f1f5f9 !important;
+}
+.dark-mode .dark-blue-mode-bg {
+    background-color: #0f172a !important; /* slate-900 */
+    border-color: #334155 !important;
+}
+.dark-mode-blue .dark-blue-mode-bg {
+    background-color: #1e3a8a !important; /* blue-900 */
+    border-color: #1e40af !important;
+}
+
+/* Force landscape view for premium slides if required */
+@media screen and (orientation: portrait) {
+    .premium-slides-container iframe {
+        transform: rotate(-90deg);
+        transform-origin: center center;
+        width: 100vh !important;
+        height: 100vw !important;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        margin-top: -50vw;
+        margin-left: -50vh;
+    }
+}
+
+/* 3D Model Viewer Styling */
+model-viewer {
+  width: 100%;
+  height: 300px; /* Default height, can be overridden inline */
+  background-color: #1e293b; /* Dark background to match dark mode notes */
+  border-radius: 0.5rem;
+  margin: 1rem 0;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --poster-color: transparent;
+}
+.bg-slate-50 model-viewer {
+  background-color: #f1f5f9; /* Light background for light mode */
+}

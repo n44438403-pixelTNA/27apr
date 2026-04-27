@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.vercel.app_2025_blush_one.twa",
+        "sha256_cert_fingerprints": ["CB:5D:AA:5C:E5:B9:B5:63:E5:1B:99:9E:80:28:35:B7:49:B3:DC:68:AA:E0:A4:E4:3D:0C:91:BA:CC:46:13:70"]
+      }
+    }]
