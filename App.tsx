@@ -2232,6 +2232,10 @@ const App: React.FC = () => {
   };
 
   const goBack = () => {
+    if (document.fullscreenElement) {
+        document.exitFullscreen().catch(err => console.log(err));
+    }
+
     // Exit Full Screen if active
     if (isFullScreen) {
         setIsFullScreen(false);

@@ -1634,6 +1634,9 @@ export const StudentDashboard: React.FC<Props> = ({
     };
 
     const onPopState = () => {
+      if (document.fullscreenElement) {
+          document.exitFullscreen().catch(err => console.log(err));
+      }
       const s = navStateRef.current;
 
       // 1. Close any open overlays first (one back press = one overlay close)
@@ -1843,6 +1846,9 @@ export const StudentDashboard: React.FC<Props> = ({
     type: "VIDEO" | "PDF" | "MCQ" | "AUDIO" | "GENERIC",
   ) => {
     const goBack = () => {
+      if (document.fullscreenElement) {
+          document.exitFullscreen().catch(err => console.log(err));
+      }
       if (contentViewStep === "PLAYER") {
         setContentViewStep("CHAPTERS");
         setFullScreen(false);
