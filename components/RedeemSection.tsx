@@ -221,18 +221,23 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
             successMessage = `Success! Added ${amount} Premium Notes.`;
         }
         
-        // Save User immediately to global storage & Cloud
+        // Save User immediately to local storage first (always succeeds)
         const allUsersStr = localStorage.getItem('nst_users');
         if (allUsersStr) {
-            const allUsers: User[] = JSON.parse(allUsersStr);
-            const userIdx = allUsers.findIndex(u => u.id === user.id);
-            if (userIdx !== -1) {
-                allUsers[userIdx] = updatedUser;
-                localStorage.setItem('nst_users', JSON.stringify(allUsers));
-            }
+            try {
+                const allUsers: User[] = JSON.parse(allUsersStr);
+                const userIdx = allUsers.findIndex(u => u.id === user.id);
+                if (userIdx !== -1) {
+                    allUsers[userIdx] = updatedUser;
+                    localStorage.setItem('nst_users', JSON.stringify(allUsers));
+                }
+            } catch (_) {}
         }
         localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
-        await saveUserToLive(updatedUser); 
+        // Cloud sync (best-effort — doesn't block success if offline)
+        try { await saveUserToLive(updatedUser); } catch (syncErr) {
+            console.warn("Cloud sync after redeem failed (offline?), saved locally:", syncErr);
+        }
 
         setStatus('SUCCESS');
         setMsg(successMessage);
@@ -264,9 +269,19 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
             setMsg('');
         }, 3000);
 
-    } catch (e) {
-        setStatus('ERROR');
-        setMsg('Connection Error. Please try again.');
+    } catch (e: any) {
+        console.error("Redeem error:", e);
+        const msg = e?.message || '';
+        if (msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('denied')) {
+            setStatus('ERROR');
+            setMsg('Permission Error. Please contact admin.');
+        } else if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('offline') || msg.toLowerCase().includes('unavailable')) {
+            setStatus('ERROR');
+            setMsg('Network Error. Check your internet and try again.');
+        } else {
+            setStatus('ERROR');
+            setMsg('Something went wrong. Please try again.');
+        }
     }
   };
 

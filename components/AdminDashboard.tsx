@@ -9,7 +9,7 @@ import { parseMCQText } from '../utils/mcqParser';
 import { generateSecureRandomString, generateSecureRandomId } from '../utils/cryptoUtils';
 import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, subscribeToDemands } from '../firebase'; // IMPORT FIREBASE
 import { ref, set, onValue, update, push, get } from "firebase/database";
-import { doc, deleteDoc } from "firebase/firestore";
+import { doc, deleteDoc, setDoc } from "firebase/firestore";
 import { storage } from '../utils/storage';
 import { SimpleRichTextEditor } from './SimpleRichTextEditor';
 import { ImageCropper } from './ImageCropper';
@@ -1860,12 +1860,26 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   redeemedBy: []
               };
               newCodes.push(newGiftCode);
-              // Ensure rtdb is used correctly
+              // Write to Firestore first (admin has guaranteed create permission), RTDB as backup
+              let saved = false;
               try {
-                  await set(ref(rtdb, `redeem_codes/${newGiftCode.code}`), newGiftCode); 
-              } catch (dbError) {
-                  console.error("Firebase Set Error:", dbError);
-                  throw dbError;
+                  await setDoc(doc(db, 'redeem_codes', newGiftCode.code), newGiftCode);
+                  saved = true;
+              } catch (fsError) {
+                  console.warn("Firestore setDoc failed, trying RTDB:", fsError);
+              }
+              if (!saved) {
+                  try {
+                      await set(ref(rtdb, `redeem_codes/${newGiftCode.code}`), newGiftCode);
+                      saved = true;
+                  } catch (dbError) {
+                      console.error("RTDB Set Error:", dbError);
+                      throw dbError;
+                  }
+              }
+              // Also mirror to RTDB for fast reads (best-effort)
+              if (saved) {
+                  try { await set(ref(rtdb, `redeem_codes/${newGiftCode.code}`), newGiftCode); } catch (_) {}
               }
           }
           const updated = [...newCodes, ...giftCodes];

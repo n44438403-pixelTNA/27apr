@@ -115,6 +115,7 @@ import {
   Square,
   GraduationCap,
   Newspaper,
+  PlusCircle,
 } from "lucide-react";
 import { speakText, stopSpeech } from "../utils/textToSpeech";
 import { splitIntoTopics } from "../utils/notesSplitter";
@@ -1949,119 +1950,114 @@ export const StudentDashboard: React.FC<Props> = ({
         };
 
         return (
-          <div className={`min-h-[100dvh] ${theme.bg} p-4 pt-2`}>
-            <div className="max-w-3xl mx-auto pb-8 animate-in fade-in">
-              <div className="flex items-center gap-3 mb-4">
-                <button onClick={goBack} className={`${theme.bgSoft} p-2 rounded-full ${theme.text}`}>
-                  <ChevronRight size={18} className="rotate-180" />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <p className={`text-[10px] font-bold ${theme.text} uppercase tracking-widest truncate`}>{crumb}</p>
-                  <h2 className={`text-lg font-black ${theme.textDeep} truncate`}>{activeHw.title}</h2>
-                </div>
-                <span className={`text-[11px] font-bold ${theme.chip} px-2 py-1 rounded-full shrink-0`}>{flatIdx + 1}/{filteredHw.length}</span>
+          <div className="fixed inset-0 z-[150] bg-white flex flex-col animate-in fade-in">
+            {/* Sticky header */}
+            <div className={`${theme.btn} text-white px-4 py-3 flex items-center gap-3 shrink-0`}>
+              <button onClick={goBack} className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors">
+                <ChevronRight size={18} className="rotate-180" />
+              </button>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold opacity-75 uppercase tracking-widest truncate">{crumb}</p>
+                <p className="font-black text-sm leading-tight truncate">{activeHw.title}</p>
               </div>
+              <span className="bg-white/20 text-white text-[11px] font-black px-2.5 py-1 rounded-full shrink-0">
+                {flatIdx + 1}/{filteredHw.length}
+              </span>
+            </div>
 
-              <div className={`bg-white rounded-2xl border-2 ${theme.border} shadow-sm overflow-hidden`}>
-                <div className={`${theme.bgSoft} px-4 py-3 flex items-center justify-between gap-3 border-b ${theme.border}`}>
-                  <div className="min-w-0">
-                    <p className={`text-xs font-bold ${theme.text} uppercase tracking-widest`}>{new Date(activeHw.date).toLocaleDateString('default', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                    <p className={`font-black ${theme.textDeep} text-base leading-snug`}>{activeHw.title}</p>
-                  </div>
-                  {(activeHw.parsedMcqs && activeHw.parsedMcqs.length > 0) || activeHw.notes ? (
-                    <button
-                      onClick={() => {
-                        setHomeworkPlayerHwId(activeHw.id || hwKey);
-                        setPlayerCurrentIndex(0);
-                        setPlayerIsReadingAll(false);
-                        setPlayerRevealAll(true);
-                      }}
-                      className={`shrink-0 ${theme.btn} ${theme.btnHover} text-white text-xs font-bold px-3 py-2 rounded-lg shadow-sm flex items-center gap-1 active:scale-95 transition-transform`}
-                      title="Full Screen Player"
-                    >
-                      <Play size={12} /> Player
-                    </button>
-                  ) : null}
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto">
+              {/* Notes */}
+              {activeHw.notes && (
+                <div className="px-4 pb-2">
+                  <ChunkedNotesReader
+                    content={activeHw.notes}
+                    topBarLabel={activeHw.title}
+                  />
                 </div>
-                <div className="p-4 space-y-3">
-                  {activeHw.notes && (
-                    <div className={`${theme.bg} border ${theme.border} rounded-xl p-3`}>
-                      <p className={`text-xs font-bold ${theme.text} flex items-center gap-1 mb-2`}><BookOpen size={12} /> Notes</p>
-                      <ChunkedNotesReader
-                        content={activeHw.notes}
-                        topBarLabel="Notes"
-                      />
-                    </div>
-                  )}
-                  {activeHw.audioUrl && (
-                    <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
-                      <p className="text-xs font-bold text-purple-700 mb-2 flex items-center gap-1"><Volume2 size={12} /> Audio</p>
-                      <audio controls src={activeHw.audioUrl} className="w-full h-8" />
-                    </div>
-                  )}
-                  {activeHw.videoUrl && (
-                    <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
-                      <p className="text-xs font-bold text-rose-700 mb-2 flex items-center gap-1"><Play size={12} /> Video</p>
-                      <a href={activeHw.videoUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-rose-700">
-                        <Play size={12} /> Video Dekhen
-                      </a>
-                    </div>
-                  )}
-                  {activeHw.parsedMcqs && activeHw.parsedMcqs.length > 0 && (
-                    <div className={`${theme.bg} border ${theme.border} rounded-xl p-3`}>
-                      <p className={`text-xs font-bold ${theme.text} mb-2 flex items-center gap-1`}><CheckSquare size={12} /> MCQ ({activeHw.parsedMcqs.length} questions)</p>
-                      <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-                        {activeHw.parsedMcqs.map((mcq, qi) => {
-                          const ansKey = `${hwKey}_${qi}`;
-                          const selected = hwAnswers[ansKey];
-                          return (
-                            <div key={qi} className={`bg-white rounded-lg p-3 border ${theme.border}`}>
-                              <p className="text-sm font-bold text-slate-800 mb-2">{qi + 1}. {mcq.question}</p>
-                              <div className="space-y-1">
-                                {mcq.options.map((opt, oi) => {
-                                  const isSelected = selected === oi;
-                                  const isCorrect = mcq.correctAnswer === oi;
-                                  const showResult = selected !== undefined;
-                                  return (
-                                    <button key={oi} onClick={() => { if (selected === undefined) setHwAnswers(prev => ({ ...prev, [ansKey]: oi })); }}
-                                      className={`w-full text-left text-xs px-3 py-2 rounded-lg border transition-all ${showResult ? (isCorrect ? 'bg-green-100 border-green-400 text-green-800 font-bold' : isSelected ? 'bg-red-100 border-red-400 text-red-800' : 'bg-white border-slate-200 text-slate-500') : `bg-white border-slate-200 hover:${theme.border} hover:${theme.bg} text-slate-700`}`}>
-                                      {String.fromCharCode(65 + oi)}. {opt}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {selected !== undefined && mcq.explanation && (
-                                <p className="text-xs text-slate-600 mt-2 bg-yellow-50 border border-yellow-200 rounded p-2">{mcq.explanation}</p>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Prev / Next navigation */}
-              <div className="flex items-center justify-between gap-2 mt-4">
-                <button
-                  disabled={!prevHw}
-                  onClick={() => prevHw && goToHw(prevHw)}
-                  className={`flex-1 flex items-center justify-center gap-1 px-4 py-3 rounded-xl font-bold text-sm transition-all ${prevHw ? `bg-white ${theme.text} border-2 ${theme.border} hover:${theme.bgSoft}` : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
-                >
-                  <ChevronRight size={16} className="rotate-180" /> Previous
-                </button>
-                <button
-                  disabled={!nextHw}
-                  onClick={() => nextHw && goToHw(nextHw)}
-                  className={`flex-1 flex items-center justify-center gap-1 px-4 py-3 rounded-xl font-bold text-sm transition-all ${nextHw ? `${theme.btn} ${theme.btnHover} text-white shadow-md active:scale-95` : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
-                >
-                  Next <ChevronRight size={16} />
-                </button>
-              </div>
-              {!nextHw && (
-                <p className="text-center text-xs text-slate-500 font-bold mt-3">🎉 Aap ne saare notes complete kar liye!</p>
               )}
+
+              {/* Audio */}
+              {activeHw.audioUrl && (
+                <div className="mx-4 mb-3 bg-purple-50 border border-purple-100 rounded-2xl p-3">
+                  <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-2 flex items-center gap-1">
+                    <Volume2 size={11} /> Audio
+                  </p>
+                  <audio controls src={activeHw.audioUrl} className="w-full h-8" />
+                </div>
+              )}
+
+              {/* Video */}
+              {activeHw.videoUrl && (
+                <div className="mx-4 mb-3 bg-rose-50 border border-rose-100 rounded-2xl p-3 flex items-center justify-between gap-3">
+                  <p className="text-sm font-bold text-rose-700">Video lesson available</p>
+                  <a href={activeHw.videoUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-700 active:scale-95 transition-all">
+                    <Play size={12} /> Watch
+                  </a>
+                </div>
+              )}
+
+              {/* MCQ */}
+              {activeHw.parsedMcqs && activeHw.parsedMcqs.length > 0 && (
+                <div className="px-4 pb-4">
+                  <p className={`text-[10px] font-black ${theme.text} uppercase tracking-widest mb-3 flex items-center gap-1`}>
+                    <CheckSquare size={11} /> MCQ Practice · {activeHw.parsedMcqs.length} questions
+                  </p>
+                  <div className="space-y-3">
+                    {activeHw.parsedMcqs.map((mcq, qi) => {
+                      const ansKey = `${hwKey}_${qi}`;
+                      const selected = hwAnswers[ansKey];
+                      return (
+                        <div key={qi} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                          <p className="text-sm font-bold text-slate-800 mb-3 leading-snug">{qi + 1}. {mcq.question}</p>
+                          <div className="space-y-2">
+                            {mcq.options.map((opt, oi) => {
+                              const isSelected = selected === oi;
+                              const isCorrect = mcq.correctAnswer === oi;
+                              const showResult = selected !== undefined;
+                              return (
+                                <button key={oi} onClick={() => { if (selected === undefined) setHwAnswers(prev => ({ ...prev, [ansKey]: oi })); }}
+                                  className={`w-full text-left text-sm px-4 py-2.5 rounded-xl border-2 transition-all font-medium ${showResult
+                                    ? (isCorrect ? 'bg-green-50 border-green-400 text-green-800 font-bold'
+                                      : isSelected ? 'bg-red-50 border-red-400 text-red-800'
+                                      : 'bg-slate-50 border-slate-200 text-slate-500')
+                                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50'}`}>
+                                  <span className="font-black mr-2">{String.fromCharCode(65 + oi)}.</span>{opt}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {selected !== undefined && mcq.explanation && (
+                            <p className="text-xs text-slate-600 mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 leading-relaxed">{mcq.explanation}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {!nextHw && (
+                <p className="text-center text-xs text-slate-400 font-bold py-6">🎉 Saare notes complete!</p>
+              )}
+            </div>
+
+            {/* Fixed bottom nav */}
+            <div className="shrink-0 border-t border-slate-100 bg-white px-4 py-3 flex items-center gap-3">
+              <button
+                disabled={!prevHw}
+                onClick={() => prevHw && goToHw(prevHw)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl font-bold text-sm transition-all ${prevHw ? `border-2 ${theme.border} ${theme.text} hover:${theme.bgSoft} active:scale-95` : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+              >
+                <ChevronRight size={16} className="rotate-180" /> Prev
+              </button>
+              <button
+                disabled={!nextHw}
+                onClick={() => nextHw && goToHw(nextHw)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl font-bold text-sm transition-all ${nextHw ? `${theme.btn} ${theme.btnHover} text-white shadow-md active:scale-95` : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+              >
+                Next <ChevronRight size={16} />
+              </button>
             </div>
           </div>
         );
@@ -2738,12 +2734,12 @@ export const StudentDashboard: React.FC<Props> = ({
                   const themes: Record<"junior" | "secondary" | "senior", ClassTheme> = {
                     junior: {
                       label: "Junior • Foundation",
-                      accent: "from-emerald-500 to-teal-600",
+                      accent: "from-emerald-400 to-teal-500",
                       chip: "bg-emerald-100 text-emerald-700 border-emerald-200",
-                      border: "border-emerald-100",
-                      hoverBorder: "hover:border-emerald-500",
-                      hoverBg: "hover:bg-emerald-50",
-                      hoverText: "hover:text-emerald-700",
+                      border: "border-emerald-200",
+                      hoverBorder: "hover:border-emerald-400",
+                      hoverBg: "hover:bg-gradient-to-b hover:from-emerald-50 hover:to-teal-50",
+                      hoverText: "hover:text-emerald-800",
                       text: "text-emerald-700",
                       iconBg: "bg-emerald-50",
                       iconText: "text-emerald-600",
@@ -2752,10 +2748,10 @@ export const StudentDashboard: React.FC<Props> = ({
                       label: "Secondary • Building Concepts",
                       accent: "from-blue-500 to-indigo-600",
                       chip: "bg-blue-100 text-blue-700 border-blue-200",
-                      border: "border-blue-100",
-                      hoverBorder: "hover:border-blue-500",
-                      hoverBg: "hover:bg-blue-50",
-                      hoverText: "hover:text-blue-700",
+                      border: "border-blue-200",
+                      hoverBorder: "hover:border-blue-400",
+                      hoverBg: "hover:bg-gradient-to-b hover:from-blue-50 hover:to-indigo-50",
+                      hoverText: "hover:text-blue-800",
                       text: "text-blue-700",
                       iconBg: "bg-blue-50",
                       iconText: "text-blue-600",
@@ -2764,10 +2760,10 @@ export const StudentDashboard: React.FC<Props> = ({
                       label: "Senior • Boards & Beyond",
                       accent: "from-purple-500 to-fuchsia-600",
                       chip: "bg-purple-100 text-purple-700 border-purple-200",
-                      border: "border-purple-100",
-                      hoverBorder: "hover:border-purple-500",
-                      hoverBg: "hover:bg-purple-50",
-                      hoverText: "hover:text-purple-700",
+                      border: "border-purple-200",
+                      hoverBorder: "hover:border-purple-400",
+                      hoverBg: "hover:bg-gradient-to-b hover:from-purple-50 hover:to-fuchsia-50",
+                      hoverText: "hover:text-purple-800",
                       text: "text-purple-700",
                       iconBg: "bg-purple-50",
                       iconText: "text-purple-600",
@@ -2814,21 +2810,24 @@ export const StudentDashboard: React.FC<Props> = ({
                                   <button
                                     key={c}
                                     onClick={() => goToClass(c)}
-                                    className={`group relative w-full py-4 px-3 rounded-2xl bg-white border-2 ${t.border} text-slate-700 font-black ${t.hoverBorder} ${t.hoverBg} ${t.hoverText} active:scale-[0.98] transition-all text-center text-base flex flex-col items-center justify-center gap-1 overflow-hidden shadow-sm hover:shadow-md`}
+                                    className={`group relative w-full py-5 px-3 rounded-2xl bg-white border-2 ${t.border} text-slate-700 font-black ${t.hoverBorder} active:scale-[0.97] transition-all text-center text-base flex flex-col items-center justify-center gap-1 overflow-hidden shadow-md hover:shadow-lg`}
                                   >
-                                    {/* Top accent bar */}
-                                    <span className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${t.accent}`} />
+                                    {/* Top accent bar — thicker & rounded */}
+                                    <span className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${t.accent} rounded-t-2xl`} />
+                                    {/* Subtle inner glow on hover */}
+                                    <span className={`absolute inset-0 opacity-0 group-hover:opacity-100 bg-gradient-to-br ${t.accent} opacity-5 transition-opacity`} style={{opacity: 0}} />
 
                                     {/* Board year crown badge */}
                                     {showBoardBadge(c) && (
-                                      <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[8px] font-black uppercase tracking-wider">
+                                      <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[8px] font-black uppercase tracking-wider shadow-sm">
                                         <Crown size={9} className="text-amber-600" />
                                         Board
                                       </span>
                                     )}
 
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Class</span>
-                                    <span className={`text-2xl leading-none ${board ? "text-amber-700" : t.text}`}>{c}</span>
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Class</span>
+                                    <span className={`text-3xl font-black leading-none ${board ? "text-amber-600" : t.text}`}>{c}</span>
+                                    <span className={`text-[9px] font-bold ${t.text} opacity-60`}>Tap to open</span>
                                   </button>
                                 );
                               })}
@@ -2849,11 +2848,19 @@ export const StudentDashboard: React.FC<Props> = ({
                         <div className="grid grid-cols-1 gap-3">
                           <button
                             onClick={() => goToClass("COMPETITION")}
-                            className="group relative w-full py-7 px-5 rounded-2xl bg-white border-2 border-orange-100 text-slate-700 font-black hover:border-orange-500 hover:bg-orange-50 hover:text-orange-700 active:scale-[0.98] transition-all text-center text-base flex flex-col items-center justify-center gap-2 overflow-hidden shadow-sm hover:shadow-md"
+                            className="group relative w-full py-5 px-5 rounded-2xl bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 border-2 border-orange-200 text-slate-700 font-black hover:border-orange-400 hover:from-orange-100 hover:via-amber-100 hover:to-yellow-100 active:scale-[0.97] transition-all text-left flex items-center gap-4 overflow-hidden shadow-md hover:shadow-lg"
                           >
-                            <span className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 to-amber-600" />
-                            <Trophy size={28} className="text-orange-500 mb-0.5" />
-                            <span className="text-base leading-tight">Govt. Exams</span>
+                            <span className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 rounded-t-2xl" />
+                            <span className="absolute -right-6 -bottom-6 w-24 h-24 bg-orange-100/60 rounded-full blur-2xl group-hover:bg-orange-200/60 transition-colors" />
+                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center shadow-lg shrink-0">
+                              <Trophy size={26} className="text-white drop-shadow" />
+                            </div>
+                            <div className="flex-1 min-w-0 relative z-10">
+                              <span className="text-[9px] font-black uppercase tracking-widest text-orange-600 block">Competitive Mode</span>
+                              <span className="text-lg font-black text-slate-800 leading-tight block">Govt. Exams</span>
+                              <span className="text-[10px] text-slate-500 font-medium">SSC, Railway, UPSC, Bihar</span>
+                            </div>
+                            <ChevronRight size={20} className="text-orange-500 shrink-0 group-hover:translate-x-1 transition-transform" />
                           </button>
                         </div>
                       </div>
@@ -4575,7 +4582,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 <div className="flex-1 min-w-0">
                   <h3 className="text-base font-black text-slate-800">Homework</h3>
                   <p className="text-[11px] text-slate-500 font-medium">
-                    Aaj ka homework + subject-wise history
+                    Aaj ka homework
                   </p>
                 </div>
               </div>
@@ -4641,8 +4648,17 @@ export const StudentDashboard: React.FC<Props> = ({
                   </div>
                 )}
 
+                {/* EMPTY STATE */}
+                {todaysHw.length === 0 && (
+                  <div className="text-center py-10 text-slate-500">
+                    <GraduationCap size={40} className="mx-auto mb-3 opacity-40" />
+                    <p className="font-bold text-sm">Aaj koi homework nahi hai</p>
+                    <p className="text-xs mt-1">Admin ke add karne ka intezaar karein</p>
+                  </div>
+                )}
+
                 {/* SUBJECT-WISE HISTORY */}
-                {subjectKeys.length > 0 ? (
+                {subjectKeys.length > 0 && (
                   <div className="space-y-3">
                     <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest px-1">
                       Subject-wise History
@@ -4690,13 +4706,30 @@ export const StudentDashboard: React.FC<Props> = ({
                       );
                     })}
                   </div>
-                ) : todaysHw.length === 0 ? (
-                  <div className="text-center py-16 text-slate-500">
-                    <GraduationCap size={48} className="mx-auto mb-4 opacity-50" />
-                    <p className="font-bold">Abhi koi homework nahi hai</p>
-                    <p className="text-xs mt-1">Admin ke add karne ka intezaar karein</p>
-                  </div>
-                ) : null}
+                )}
+
+                {/* CREATE / PRACTICE MCQ CARD */}
+                <div className="pt-1">
+                  <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest px-1 mb-3">
+                    Khud banao
+                  </h4>
+                  <button
+                    onClick={() => { setShowHomeworkHistory(false); setShowCompMcqHub(true); setCompMcqTab('CREATE'); }}
+                    className="w-full bg-white rounded-2xl border border-emerald-200 shadow-sm overflow-hidden hover:shadow-md active:scale-[0.99] transition-all text-left"
+                  >
+                    <div className="h-1.5 w-full bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400" />
+                    <div className="p-4 flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                        <CheckSquare size={22} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-black text-slate-800 text-sm">MCQ Banao / Practice Karo</p>
+                        <p className="text-[11px] text-slate-500 font-medium">Apna khud ka MCQ set banao aur practice karo</p>
+                      </div>
+                      <ChevronRight size={20} className="text-emerald-500 shrink-0" />
+                    </div>
+                  </button>
+                </div>
 
                 {/* HOMEWORK MCQ HISTORY (separate from regular MCQ) */}
                 {(() => {
@@ -5458,7 +5491,7 @@ export const StudentDashboard: React.FC<Props> = ({
             <div className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-10">
               <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
                 <button
-                  onClick={() => setShowDailyGkHistory(false)}
+                  onClick={() => { setShowDailyGkHistory(false); stopSpeech(); setSpeakingId(null); }}
                   className="p-2 hover:bg-slate-100 rounded-full text-slate-700 transition-colors"
                   aria-label="Back"
                 >
@@ -5475,6 +5508,22 @@ export const StudentDashboard: React.FC<Props> = ({
                     Today's GK + full history
                   </p>
                 </div>
+                {/* Read All GK button */}
+                <button
+                  onClick={() => {
+                    const gksToRead = allGks.length > 0 ? allGks : [];
+                    if (speakingId === 'gk_readall') {
+                      stopSpeech();
+                      setSpeakingId(null);
+                    } else if (gksToRead.length > 0) {
+                      const fullText = gksToRead.map((gk, i) => `Question ${i + 1}: ${gk.question}. Answer: ${gk.answer}`).join('. ');
+                      speakText(fullText, null, 1.0, 'hi-IN', () => setSpeakingId('gk_readall'), () => setSpeakingId(null));
+                    }
+                  }}
+                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider shadow-sm active:scale-95 transition ${speakingId === 'gk_readall' ? 'bg-red-600 text-white' : 'bg-teal-600 text-white hover:bg-teal-700'}`}
+                >
+                  {speakingId === 'gk_readall' ? <><Square size={13} /> Stop</> : <><Volume2 size={13} /> Read All</>}
+                </button>
               </div>
             </div>
 
@@ -6414,79 +6463,66 @@ export const StudentDashboard: React.FC<Props> = ({
           ? `Page ${currentPage.pageNo}. ${currentPage.content || ''}`
           : '';
         return (
-          <div className="fixed inset-0 z-[200] bg-slate-900/70 backdrop-blur-sm flex items-stretch sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
-            <div className="bg-white w-full sm:max-w-2xl sm:rounded-3xl shadow-2xl flex flex-col max-h-screen sm:max-h-[90vh] overflow-hidden">
-              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 flex items-center gap-3">
-                <button onClick={() => { stopSpeech(); setLucentAutoSync(false); setLucentNoteViewer(null); }} className="bg-white/15 hover:bg-white/25 p-2 rounded-full">
-                  <ChevronRight size={20} className="rotate-180" />
-                </button>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider opacity-90">📘 Lucent Book</p>
-                  <p className="font-black text-base truncate">{entry.lessonTitle}</p>
-                </div>
-                <div className="bg-white/15 px-3 py-1 rounded-full text-xs font-bold">
-                  Page {currentPage?.pageNo || '-'} • {safeIndex + 1}/{totalPages}
-                </div>
+          <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in fade-in">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-3 flex items-center gap-3 shrink-0">
+              <button onClick={() => { stopSpeech(); setLucentAutoSync(false); setLucentNoteViewer(null); }} className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors">
+                <ChevronRight size={18} className="rotate-180" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wider opacity-75">📘 Lucent Book</p>
+                <p className="font-black text-sm truncate">{entry.lessonTitle}</p>
               </div>
-              {/* Auto-Read & Sync toggle — drives ChunkedNotesReader's autoStart */}
-              <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-600 truncate">
-                  Tap "Read All" to listen, ya Auto-Sync ON karein for next-page auto-flow.
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="bg-white/20 px-2.5 py-1 rounded-full text-[11px] font-black whitespace-nowrap">
+                  {safeIndex + 1}/{totalPages}
                 </span>
                 <button
-                  onClick={() => {
-                    const next = !autoSyncOn;
-                    setLucentAutoSync(next);
-                    if (!next) stopSpeech();
-                  }}
-                  className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${autoSyncOn ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600'}`}
+                  onClick={() => { const next = !autoSyncOn; setLucentAutoSync(next); if (!next) stopSpeech(); }}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all ${autoSyncOn ? 'bg-white text-indigo-700' : 'bg-white/20 text-white'}`}
                   title="Auto-Read & Sync: automatically read each page and move to the next"
                 >
-                  <Zap size={12} className={autoSyncOn ? 'fill-current' : ''} />
-                  {autoSyncOn ? 'Auto-Sync ON' : 'Auto-Read & Sync'}
+                  <Zap size={11} className={autoSyncOn ? 'fill-indigo-600' : ''} />
+                  {autoSyncOn ? 'Auto ON' : 'Auto'}
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-5 sm:p-7">
-                {currentPage ? (
-                  <div>
-                    <div className="inline-block bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold mb-3">
-                      Page No. {currentPage.pageNo}
-                    </div>
-                    {/* Use the SAME reader as Speedy notes so Auto-Read & Sync
-                        behaves identically (chunked TTS, per-topic highlight,
-                        Read All / Read from here, robust onEnd chaining). */}
-                    <ChunkedNotesReader
-                      key={`lucent-reader-${entry.id}-${safeIndex}-${autoSyncOn ? 'auto' : 'manual'}`}
-                      content={pageSpeakText}
-                      topBarLabel={`Page ${currentPage.pageNo}`}
-                      autoStart={autoSyncOn}
-                      onComplete={() => {
-                        // Auto-Read & Sync: after the last topic of this page finishes,
-                        // jump to the next page which (still in autoStart=true mode)
-                        // will start reading automatically.
-                        if (autoSyncOn && safeIndex < totalPages - 1) {
-                          setTimeout(() => setLucentPageIndex(safeIndex + 1), 400);
-                        }
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="text-center text-slate-500 py-12 text-sm">No pages available.</div>
-                )}
-              </div>
-              <div className="border-t border-slate-200 bg-slate-50 p-3 flex items-center gap-2">
-                <button onClick={() => { stopSpeech(); goPrev(); }} disabled={safeIndex <= 0} className="flex-1 bg-white border border-slate-200 text-slate-700 py-2.5 rounded-xl font-bold text-sm shadow-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1">
-                  <ChevronRight size={16} className="rotate-180" /> Prev
-                </button>
-                <select value={safeIndex} onChange={e => { stopSpeech(); setLucentPageIndex(parseInt(e.target.value, 10)); }} className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-bold bg-white outline-none focus:border-indigo-500">
-                  {entry.pages.map((p, idx) => (
-                    <option key={p.id} value={idx}>Page {p.pageNo}</option>
-                  ))}
-                </select>
-                <button onClick={() => { stopSpeech(); goNext(); }} disabled={safeIndex >= totalPages - 1} className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-bold text-sm shadow-sm hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1">
-                  Next <ChevronRight size={16} />
-                </button>
-              </div>
+            </div>
+            {/* Notes scroll area */}
+            <div className="flex-1 overflow-y-auto">
+              {currentPage ? (
+                <div className="px-4 pb-2">
+                  <ChunkedNotesReader
+                    key={`lucent-reader-${entry.id}-${safeIndex}-${autoSyncOn ? 'auto' : 'manual'}`}
+                    content={pageSpeakText}
+                    topBarLabel={`Page ${currentPage.pageNo}`}
+                    autoStart={autoSyncOn}
+                    onComplete={() => {
+                      if (autoSyncOn && safeIndex < totalPages - 1) {
+                        setTimeout(() => setLucentPageIndex(safeIndex + 1), 400);
+                      }
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="text-center text-slate-500 py-16 text-sm">No pages available.</div>
+              )}
+            </div>
+            {/* Fixed bottom nav */}
+            <div className="shrink-0 border-t border-slate-100 bg-white px-4 py-3 flex items-center gap-3">
+              <button onClick={() => { stopSpeech(); goPrev(); }} disabled={safeIndex <= 0}
+                className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                <ChevronRight size={16} className="rotate-180" /> Prev
+              </button>
+              <select value={safeIndex} onChange={e => { stopSpeech(); setLucentPageIndex(parseInt(e.target.value, 10)); }}
+                className="px-3 py-3 border-2 border-slate-200 rounded-2xl text-sm font-bold bg-white outline-none focus:border-indigo-400">
+                {entry.pages.map((p, idx) => (
+                  <option key={p.id} value={idx}>Pg {p.pageNo}</option>
+                ))}
+              </select>
+              <button onClick={() => { stopSpeech(); goNext(); }} disabled={safeIndex >= totalPages - 1}
+                className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl font-bold text-sm bg-indigo-600 text-white shadow-md hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                Next <ChevronRight size={16} />
+              </button>
             </div>
           </div>
         );
@@ -6710,8 +6746,6 @@ export const StudentDashboard: React.FC<Props> = ({
                 const isActive = idx === playerCurrentIndex && playerIsReadingAll;
 
                 if (chunk.kind === 'notes-line') {
-                  // Show "Read from here" pill every 6 notes lines so the user can jump in mid-list.
-                  const showAnchor = ((chunk.index + 1) % 6 === 0);
                   return (
                     <React.Fragment key={`pchunk-${idx}`}>
                       <div
@@ -6765,30 +6799,6 @@ export const StudentDashboard: React.FC<Props> = ({
                           </button>
                         )}
                       </div>
-                      {showAnchor && idx + 1 < playerChunks.length && (
-                        <div className="flex items-center gap-2 my-2">
-                          <div className="flex-1 h-px bg-slate-200" />
-                          <button
-                            onClick={() => {
-                              if (playerIsReadingAll) {
-                                playerIsReadingAllRef.current = false;
-                                setPlayerIsReadingAll(false);
-                                stopSpeech();
-                              } else {
-                                stopSpeech();
-                                setPlayerCurrentIndex(idx + 1);
-                                playerIsReadingAllRef.current = true;
-                                setPlayerIsReadingAll(true);
-                                setTimeout(() => playPlayerFromIndex(idx + 1), 80);
-                              }
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 active:scale-95 transition"
-                          >
-                            {playerIsReadingAll ? <><Square size={11} /> Stop</> : <><Volume2 size={11} /> Read from here</>}
-                          </button>
-                          <div className="flex-1 h-px bg-slate-200" />
-                        </div>
-                      )}
                     </React.Fragment>
                   );
                 }
@@ -6813,20 +6823,29 @@ export const StudentDashboard: React.FC<Props> = ({
                               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{chunk.mcq.topic}</span>
                             )}
                           </div>
-                          <button
-                            onClick={() => {
-                              if (speakingId === `player_mcq_${idx}`) { stopSpeech(); setSpeakingId(null); }
-                              else {
-                                speakText(chunk.text, undefined, 1.0, 'hi-IN',
-                                  () => setSpeakingId(`player_mcq_${idx}`),
-                                  () => setSpeakingId(null));
-                              }
-                            }}
-                            className={`shrink-0 p-2 rounded-full transition ${speakingId === `player_mcq_${idx}` ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}
-                            title="Read this question"
-                          >
-                            {speakingId === `player_mcq_${idx}` ? <Square size={14} /> : <Volume2 size={14} />}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                if (speakingId === `player_mcq_${idx}`) { stopSpeech(); setSpeakingId(null); }
+                                else {
+                                  speakText(chunk.text, undefined, 1.0, 'hi-IN',
+                                    () => setSpeakingId(`player_mcq_${idx}`),
+                                    () => setSpeakingId(null));
+                                }
+                              }}
+                              className={`shrink-0 p-2 rounded-full transition ${speakingId === `player_mcq_${idx}` ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}
+                              title="Read this question"
+                            >
+                              {speakingId === `player_mcq_${idx}` ? <Square size={14} /> : <Volume2 size={14} />}
+                            </button>
+                            <button
+                              onClick={() => { setShowCompMcqHub(true); setCompMcqTab('CREATE'); setCompMcqDraft({ question: chunk.mcq?.question || '', options: chunk.mcq?.options?.length === 4 ? [...chunk.mcq.options] : ['', '', '', ''], correctAnswer: chunk.mcq?.correctAnswer ?? 0 }); }}
+                              className="shrink-0 p-2 rounded-full transition bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              title="Is question ko MCQ bank mein save karo"
+                            >
+                              <PlusCircle size={14} />
+                            </button>
+                          </div>
                         </div>
                         <p className="text-base sm:text-lg font-bold text-slate-800 mb-3 leading-snug">
                           {chunk.mcq?.question}

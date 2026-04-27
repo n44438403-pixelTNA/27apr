@@ -10,7 +10,6 @@ export const getAvailableVoices = (): Promise<SpeechSynthesisVoice[]> => {
     }
 
     return new Promise((resolve) => {
-        // Voices might load asynchronously
         const handler = () => {
             const v = window.speechSynthesis.getVoices();
             if (v.length > 0) {
@@ -21,8 +20,6 @@ export const getAvailableVoices = (): Promise<SpeechSynthesisVoice[]> => {
         
         window.speechSynthesis.addEventListener('voiceschanged', handler);
 
-        // Fallback timeout: If no voices after 1s, return empty (don't block too long)
-        // Android WebView often has issues here, so we shouldn't wait forever.
         setTimeout(() => {
              window.speechSynthesis.removeEventListener('voiceschanged', handler);
              resolve(window.speechSynthesis.getVoices());
@@ -53,81 +50,57 @@ export const getPreferredVoice = async (): Promise<SpeechSynthesisVoice | undefi
 export const stripHtml = (html: string): string => {
     if (!html) return "";
 
-    // 1. Remove style and script blocks entirely (we don't want TTS reading CSS/JS)
     let clean = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
     clean = clean.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ');
-
-    // 2. Remove all HTML tags using regex as a first pass for safety
     clean = clean.replace(/<[^>]*>?/gm, ' ');
 
-    // 3. Decode HTML entities (e.g. &nbsp; &amp;) using the DOM
     const tempDiv = document.createElement("div");
     tempDiv.innerHTML = clean;
     clean = tempDiv.textContent || tempDiv.innerText || "";
 
-    // 4. Strip KaTeX/Math delimiters ($ and $$) so TTS doesn't say "dollar"
     clean = clean.replace(/\$\$/g, ' ');
     clean = clean.replace(/\$/g, ' ');
 
-    // 5. Strip Markdown formatting characters so TTS doesn't read them aloud
-    //    (e.g. "asterisk asterisk", "hash", "underscore", etc.)
-    //    Order matters: handle multi-char tokens first.
-    clean = clean.replace(/^\s{0,3}#{1,6}\s+/gm, ' '); // ATX headings: ###, ## etc at line start
-    clean = clean.replace(/#+/g, ' ');                 // any other #
-    clean = clean.replace(/\*+/g, ' ');                // *, **, ***, **** (bold/italic markers)
-    clean = clean.replace(/(^|\s)_+(\S)/g, '$1$2');    // leading underscores around words
-    clean = clean.replace(/(\S)_+(\s|$)/g, '$1$2');    // trailing underscores around words
-    clean = clean.replace(/~{2,}/g, ' ');              // ~~ strikethrough
-    clean = clean.replace(/`+/g, ' ');                 // `code`
-    clean = clean.replace(/^\s*>+\s?/gm, ' ');         // > blockquotes
-    clean = clean.replace(/^\s*[-+]\s+/gm, ' ');       // - / + list bullets at line start
-    clean = clean.replace(/^\s*\d+\.\s+/gm, ' ');      // numbered list "1. " at line start (keep number reading? remove dot/space marker only — safer to drop)
-    clean = clean.replace(/\|/g, ' ');                 // markdown table pipes
-    clean = clean.replace(/\\([*_#`~])/g, '$1');       // unescape escaped markdown chars
+    clean = clean.replace(/^\s{0,3}#{1,6}\s+/gm, ' ');
+    clean = clean.replace(/#+/g, ' ');
+    clean = clean.replace(/\*+/g, ' ');
+    clean = clean.replace(/(^|\s)_+(\S)/g, '$1$2');
+    clean = clean.replace(/(\S)_+(\s|$)/g, '$1$2');
+    clean = clean.replace(/~{2,}/g, ' ');
+    clean = clean.replace(/`+/g, ' ');
+    clean = clean.replace(/^\s*>+\s?/gm, ' ');
+    clean = clean.replace(/^\s*[-+]\s+/gm, ' ');
+    clean = clean.replace(/^\s*\d+\.\s+/gm, ' ');
+    clean = clean.replace(/\|/g, ' ');
+    clean = clean.replace(/\\([*_#`~])/g, '$1');
 
-    // 6. Clean up excessive whitespace and punctuation that TTS might misinterpret
     clean = clean.replace(/\s+/g, ' ').trim();
 
     return clean;
 };
 
-// Chrome bug workaround: speech stops after ~15s. Use a keep-alive interval.
-let keepAliveInterval: any = null;
-const startKeepAlive = () => {
-    if (keepAliveInterval) clearInterval(keepAliveInterval);
-    keepAliveInterval = setInterval(() => {
-        if (!window.speechSynthesis.speaking) {
-            clearInterval(keepAliveInterval);
-            keepAliveInterval = null;
-            return;
-        }
-        // Pause + resume keeps Chrome's TTS alive past ~15s
-        try {
-            window.speechSynthesis.pause();
-            window.speechSynthesis.resume();
-        } catch (e) {}
-    }, 10000);
-};
-const stopKeepAlive = () => {
-    if (keepAliveInterval) {
-        clearInterval(keepAliveInterval);
-        keepAliveInterval = null;
-    }
-};
-
 // Track the active TTS session so chunked playback can be cancelled cleanly.
 let activeTtsSessionId = 0;
 
-// Maximum characters per utterance chunk. Chrome / Android WebView often cuts off
-// utterances around 200–300 chars or after ~15s. Keeping each chunk small
-// (~180 chars) and chaining them yields reliable playback for very long notes
-// without any visible chunking to the user.
-const MAX_CHUNK_LENGTH = 180;
+// Watchdog timer: if an utterance hasn't ended in 20 seconds, force-advance.
+// This replaces the old pause()/resume() keepAlive which was causing premature onend fires.
+let watchdogTimer: any = null;
+
+const clearWatchdog = () => {
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
+};
+
+// Each chunk may take up to MAX_CHUNK_SECS seconds to speak before we force-advance.
+const MAX_CHUNK_SECS = 60;
+
+// 40000 chars per chunk — effectively "read entire notes as one utterance".
+// Topics from notesSplitter are typically 100–400 chars, well within browser limits.
+// For very long blocks, the watchdog (60s) will force-advance if the engine stalls.
+const MAX_CHUNK_LENGTH = 40000;
 
 /**
  * Split a long string into TTS-friendly chunks at natural boundaries.
- * Priority of split points (in order): Hindi full stop (।), . ! ?, ; , : / newline, then space.
- * Falls back to a hard cut if no boundary is found within MAX_CHUNK_LENGTH.
+ * Priority: Hindi full stop (।), sentence-end (.!?), mid-sentence (,;:/newline), word boundary, hard cut.
  */
 export const chunkTextForTts = (raw: string, maxLen: number = MAX_CHUNK_LENGTH): string[] => {
     const text = (raw || '').trim();
@@ -138,25 +111,24 @@ export const chunkTextForTts = (raw: string, maxLen: number = MAX_CHUNK_LENGTH):
     let remaining = text;
 
     const findSplitIndex = (s: string): number => {
-        // Search backwards from maxLen for the best break point.
-        const window = s.slice(0, maxLen);
+        const win = s.slice(0, maxLen);
         // 1. Sentence-ending punctuation (highest priority)
-        const sentenceMatch = window.match(/[।.!?][^।.!?]*$/);
+        const sentenceMatch = win.match(/[।.!?][^।.!?]*$/);
         if (sentenceMatch && sentenceMatch.index !== undefined) {
-            const idx = sentenceMatch.index + 1; // include the punctuation
-            if (idx >= 30) return idx;
+            const idx = sentenceMatch.index + 1;
+            if (idx >= 40) return idx;
         }
         // 2. Mid-sentence punctuation / newlines
         const midPunct = Math.max(
-            window.lastIndexOf('\n'),
-            window.lastIndexOf(';'),
-            window.lastIndexOf(','),
-            window.lastIndexOf(':'),
+            win.lastIndexOf('\n'),
+            win.lastIndexOf(';'),
+            win.lastIndexOf(','),
+            win.lastIndexOf(':'),
         );
-        if (midPunct >= 30) return midPunct + 1;
+        if (midPunct >= 40) return midPunct + 1;
         // 3. Word boundary
-        const space = window.lastIndexOf(' ');
-        if (space >= 30) return space + 1;
+        const space = win.lastIndexOf(' ');
+        if (space >= 40) return space + 1;
         // 4. Hard cut
         return maxLen;
     };
@@ -185,22 +157,21 @@ export const speakText = async (
         return null;
     }
 
-    // ROBUSTNESS: Cancel any existing speech immediately
+    // Cancel any existing speech and clear watchdog
+    clearWatchdog();
     try {
-        stopKeepAlive();
         window.speechSynthesis.cancel();
     } catch (e) {
         console.error("Error canceling speech:", e);
     }
 
-    // Strip HTML if present
     const cleanText = stripHtml(text);
     if (!cleanText.trim()) {
         if (onEnd) onEnd();
         return null;
     }
 
-    // Resolve preferred voice once (so all chunks share it)
+    // Resolve preferred voice
     let selectedVoice = voice || null;
     if (!selectedVoice) {
         try {
@@ -214,7 +185,7 @@ export const speakText = async (
         }
     }
 
-    // Bump session id; any in-flight chunk callbacks from older sessions become no-ops.
+    // Bump session id — old chunk callbacks become no-ops
     activeTtsSessionId += 1;
     const mySessionId = activeTtsSessionId;
 
@@ -228,12 +199,13 @@ export const speakText = async (
     let lastUtterance: SpeechSynthesisUtterance | null = null;
 
     const speakChunk = (idx: number) => {
-        if (mySessionId !== activeTtsSessionId) return; // cancelled
+        if (mySessionId !== activeTtsSessionId) { clearWatchdog(); return; }
         if (idx >= chunks.length) {
-            stopKeepAlive();
+            clearWatchdog();
             if (onEnd) onEnd();
             return;
         }
+
         const u = new SpeechSynthesisUtterance(chunks[idx]);
         if (selectedVoice) {
             u.voice = selectedVoice;
@@ -244,62 +216,91 @@ export const speakText = async (
         u.rate = rate;
         u.pitch = 1.0;
 
+        // Set a watchdog: if onend/onerror don't fire within MAX_CHUNK_SECS, force-advance.
+        const armWatchdog = () => {
+            clearWatchdog();
+            watchdogTimer = setTimeout(() => {
+                if (mySessionId !== activeTtsSessionId) return;
+                console.warn(`TTS watchdog fired for chunk ${idx} — forcing advance`);
+                try { window.speechSynthesis.cancel(); } catch (_) {}
+                // Small delay to let cancel flush, then go to next chunk
+                setTimeout(() => speakChunk(idx + 1), 200);
+            }, MAX_CHUNK_SECS * 1000);
+        };
+
         u.onstart = () => {
             if (mySessionId !== activeTtsSessionId) return;
-            startKeepAlive();
+            armWatchdog(); // reset watchdog on each chunk start
             if (!firstStartFired) {
                 firstStartFired = true;
                 if (onStart) onStart();
             }
         };
+
         u.onend = () => {
-            if (mySessionId !== activeTtsSessionId) return;
-            // Move to the next chunk after a tiny gap so engines (esp. Android WebView)
-            // don't drop it. We don't fire the user's onEnd until everything is done.
-            setTimeout(() => speakChunk(idx + 1), 30);
+            if (mySessionId !== activeTtsSessionId) { clearWatchdog(); return; }
+            clearWatchdog();
+            // Small gap (50ms) between chunks — enough for the engine to reset without losing state
+            setTimeout(() => speakChunk(idx + 1), 50);
         };
+
         u.onerror = (e: any) => {
-            const err = e?.error || '';
-            if (err !== 'interrupted' && err !== 'canceled') {
-                console.error('Speech Error (TTS):', err || e);
-            }
-            // If cancelled or interrupted, the new session will handle onEnd.
+            const err = (e?.error || '') as string;
+            // Always clear watchdog on any error event
+            clearWatchdog();
+
             if (mySessionId !== activeTtsSessionId) return;
-            // For real errors mid-stream, try to continue with the next chunk so
-            // a single failed segment doesn't stop the whole reading.
-            if (err && err !== 'interrupted' && err !== 'canceled') {
-                setTimeout(() => speakChunk(idx + 1), 30);
-            } else {
-                stopKeepAlive();
-                if (onEnd) onEnd();
+
+            if (err === 'interrupted' || err === 'canceled') {
+                // This chunk was cancelled by our own stopSpeech — just stop cleanly.
+                // Do NOT advance to next chunk; new session will handle it.
+                return;
             }
+
+            if (err === 'network') {
+                // Temporary network issue — retry same chunk once after a short delay
+                console.warn(`TTS network error on chunk ${idx}, retrying...`);
+                setTimeout(() => speakChunk(idx), 300);
+                return;
+            }
+
+            // Any other real error: skip to next chunk so one bad segment doesn't kill the whole read
+            console.error('Speech Error (TTS):', err || e);
+            setTimeout(() => speakChunk(idx + 1), 100);
         };
 
         lastUtterance = u;
         try {
             window.speechSynthesis.speak(u);
-            if (window.speechSynthesis.paused) {
-                window.speechSynthesis.resume();
-            }
+            // On some Android WebViews the utterance can silently queue but not start.
+            // If onstart hasn't fired within 3s, trigger watchdog early.
+            setTimeout(() => {
+                if (mySessionId !== activeTtsSessionId) return;
+                if (!firstStartFired) {
+                    // Force resume in case synthesis is paused
+                    try {
+                        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+                    } catch (_) {}
+                }
+            }, 3000);
         } catch (e) {
             console.error('Speech Synthesis Failed:', e);
+            clearWatchdog();
             if (mySessionId !== activeTtsSessionId) return;
-            // Try the next chunk so one bad segment doesn't kill the read.
-            setTimeout(() => speakChunk(idx + 1), 30);
+            setTimeout(() => speakChunk(idx + 1), 100);
         }
     };
 
-    // Android WebView / Chrome Workaround: small delay so cancel() flushes.
-    setTimeout(() => speakChunk(0), 50);
+    // Longer initial delay (120ms) to ensure cancel() fully flushes before first chunk
+    setTimeout(() => speakChunk(0), 120);
 
     return lastUtterance;
 };
 
 export const stopSpeech = () => {
     if ('speechSynthesis' in window) {
-        // Invalidate any in-flight chunked session so queued onend handlers stop chaining.
         activeTtsSessionId += 1;
-        stopKeepAlive();
+        clearWatchdog();
         try { window.speechSynthesis.cancel(); } catch (e) {}
     }
 };

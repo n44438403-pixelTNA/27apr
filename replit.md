@@ -36,6 +36,27 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
 - Removed MonthlyMarksheet full-screen rendering trigger
 - Removed "Premium Revision Hub" feature banner from AI Hub event slides
 
+## Recent Changes (Apr 27 — Session 2)
+- **TTS fix — reads full notes now (not just 2 lines)**:
+  - `MAX_CHUNK_LENGTH` increased from 180 → 500 chars. Fewer chunk-chain links = far fewer failure points, especially on Android WebView / Chrome.
+  - Initial delay before first chunk raised 50ms → 100ms; inter-chunk gap raised 30ms → 80ms for more reliable sequencing.
+  - `onerror` handler for `"interrupted"` / `"canceled"` errors now retries the **same chunk** (with 150ms delay) instead of calling `onEnd()`. Fixes a bug where Chrome's keepAlive pause/resume triggered `onerror` → premature topic advancement.
+  - All other real errors now skip to the next chunk instead of stopping entirely.
+- **Admin code generation PERMISSION_DENIED fixed** (`AdminDashboard.tsx`):
+  - `generateCodes` now writes to **Firestore first** (`setDoc`) — admin has guaranteed `create` permission via Firestore rules.
+  - Falls back to RTDB if Firestore fails; also mirrors to RTDB after Firestore success for fast reads.
+  - Added `setDoc` import from firebase/firestore.
+- **Redeem "Connection Error" fixed** (`RedeemSection.tsx`):
+  - `saveUserToLive` is now wrapped in its own try/catch so a cloud-sync failure doesn't abort the redeem and show "Connection Error".
+  - Reward is saved to localStorage first (always succeeds), then synced to cloud best-effort.
+  - Outer catch now gives specific messages: Permission Error / Network Error / generic.
+- **GK page TTS — "Read All" button added** (`StudentDashboard.tsx`):
+  - New "Read All" button in the Daily GK page header. Reads all GK entries (Q+A) sequentially in one continuous TTS pass using the improved chunked speakText engine.
+  - Stop button appears when reading; Back button also stops TTS on close.
+- **Home page UI — premium button design** (`StudentDashboard.tsx`):
+  - Class selection buttons: thicker accent bar (3px), larger class number (text-3xl), "Tap to open" hint, stronger shadows.
+  - Competition/Govt. Exams button: full gradient card with colored trophy icon, subtitle text, hover animation.
+
 ## Recent Changes (Apr 27)
 - **Lucent viewer now uses the same reader as Speedy notes** (`ChunkedNotesReader`):
   - The custom `SpeakButton` + manual chained-onEnd toolbar inside the Lucent page-wise viewer was replaced with `<ChunkedNotesReader />`, the exact component Speedy/homework notes use. This gives Lucent the proven topic-by-topic split, per-topic highlight, "Read All" / "Read from here" pills, and chunked TTS that already works reliably.

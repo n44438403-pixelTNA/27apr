@@ -12,10 +12,12 @@ interface Props {
   autoStart?: boolean;
   /** Fires after the last topic has finished being read aloud. */
   onComplete?: () => void;
+  /** When true, hides the sticky "Read All" top bar (use when parent renders controls externally). */
+  hideTopBar?: boolean;
 }
 
 
-export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete }) => {
+export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, hideTopBar }) => {
   const topics = useMemo(() => splitIntoTopics(content), [content]);
 
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
@@ -133,8 +135,6 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
       <div className="space-y-1.5">
         {topics.map((topic, idx) => {
           const isActive = isReading && activeIdx === idx;
-          // Insert a "Read from here" pill every 6 topics (i.e. on indices 5, 11, 17, ...)
-          const showChunkAnchor = (idx + 1) % 6 === 0 && idx + 1 < topics.length;
           return (
             <React.Fragment key={`tp-${idx}`}>
               <div
@@ -177,19 +177,6 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                 )}
               </div>
 
-              {/* Chunk anchor: another Read All button every 6 topics */}
-              {showChunkAnchor && (
-                <div className="flex items-center gap-2 my-3">
-                  <div className="flex-1 h-px bg-slate-200" />
-                  <button
-                    onClick={() => (isReading ? stopAll() : startFromIndex(idx + 1))}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 active:scale-95 transition"
-                  >
-                    {isReading ? <><Square size={11} /> Stop</> : <><Volume2 size={11} /> Read from here</>}
-                  </button>
-                  <div className="flex-1 h-px bg-slate-200" />
-                </div>
-              )}
             </React.Fragment>
           );
         })}

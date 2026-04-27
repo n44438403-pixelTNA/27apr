@@ -552,6 +552,137 @@ button {
     border-color: #1e40af !important;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   DARK MODE & BLUE MODE — COMPREHENSIVE READABILITY FIXES
+   Covers all colored tint backgrounds, text, borders & buttons.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── DARK MODE (black theme) ── */
+
+/* Colored backgrounds → deep dark equivalents */
+.dark-mode [class*="bg-indigo-50"], .dark-mode [class*="bg-indigo-100"] { background-color: #1e1b4b !important; }
+.dark-mode [class*="bg-blue-50"],   .dark-mode [class*="bg-blue-100"]   { background-color: #172554 !important; }
+.dark-mode [class*="bg-sky-50"],    .dark-mode [class*="bg-sky-100"]    { background-color: #082f49 !important; }
+.dark-mode [class*="bg-cyan-50"],   .dark-mode [class*="bg-cyan-100"]   { background-color: #083344 !important; }
+.dark-mode [class*="bg-teal-50"],   .dark-mode [class*="bg-teal-100"]   { background-color: #042f2e !important; }
+.dark-mode [class*="bg-emerald-50"],.dark-mode [class*="bg-emerald-100"]{ background-color: #064e3b !important; }
+.dark-mode [class*="bg-green-50"],  .dark-mode [class*="bg-green-100"]  { background-color: #052e16 !important; }
+.dark-mode [class*="bg-yellow-50"], .dark-mode [class*="bg-yellow-100"] { background-color: #422006 !important; }
+.dark-mode [class*="bg-amber-50"],  .dark-mode [class*="bg-amber-100"]  { background-color: #451a03 !important; }
+.dark-mode [class*="bg-orange-50"], .dark-mode [class*="bg-orange-100"] { background-color: #431407 !important; }
+.dark-mode [class*="bg-red-50"],    .dark-mode [class*="bg-red-100"]    { background-color: #450a0a !important; }
+.dark-mode [class*="bg-rose-50"],   .dark-mode [class*="bg-rose-100"]   { background-color: #4c0519 !important; }
+.dark-mode [class*="bg-pink-50"],   .dark-mode [class*="bg-pink-100"]   { background-color: #500724 !important; }
+.dark-mode [class*="bg-fuchsia-50"],.dark-mode [class*="bg-fuchsia-100"]{ background-color: #4a044e !important; }
+.dark-mode [class*="bg-purple-50"], .dark-mode [class*="bg-purple-100"] { background-color: #3b0764 !important; }
+.dark-mode [class*="bg-violet-50"], .dark-mode [class*="bg-violet-100"] { background-color: #2e1065 !important; }
+.dark-mode [class*="bg-slate-200"], .dark-mode [class*="bg-slate-300"]  { background-color: #1e293b !important; }
+
+/* Colored text → lighter readable versions */
+.dark-mode [class*="text-indigo-700"],.dark-mode [class*="text-indigo-800"],.dark-mode [class*="text-indigo-900"] { color: #a5b4fc !important; }
+.dark-mode [class*="text-blue-700"],  .dark-mode [class*="text-blue-800"],  .dark-mode [class*="text-blue-900"]   { color: #93c5fd !important; }
+.dark-mode [class*="text-sky-700"],   .dark-mode [class*="text-sky-800"],   .dark-mode [class*="text-sky-900"]    { color: #7dd3fc !important; }
+.dark-mode [class*="text-teal-700"],  .dark-mode [class*="text-teal-800"],  .dark-mode [class*="text-teal-900"]   { color: #5eead4 !important; }
+.dark-mode [class*="text-emerald-700"],.dark-mode [class*="text-emerald-800"],.dark-mode [class*="text-emerald-900"] { color: #6ee7b7 !important; }
+.dark-mode [class*="text-green-700"], .dark-mode [class*="text-green-800"], .dark-mode [class*="text-green-900"]  { color: #86efac !important; }
+.dark-mode [class*="text-yellow-700"],.dark-mode [class*="text-yellow-800"],.dark-mode [class*="text-yellow-900"] { color: #fde68a !important; }
+.dark-mode [class*="text-amber-700"], .dark-mode [class*="text-amber-800"], .dark-mode [class*="text-amber-900"]  { color: #fcd34d !important; }
+.dark-mode [class*="text-orange-700"],.dark-mode [class*="text-orange-800"],.dark-mode [class*="text-orange-900"] { color: #fdba74 !important; }
+.dark-mode [class*="text-red-700"],   .dark-mode [class*="text-red-800"],   .dark-mode [class*="text-red-900"]    { color: #fca5a5 !important; }
+.dark-mode [class*="text-rose-700"],  .dark-mode [class*="text-rose-800"],  .dark-mode [class*="text-rose-900"]   { color: #fda4af !important; }
+.dark-mode [class*="text-pink-700"],  .dark-mode [class*="text-pink-800"],  .dark-mode [class*="text-pink-900"]   { color: #f9a8d4 !important; }
+.dark-mode [class*="text-purple-700"],.dark-mode [class*="text-purple-800"],.dark-mode [class*="text-purple-900"] { color: #d8b4fe !important; }
+.dark-mode [class*="text-violet-700"],.dark-mode [class*="text-violet-800"],.dark-mode [class*="text-violet-900"] { color: #c4b5fd !important; }
+
+/* Colored borders → darker versions */
+.dark-mode [class*="border-indigo-200"],.dark-mode [class*="border-indigo-300"] { border-color: #3730a3 !important; }
+.dark-mode [class*="border-blue-200"],  .dark-mode [class*="border-blue-300"]   { border-color: #1d4ed8 !important; }
+.dark-mode [class*="border-emerald-200"],.dark-mode [class*="border-emerald-300"]{ border-color: #059669 !important; }
+.dark-mode [class*="border-green-200"], .dark-mode [class*="border-green-300"]  { border-color: #16a34a !important; }
+.dark-mode [class*="border-rose-200"],  .dark-mode [class*="border-rose-300"]   { border-color: #be123c !important; }
+.dark-mode [class*="border-amber-200"], .dark-mode [class*="border-amber-300"]  { border-color: #d97706 !important; }
+.dark-mode [class*="border-purple-200"],.dark-mode [class*="border-purple-300"] { border-color: #7c3aed !important; }
+.dark-mode [class*="border-orange-200"],.dark-mode [class*="border-orange-300"] { border-color: #ea580c !important; }
+.dark-mode [class*="border-slate-100"], .dark-mode [class*="border-slate-200"]  { border-color: #334155 !important; }
+
+/* Solid colored buttons remain visible — keep their bg, just ensure text is white */
+.dark-mode [class*="bg-indigo-500"], .dark-mode [class*="bg-indigo-600"] { color: #ffffff !important; }
+.dark-mode [class*="bg-blue-500"],   .dark-mode [class*="bg-blue-600"]   { color: #ffffff !important; }
+.dark-mode [class*="bg-emerald-500"],.dark-mode [class*="bg-emerald-600"]{ color: #ffffff !important; }
+.dark-mode [class*="bg-green-500"],  .dark-mode [class*="bg-green-600"]  { color: #ffffff !important; }
+.dark-mode [class*="bg-rose-500"],   .dark-mode [class*="bg-rose-600"]   { color: #ffffff !important; }
+.dark-mode [class*="bg-purple-500"], .dark-mode [class*="bg-purple-600"] { color: #ffffff !important; }
+.dark-mode [class*="bg-orange-500"], .dark-mode [class*="bg-orange-600"] { color: #ffffff !important; }
+.dark-mode [class*="bg-amber-500"],  .dark-mode [class*="bg-amber-600"]  { color: #ffffff !important; }
+
+/* Fixed overlay pages in dark mode */
+.dark-mode .fixed.inset-0.bg-slate-50,
+.dark-mode .fixed.inset-0.bg-white { background-color: #0a0a0a !important; }
+
+/* Sticky header bars inside overlays */
+.dark-mode .sticky.bg-white { background-color: #111111 !important; border-color: #333333 !important; }
+
+/* ── BLUE MODE (dark navy theme) ── */
+
+/* Colored backgrounds → navy-tinted equivalents */
+.dark-mode-blue [class*="bg-indigo-50"], .dark-mode-blue [class*="bg-indigo-100"] { background-color: #1e2557 !important; }
+.dark-mode-blue [class*="bg-blue-50"],   .dark-mode-blue [class*="bg-blue-100"]   { background-color: #172554 !important; }
+.dark-mode-blue [class*="bg-sky-50"],    .dark-mode-blue [class*="bg-sky-100"]    { background-color: #0c2a49 !important; }
+.dark-mode-blue [class*="bg-cyan-50"],   .dark-mode-blue [class*="bg-cyan-100"]   { background-color: #0a2e3a !important; }
+.dark-mode-blue [class*="bg-teal-50"],   .dark-mode-blue [class*="bg-teal-100"]   { background-color: #0a2e2d !important; }
+.dark-mode-blue [class*="bg-emerald-50"],.dark-mode-blue [class*="bg-emerald-100"]{ background-color: #0a3028 !important; }
+.dark-mode-blue [class*="bg-green-50"],  .dark-mode-blue [class*="bg-green-100"]  { background-color: #082918 !important; }
+.dark-mode-blue [class*="bg-yellow-50"], .dark-mode-blue [class*="bg-yellow-100"] { background-color: #2c1a08 !important; }
+.dark-mode-blue [class*="bg-amber-50"],  .dark-mode-blue [class*="bg-amber-100"]  { background-color: #2c1a06 !important; }
+.dark-mode-blue [class*="bg-orange-50"], .dark-mode-blue [class*="bg-orange-100"] { background-color: #2c1208 !important; }
+.dark-mode-blue [class*="bg-red-50"],    .dark-mode-blue [class*="bg-red-100"]    { background-color: #2c0a0a !important; }
+.dark-mode-blue [class*="bg-rose-50"],   .dark-mode-blue [class*="bg-rose-100"]   { background-color: #300a14 !important; }
+.dark-mode-blue [class*="bg-pink-50"],   .dark-mode-blue [class*="bg-pink-100"]   { background-color: #300a18 !important; }
+.dark-mode-blue [class*="bg-purple-50"], .dark-mode-blue [class*="bg-purple-100"] { background-color: #250838 !important; }
+.dark-mode-blue [class*="bg-violet-50"], .dark-mode-blue [class*="bg-violet-100"] { background-color: #1e083d !important; }
+.dark-mode-blue [class*="bg-slate-200"], .dark-mode-blue [class*="bg-slate-300"]  { background-color: #1e293b !important; }
+
+/* Colored text → lighter readable versions */
+.dark-mode-blue [class*="text-indigo-700"],.dark-mode-blue [class*="text-indigo-800"],.dark-mode-blue [class*="text-indigo-900"] { color: #a5b4fc !important; }
+.dark-mode-blue [class*="text-blue-700"],  .dark-mode-blue [class*="text-blue-800"],  .dark-mode-blue [class*="text-blue-900"]   { color: #93c5fd !important; }
+.dark-mode-blue [class*="text-teal-700"],  .dark-mode-blue [class*="text-teal-800"],  .dark-mode-blue [class*="text-teal-900"]   { color: #5eead4 !important; }
+.dark-mode-blue [class*="text-emerald-700"],.dark-mode-blue [class*="text-emerald-800"],.dark-mode-blue [class*="text-emerald-900"] { color: #6ee7b7 !important; }
+.dark-mode-blue [class*="text-green-700"], .dark-mode-blue [class*="text-green-800"], .dark-mode-blue [class*="text-green-900"]  { color: #86efac !important; }
+.dark-mode-blue [class*="text-yellow-700"],.dark-mode-blue [class*="text-yellow-800"],.dark-mode-blue [class*="text-yellow-900"] { color: #fde68a !important; }
+.dark-mode-blue [class*="text-amber-700"], .dark-mode-blue [class*="text-amber-800"], .dark-mode-blue [class*="text-amber-900"]  { color: #fcd34d !important; }
+.dark-mode-blue [class*="text-orange-700"],.dark-mode-blue [class*="text-orange-800"],.dark-mode-blue [class*="text-orange-900"] { color: #fdba74 !important; }
+.dark-mode-blue [class*="text-red-700"],   .dark-mode-blue [class*="text-red-800"],   .dark-mode-blue [class*="text-red-900"]    { color: #fca5a5 !important; }
+.dark-mode-blue [class*="text-rose-700"],  .dark-mode-blue [class*="text-rose-800"],  .dark-mode-blue [class*="text-rose-900"]   { color: #fda4af !important; }
+.dark-mode-blue [class*="text-pink-700"],  .dark-mode-blue [class*="text-pink-800"],  .dark-mode-blue [class*="text-pink-900"]   { color: #f9a8d4 !important; }
+.dark-mode-blue [class*="text-purple-700"],.dark-mode-blue [class*="text-purple-800"],.dark-mode-blue [class*="text-purple-900"] { color: #d8b4fe !important; }
+.dark-mode-blue [class*="text-violet-700"],.dark-mode-blue [class*="text-violet-800"],.dark-mode-blue [class*="text-violet-900"] { color: #c4b5fd !important; }
+
+/* Colored borders */
+.dark-mode-blue [class*="border-indigo-200"],.dark-mode-blue [class*="border-indigo-300"] { border-color: #4338ca !important; }
+.dark-mode-blue [class*="border-blue-200"],  .dark-mode-blue [class*="border-blue-300"]   { border-color: #2563eb !important; }
+.dark-mode-blue [class*="border-emerald-200"],.dark-mode-blue [class*="border-emerald-300"]{ border-color: #059669 !important; }
+.dark-mode-blue [class*="border-green-200"], .dark-mode-blue [class*="border-green-300"]  { border-color: #16a34a !important; }
+.dark-mode-blue [class*="border-rose-200"],  .dark-mode-blue [class*="border-rose-300"]   { border-color: #e11d48 !important; }
+.dark-mode-blue [class*="border-amber-200"], .dark-mode-blue [class*="border-amber-300"]  { border-color: #d97706 !important; }
+.dark-mode-blue [class*="border-purple-200"],.dark-mode-blue [class*="border-purple-300"] { border-color: #7c3aed !important; }
+.dark-mode-blue [class*="border-slate-100"], .dark-mode-blue [class*="border-slate-200"]  { border-color: #334155 !important; }
+
+/* Fixed overlay pages in blue mode */
+.dark-mode-blue .fixed.inset-0.bg-slate-50,
+.dark-mode-blue .fixed.inset-0.bg-white { background-color: #0f172a !important; }
+
+/* Sticky header bars inside overlays */
+.dark-mode-blue .sticky.bg-white { background-color: #1e293b !important; border-color: #334155 !important; }
+
+/* Ensure solid colored buttons have white text */
+.dark-mode-blue [class*="bg-indigo-500"], .dark-mode-blue [class*="bg-indigo-600"] { color: #ffffff !important; }
+.dark-mode-blue [class*="bg-blue-500"],   .dark-mode-blue [class*="bg-blue-600"]   { color: #ffffff !important; }
+.dark-mode-blue [class*="bg-emerald-500"],.dark-mode-blue [class*="bg-emerald-600"]{ color: #ffffff !important; }
+.dark-mode-blue [class*="bg-green-500"],  .dark-mode-blue [class*="bg-green-600"]  { color: #ffffff !important; }
+.dark-mode-blue [class*="bg-rose-500"],   .dark-mode-blue [class*="bg-rose-600"]   { color: #ffffff !important; }
+.dark-mode-blue [class*="bg-purple-500"], .dark-mode-blue [class*="bg-purple-600"] { color: #ffffff !important; }
+.dark-mode-blue [class*="bg-orange-500"], .dark-mode-blue [class*="bg-orange-600"] { color: #ffffff !important; }
+
 /* Force landscape view for premium slides if required */
 @media screen and (orientation: portrait) {
     .premium-slides-container iframe {
