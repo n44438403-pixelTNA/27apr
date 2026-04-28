@@ -148,6 +148,17 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     };
   }, []);
 
+  // Stop TTS when user switches browser tab
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden && isReadingRef.current) {
+        stopAll();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [stopAll]);
+
   // Reset position only when content actually changes after the first render
   // (so a fresh mount with restored initialIndex isn't immediately wiped).
   const contentChangedOnce = useRef(false);

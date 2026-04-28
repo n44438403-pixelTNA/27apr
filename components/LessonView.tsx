@@ -21,6 +21,7 @@ import { DownloadOptionsModal } from './DownloadOptionsModal';
 import { downloadAsMHTML } from '../utils/downloadUtils';
 import { saveOfflineItem } from '../utils/offlineStorage';
 
+
 interface Props {
   content: LessonContent | null;
   subject: Subject;
@@ -77,6 +78,28 @@ export const LessonView: React.FC<Props> = ({
   // Auto-enable TTS for Premium Instant Explanation Mode
   const [autoReadEnabled, setAutoReadEnabled] = useState(settings?.isAutoTtsEnabled || instantExplanation || false);
   const BATCH_SIZE = 1;
+
+  // Per-topic star system (same storage as StudentDashboard: nst_starred_notes_v1)
+  const noteKey = chapter?.id ? `chapter_${chapter.id}` : '';
+  type StarEntry = { id: string; noteKey: string; topicText: string; savedAt: string };
+  const [lessonStars, setLessonStars] = useState<StarEntry[]>(() => {
+    try {
+      const raw = localStorage.getItem('nst_starred_notes_v1');
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
+  const isTopicStarred = (text: string) =>
+    lessonStars.some(n => n.noteKey === noteKey && n.topicText === text);
+  const toggleTopicStar = (text: string) => {
+    setLessonStars(prev => {
+      const exists = prev.find(n => n.noteKey === noteKey && n.topicText === text);
+      const updated = exists
+        ? prev.filter(n => !(n.noteKey === noteKey && n.topicText === text))
+        : [...prev, { id: Date.now().toString(), noteKey, topicText: text, savedAt: new Date().toISOString() }];
+      try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+  };
 
   const submitRef = useRef<() => void>();
 
@@ -267,7 +290,6 @@ export const LessonView: React.FC<Props> = ({
                           >
                               <Globe size={14} /> {language === 'English' ? 'Hindi (हिंदी)' : 'English'}
                           </button>
-
                           <button onClick={onBack} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><X size={20} /></button>
                       </div>
                   </header>
@@ -278,6 +300,9 @@ export const LessonView: React.FC<Props> = ({
                               language={language === 'Hindi' ? 'hi-IN' : 'en-US'}
                               topBarLabel={content.title}
                               className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100"
+                              noteKey={noteKey}
+                              isStarred={isTopicStarred}
+                              onStarToggle={toggleTopicStar}
                           />
                           {isStreaming && (
                             <div className="flex items-center gap-2 text-slate-600 mt-4 animate-pulse pb-4">
@@ -385,7 +410,6 @@ export const LessonView: React.FC<Props> = ({
                       >
                           <Globe size={14} /> {language === 'English' ? 'Hindi (हिंदी)' : 'English'}
                       </button>
-
                       <button onClick={onBack} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><X size={20} /></button>
                   </div>
               </header>
@@ -395,6 +419,9 @@ export const LessonView: React.FC<Props> = ({
                           content={content.content || ''}
                           language={language === 'Hindi' ? 'hi-IN' : 'en-US'}
                           topBarLabel={content.title}
+                          noteKey={noteKey}
+                          isStarred={isTopicStarred}
+                          onStarToggle={toggleTopicStar}
                       />
                       {isStreaming && (
                         <div className="flex items-center gap-2 text-slate-600 mt-4 animate-pulse">

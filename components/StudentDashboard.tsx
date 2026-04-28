@@ -77,6 +77,7 @@ import {
   Trophy,
   ShoppingBag,
   ArrowRight,
+  ArrowLeft,
   Video,
   Youtube,
   Home,
@@ -120,8 +121,10 @@ import {
   GraduationCap,
   Newspaper,
   PlusCircle,
+  Search,
 } from "lucide-react";
 import { speakText, stopSpeech } from "../utils/textToSpeech";
+import { hapticLight, hapticMedium, hapticStrong } from "../utils/haptic";
 import { splitIntoTopics } from "../utils/notesSplitter";
 import { SubjectSelection } from "./SubjectSelection";
 import { BannerCarousel } from "./BannerCarousel";
@@ -1068,6 +1071,8 @@ export const StudentDashboard: React.FC<Props> = ({
   const [recentHw, setRecentHw] = useState<RecentHwEntry[]>([]);
   const [recentLucent, setRecentLucent] = useState<RecentLucentEntry[]>([]);
   const [homeResumeFilter, setHomeResumeFilter] = useState<'all' | 'chapter' | 'sarSangrah' | 'speedy' | 'mcq' | 'lucent'>('all');
+  const [showHomeSearch, setShowHomeSearch] = useState(false);
+  const [homeSearchQuery, setHomeSearchQuery] = useState('');
   const [readingStreak, setReadingStreak] = useState<StreakInfo>({ current: 0, longest: 0, readToday: false });
   const [showStreakPopup, setShowStreakPopup] = useState(false);
   // When the user taps a "Today" subject banner card with multiple items, this picker shows the list.
@@ -3387,8 +3392,9 @@ export const StudentDashboard: React.FC<Props> = ({
     if (activeTab === "HOME") {
       return (
         <PullToRefresh onRefresh={() => window.location.reload()}>
-        <div className="space-y-4 pb-4">
+        <div className="flex flex-col gap-4 pb-4">
           {/* RESUME READING — page-wise (chapters + ALL homework notes), sorted by latest activity */}
+          <div className="order-1">
           {(() => {
             const HW_SUBJECT_META: Record<string, { label: string; chipBg: string; chipText: string; barFrom: string; barTo: string; btnBg: string; btnHover: string }> = {
               sarSangrah:           { label: 'Sar Sangrah',           chipBg: 'bg-rose-100',    chipText: 'text-rose-700',    barFrom: 'from-rose-500',    barTo: 'to-pink-500',     btnBg: 'bg-rose-600',    btnHover: 'hover:bg-rose-700' },
@@ -3665,8 +3671,10 @@ export const StudentDashboard: React.FC<Props> = ({
               </div>
             );
           })()}
+          </div>
 
           {/* SUBJECT-WISE PROGRESS */}
+          <div className="order-3">
           {(() => {
             // Group recentChapters by subject
             type SubjectStat = {
@@ -3754,7 +3762,9 @@ export const StudentDashboard: React.FC<Props> = ({
               </div>
             );
           })()}
+          </div>
 
+          <div className="order-2">
           <DashboardSectionWrapper
             id="section_main_actions"
             label="Main Actions"
@@ -3771,22 +3781,85 @@ export const StudentDashboard: React.FC<Props> = ({
                     <span className="truncate">Select Class</span>
                   </h3>
 
-                  {/* BOARD SELECTION TOGGLE - inline */}
-                  <div className="flex items-center p-1 bg-slate-100 rounded-xl shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* BOARD SELECTION TOGGLE - inline */}
+                    <div className="flex items-center p-1 bg-slate-100 rounded-xl">
+                      <button
+                        onClick={() => setActiveSessionBoard("CBSE")}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeSessionBoard !== "BSEB" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                      >
+                        CBSE
+                      </button>
+                      <button
+                        onClick={() => setActiveSessionBoard("BSEB")}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeSessionBoard === "BSEB" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                      >
+                        BSEB
+                      </button>
+                    </div>
+                    {/* SEARCH ICON */}
                     <button
-                      onClick={() => setActiveSessionBoard("CBSE")}
-                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeSessionBoard !== "BSEB" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                      onClick={() => { setShowHomeSearch(s => !s); setHomeSearchQuery(''); }}
+                      className={`w-8 h-8 flex items-center justify-center rounded-xl transition-all active:scale-90 ${showHomeSearch ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:text-blue-600 hover:bg-blue-50'}`}
+                      title="Chapter search karo"
                     >
-                      CBSE
-                    </button>
-                    <button
-                      onClick={() => setActiveSessionBoard("BSEB")}
-                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${activeSessionBoard === "BSEB" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-                    >
-                      BSEB
+                      <Search size={15} />
                     </button>
                   </div>
                 </div>
+
+                {/* CHAPTER SEARCH BAR */}
+                {showHomeSearch && (
+                  <div className="mb-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <div className="relative mb-2">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400 pointer-events-none" />
+                      <input
+                        autoFocus
+                        type="text"
+                        value={homeSearchQuery}
+                        onChange={e => setHomeSearchQuery(e.target.value)}
+                        placeholder="Chapter ya Subject search karo..."
+                        className="w-full pl-8 pr-8 py-2.5 text-xs font-semibold bg-blue-50 border border-blue-200 rounded-xl text-slate-700 placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-all"
+                      />
+                      {homeSearchQuery && (
+                        <button
+                          onClick={() => setHomeSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-blue-400 hover:text-blue-600"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+                    {homeSearchQuery.trim() && (() => {
+                      const q = homeSearchQuery.trim().toLowerCase();
+                      const results = recentChapters.filter(e =>
+                        e.chapter?.title?.toLowerCase().includes(q) ||
+                        e.subject?.name?.toLowerCase().includes(q)
+                      ).slice(0, 8);
+                      return results.length === 0 ? (
+                        <p className="text-center text-xs text-slate-400 font-bold py-3">Koi chapter nahi mila.</p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+                          {results.map(entry => (
+                            <button
+                              key={entry.id}
+                              onClick={() => { openRecentChapter(entry); setShowHomeSearch(false); setHomeSearchQuery(''); }}
+                              className="w-full flex items-center gap-3 bg-white border border-blue-100 hover:border-blue-300 rounded-xl px-3 py-2.5 text-left transition-all active:scale-[0.98] shadow-sm"
+                            >
+                              <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                                <BookOpen size={14} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-black text-slate-800 truncate">{entry.chapter?.title}</p>
+                                <p className="text-[10px] font-bold text-slate-400 truncate">{entry.subject?.name} · {entry.classLevel} · {entry.board}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
 
                 {/* CONTENT TYPE PREFERENCE */}
                 <div className="mb-4">
@@ -3916,8 +3989,8 @@ export const StudentDashboard: React.FC<Props> = ({
                                 return (
                                   <button
                                     key={c}
-                                    onClick={() => goToClass(c)}
-                                    className={`group relative w-full py-5 px-3 rounded-2xl bg-white border-2 ${t.border} text-slate-700 font-black ${t.hoverBorder} active:scale-[0.97] transition-all text-center text-base flex flex-col items-center justify-center gap-1 overflow-hidden shadow-md hover:shadow-lg`}
+                                    onClick={() => { hapticStrong(); goToClass(c); }}
+                                    className={`group relative w-full py-5 px-3 min-h-[110px] rounded-2xl bg-white border-2 ${t.border} text-slate-700 font-black ${t.hoverBorder} hover:scale-[1.03] active:scale-[1.05] transition-all duration-150 text-center text-base flex flex-col items-center justify-center gap-1 overflow-hidden shadow-md hover:shadow-lg`}
                                   >
                                     {/* Top accent bar — thicker & rounded */}
                                     <span className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${t.accent} rounded-t-2xl`} />
@@ -4009,6 +4082,7 @@ export const StudentDashboard: React.FC<Props> = ({
               )}
             </div>
           </DashboardSectionWrapper>
+          </div>
         </div>
         </PullToRefresh>
       );
@@ -6180,28 +6254,6 @@ export const StudentDashboard: React.FC<Props> = ({
                   );
                 })()}
 
-                {/* CREATE / PRACTICE MCQ CARD */}
-                <div className="pt-1">
-                  <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest px-1 mb-3">
-                    Khud banao
-                  </h4>
-                  <button
-                    onClick={() => { setShowHomeworkHistory(false); setShowCompMcqHub(true); setCompMcqTab('CREATE'); }}
-                    className="w-full bg-white rounded-2xl border border-emerald-200 shadow-sm overflow-hidden hover:shadow-md active:scale-[0.99] transition-all text-left"
-                  >
-                    <div className="h-1.5 w-full bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400" />
-                    <div className="p-4 flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                        <CheckSquare size={22} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-black text-slate-800 text-sm">MCQ Banao / Practice Karo</p>
-                        <p className="text-[11px] text-slate-500 font-medium">Apna khud ka MCQ set banao aur practice karo</p>
-                      </div>
-                      <ChevronRight size={20} className="text-emerald-500 shrink-0" />
-                    </div>
-                  </button>
-                </div>
 
                 {/* HOMEWORK MCQ HISTORY (separate from regular MCQ) */}
                 {(() => {
@@ -7774,6 +7826,7 @@ export const StudentDashboard: React.FC<Props> = ({
             };
 
             const switchToLogicalTab = (target: LogicalTab) => {
+              hapticLight();
               try { stopSpeech(); } catch (_) {}
               setSpeakingId(null);
               if (target === currentLogicalTab) {

@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LessonContent, User, SystemSettings, UsageHistoryEntry } from '../types';
-import { BookOpen, Calendar, ChevronDown, ChevronUp, Trash2, Search, FileText, CheckCircle2, Lock, AlertCircle, Folder, Download, ChevronRight, Play, X as XIcon } from 'lucide-react';
+import { BookOpen, Calendar, ChevronDown, ChevronUp, Trash2, Search, FileText, CheckCircle2, Lock, AlertCircle, Folder, Download, ChevronRight, Play, X as XIcon, Star, Volume2, Square } from 'lucide-react';
+import { speakText, stopSpeech } from '../utils/textToSpeech';
 import { LessonView } from './LessonView';
 import { saveUserToLive, getChapterData } from '../firebase';
 import { storage } from '../utils/storage';
@@ -19,7 +20,7 @@ interface Props {
     user: User;
     onUpdateUser: (u: User) => void;
     settings?: SystemSettings;
-    initialTab?: 'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY';
+    initialTab?: 'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY' | 'STARRED';
     /** Resume a chapter from a "Continue Reading" entry — closes History and opens the chapter. */
     onResumeRecentChapter?: (entry: RecentChapterEntry) => void;
     /** Resume a homework note (Sar Sangrah / Speedy / etc). */
@@ -29,7 +30,7 @@ interface Props {
 }
 
 export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, initialTab, onResumeRecentChapter, onResumeRecentHw, onResumeRecentLucent }) => {
-  const [activeTab, setActiveTab] = useState<'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY'>(initialTab || 'READING');
+  const [activeTab, setActiveTab] = useState<'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY' | 'STARRED'>(initialTab || 'READING');
 
   // Continue Reading state — combined chapter + homework + lucent + fully-read map.
   const [recentChapters, setRecentChapters] = useState<RecentChapterEntry[]>([]);
@@ -55,6 +56,87 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
 
   // USAGE HISTORY STATE (ACTIVITY LOG)
   const [usageLog, setUsageLog] = useState<UsageHistoryEntry[]>([]);
+
+  // STARRED NOTES STATE — unified storage (nst_starred_notes_v1)
+  type StarEntry = { id: string; noteKey: string; topicText: string; savedAt: string };
+  const [starredNotes, setStarredNotes] = useState<StarEntry[]>([]);
+  const [starSearch, setStarSearch] = useState('');
+
+  // TTS playback for Important Notes revision
+  const [isReadingStars, setIsReadingStars] = useState(false);
+  const [readingStarIdx, setReadingStarIdx] = useState<number | null>(null);
+  const isReadingStarsRef = useRef(false);
+  const playStarFromRef = useRef<(notes: StarEntry[], idx: number) => void>();
+
+  playStarFromRef.current = (notes: StarEntry[], idx: number) => {
+    if (!isReadingStarsRef.current || idx >= notes.length) {
+      isReadingStarsRef.current = false;
+      setIsReadingStars(false);
+      setReadingStarIdx(null);
+      return;
+    }
+    setReadingStarIdx(idx);
+    speakText(
+      notes[idx].topicText,
+      undefined,
+      1.0,
+      'hi-IN',
+      undefined,
+      () => { if (isReadingStarsRef.current) playStarFromRef.current?.(notes, idx + 1); }
+    );
+  };
+
+  const startStarRead = useCallback((notes: StarEntry[]) => {
+    if (notes.length === 0) return;
+    stopSpeech();
+    isReadingStarsRef.current = true;
+    setIsReadingStars(true);
+    setReadingStarIdx(null);
+    setTimeout(() => playStarFromRef.current?.(notes, 0), 80);
+  }, []);
+
+  const stopStarRead = useCallback(() => {
+    isReadingStarsRef.current = false;
+    setIsReadingStars(false);
+    setReadingStarIdx(null);
+    stopSpeech();
+  }, []);
+
+  // Stop TTS when tab is hidden or component unmounts
+  useEffect(() => {
+    const onVisibility = () => { if (document.hidden) stopStarRead(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      stopStarRead();
+    };
+  }, [stopStarRead]);
+
+  const loadStarredNotes = () => {
+    try {
+      const raw = localStorage.getItem('nst_starred_notes_v1');
+      setStarredNotes(raw ? JSON.parse(raw) : []);
+    } catch { setStarredNotes([]); }
+  };
+
+  const removeStarEntry = (id: string) => {
+    try {
+      const raw = localStorage.getItem('nst_starred_notes_v1');
+      const all: StarEntry[] = raw ? JSON.parse(raw) : [];
+      const updated = all.filter(n => n.id !== id);
+      localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated));
+      setStarredNotes(updated);
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (activeTab === 'STARRED') {
+      loadStarredNotes();
+      setStarSearch('');
+    } else {
+      stopStarRead();
+    }
+  }, [activeTab, stopStarRead]);
 
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean, message: string}>({isOpen: false, message: ''});
   const [confirmConfig, setConfirmConfig] = useState<{isOpen: boolean, message: string, onConfirm: () => void}>({
@@ -335,6 +417,12 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
             >
                 Sub History
             </button>
+            <button
+                onClick={() => setActiveTab('STARRED')}
+                className={`flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1 ${activeTab === 'STARRED' ? 'bg-amber-500 shadow text-white' : 'text-amber-600 hover:text-amber-700'}`}
+            >
+                <Star size={11} fill={activeTab === 'STARRED' ? 'white' : 'currentColor'} /> Important Notes
+            </button>
         </div>
 
         {activeTab === 'READING' && (
@@ -364,6 +452,134 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 <OfflineDownloads onBack={() => setActiveTab('SAVED')} hideHeader={true} user={user} settings={settings} />
             </div>
         )}
+
+        {activeTab === 'STARRED' && (() => {
+            const filtered = starredNotes.filter(n =>
+                n.topicText?.toLowerCase().includes(starSearch.toLowerCase())
+            );
+            return (
+            <div className="animate-in fade-in duration-300 space-y-3">
+                {/* Header row */}
+                <div className="flex items-center gap-2 mb-1">
+                    <Star size={16} className="text-amber-500" fill="currentColor" />
+                    <h4 className="text-sm font-black text-slate-700">Important Notes</h4>
+                    <span className="ml-2 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                        {starSearch ? `${filtered.length}/${starredNotes.length}` : starredNotes.length}
+                    </span>
+                    {filtered.length > 0 && (
+                        <button
+                            onClick={() => isReadingStars ? stopStarRead() : startStarRead(filtered)}
+                            className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all active:scale-95 ${
+                                isReadingStars
+                                    ? 'bg-red-100 text-red-600 border border-red-200 hover:bg-red-200'
+                                    : 'bg-amber-500 text-white hover:bg-amber-600 shadow-sm'
+                            }`}
+                        >
+                            {isReadingStars
+                                ? <><Square size={11} fill="currentColor" /> Stop</>
+                                : <><Volume2 size={12} /> Read All</>
+                            }
+                        </button>
+                    )}
+                </div>
+
+                {/* Reading progress bar */}
+                {isReadingStars && readingStarIdx !== null && filtered.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                        <Volume2 size={13} className="text-amber-500 animate-pulse shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex justify-between mb-1">
+                                <span className="text-[10px] font-black text-amber-700">Padh raha hai...</span>
+                                <span className="text-[10px] font-bold text-amber-600">{readingStarIdx + 1}/{filtered.length}</span>
+                            </div>
+                            <div className="h-1 bg-amber-100 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-amber-400 rounded-full transition-all duration-500"
+                                    style={{ width: `${((readingStarIdx + 1) / filtered.length) * 100}%` }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {starredNotes.length > 0 && (
+                    <div className="relative">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-400 pointer-events-none" />
+                        <input
+                            type="text"
+                            value={starSearch}
+                            onChange={e => { setStarSearch(e.target.value); stopStarRead(); }}
+                            placeholder="Notes mein search karo..."
+                            className="w-full pl-8 pr-8 py-2.5 text-xs font-semibold bg-amber-50 border border-amber-200 rounded-xl text-slate-700 placeholder-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-300 transition-all"
+                        />
+                        {starSearch && (
+                            <button
+                                onClick={() => { setStarSearch(''); stopStarRead(); }}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-400 hover:text-amber-600 transition-colors"
+                            >
+                                <XIcon size={14} />
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {starredNotes.length === 0 ? (
+                    <div className="text-center py-14 bg-amber-50 rounded-2xl border border-amber-100">
+                        <Star size={40} className="text-amber-300 mx-auto mb-3" />
+                        <p className="font-bold text-slate-600 text-sm">Koi important note nahi mili.</p>
+                        <p className="text-xs text-slate-400 mt-1">Note padhte waqt ⭐ dabao — yahan dikhega.</p>
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <div className="text-center py-10 bg-amber-50 rounded-2xl border border-amber-100">
+                        <Search size={32} className="text-amber-300 mx-auto mb-3" />
+                        <p className="font-bold text-slate-600 text-sm">Koi match nahi mila.</p>
+                        <p className="text-xs text-slate-400 mt-1">Doosra word try karo.</p>
+                    </div>
+                ) : (
+                    filtered.map((note, idx) => {
+                        const isCurrentlyReading = isReadingStars && readingStarIdx === idx;
+                        return (
+                        <div
+                            key={note.id}
+                            className={`rounded-2xl p-4 shadow-sm flex items-start gap-3 transition-all duration-300 ${
+                                isCurrentlyReading
+                                    ? 'bg-amber-50 border-2 border-amber-400 shadow-amber-100'
+                                    : 'bg-white border border-amber-200'
+                            }`}
+                        >
+                            <button
+                                onClick={() => { if (isCurrentlyReading) stopStarRead(); else startStarRead(filtered.slice(idx)); }}
+                                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                                    isCurrentlyReading
+                                        ? 'bg-amber-400 text-white animate-pulse'
+                                        : 'bg-amber-100 text-amber-500 hover:bg-amber-200'
+                                }`}
+                            >
+                                {isCurrentlyReading
+                                    ? <Square size={14} fill="currentColor" />
+                                    : <Volume2 size={14} />
+                                }
+                            </button>
+                            <div className="flex-1 min-w-0">
+                                <p className={`font-bold text-sm leading-snug ${isCurrentlyReading ? 'text-amber-800' : 'text-slate-800'}`}>{note.topicText}</p>
+                                <p className="text-[10px] text-amber-500 font-bold mt-1">
+                                    {note.savedAt ? new Date(note.savedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => removeStarEntry(note.id)}
+                                className="p-1.5 rounded-full text-amber-400 hover:text-red-400 hover:bg-red-50 transition-colors shrink-0 mt-0.5"
+                                title="Remove"
+                            >
+                                <XIcon size={14} />
+                            </button>
+                        </div>
+                        );
+                    })
+                )}
+            </div>
+            );
+        })()}
 
         {activeTab === 'ACTIVITY' && (
             <div className="space-y-4">
