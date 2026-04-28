@@ -34,6 +34,7 @@ import {
 import { ALL_FEATURES } from "../utils/featureRegistry";
 import { checkFeatureAccess } from "../utils/permissionUtils";
 import { downloadAsMHTML } from "../utils/downloadUtils";
+import { saveRecentHomework, getRecentHomeworks, removeRecentHomework, getRecentChapters, removeRecentChapter, saveRecentLucent, getRecentLucent, removeRecentLucent, markNoteFullyRead, getFullyReadMap, markReadToday, getReadingStreak, getReadDates, getBestReadingDay, getTodayItemCount, type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type StreakInfo, type BestDay } from "../utils/recentReads";
 import { SubscriptionEngine } from "../utils/engines/subscriptionEngine";
 import { RewardEngine } from "../utils/engines/rewardEngine";
 import { Button } from "./ui/Button"; // Design System
@@ -167,6 +168,115 @@ import jsPDF from "jspdf";
 // @ts-ignore
 import html2canvas from "html2canvas";
 
+/**
+ * Lightweight swipe-to-dismiss wrapper for "Continue Reading" cards.
+ * - Swipe LEFT > 80px → calls onDismiss().
+ * - Anything less → smoothly snaps back.
+ * Uses direct DOM transform during the gesture so we don't trigger React
+ * re-renders on every touchmove. Touch only — desktop click stays normal.
+ *
+ * Safe note: cards inside this wrapper must not contain `position: fixed`
+ * descendants (transforms break fixed positioning). The Continue Reading
+ * cards never contain fixed elements, so this is safe here.
+ */
+const SwipeToDismiss: React.FC<{
+  onDismiss: () => void;
+  className?: string;
+  threshold?: number;
+  children: React.ReactNode;
+}> = ({ onDismiss, className, threshold = 80, children }) => {
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+  const startXRef = React.useRef<number | null>(null);
+  const startYRef = React.useRef<number | null>(null);
+  const lockedRef = React.useRef<'horizontal' | 'vertical' | null>(null);
+  const draggingRef = React.useRef(false);
+
+  const reset = (animate: boolean) => {
+    const el = wrapRef.current;
+    if (!el) return;
+    el.style.transition = animate ? 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease' : 'none';
+    el.style.transform = 'translateX(0)';
+    el.style.opacity = '1';
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    startXRef.current = e.touches[0].clientX;
+    startYRef.current = e.touches[0].clientY;
+    lockedRef.current = null;
+    draggingRef.current = true;
+    if (wrapRef.current) wrapRef.current.style.transition = 'none';
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!draggingRef.current || startXRef.current === null || startYRef.current === null) return;
+    const dx = e.touches[0].clientX - startXRef.current;
+    const dy = e.touches[0].clientY - startYRef.current;
+    if (lockedRef.current === null) {
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        lockedRef.current = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+      }
+    }
+    if (lockedRef.current !== 'horizontal') return;
+    // Only allow leftward dismiss; rightward gets a slight rubber-band.
+    const tx = dx < 0 ? dx : dx * 0.25;
+    const el = wrapRef.current;
+    if (el) {
+      el.style.transform = `translateX(${tx}px)`;
+      el.style.opacity = String(Math.max(0.4, 1 - Math.min(1, Math.abs(tx) / 220)));
+    }
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    const startX = startXRef.current;
+    startXRef.current = null;
+    startYRef.current = null;
+    if (lockedRef.current !== 'horizontal' || startX === null) {
+      reset(true);
+      lockedRef.current = null;
+      return;
+    }
+    lockedRef.current = null;
+    const endX = e.changedTouches[0].clientX;
+    const dx = endX - startX;
+    if (dx <= -threshold) {
+      const el = wrapRef.current;
+      if (el) {
+        el.style.transition = 'transform 200ms ease-out, opacity 200ms ease-out';
+        el.style.transform = `translateX(-${(el.offsetWidth || 320) + 20}px)`;
+        el.style.opacity = '0';
+      }
+      window.setTimeout(() => onDismiss(), 200);
+      return;
+    }
+    reset(true);
+  };
+
+  const onTouchCancel = () => {
+    draggingRef.current = false;
+    startXRef.current = null;
+    startYRef.current = null;
+    lockedRef.current = null;
+    reset(true);
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      className={className}
+      style={{ touchAction: 'pan-y', willChange: 'transform' }}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchCancel}
+    >
+      {children}
+    </div>
+  );
+};
+
 interface Props {
   user: User;
   dailyStudySeconds: number; // Received from Global App
@@ -293,9 +403,28 @@ export const StudentDashboard: React.FC<Props> = ({
   const [activeSessionClass, setActiveSessionClass] = useState<string | null>(
     null,
   );
-  const [activeSessionBoard, setActiveSessionBoard] = useState<
+  // Persisted board choice — once the student manually picks CBSE/BSEB, that
+  // choice becomes their default on the next visit (per device).
+  const BOARD_CHOICE_KEY = "nst_board_choice_v1";
+  const [activeSessionBoard, _setActiveSessionBoardRaw] = useState<
     "CBSE" | "BSEB" | null
-  >(null);
+  >(() => {
+    try {
+      const v = localStorage.getItem(BOARD_CHOICE_KEY);
+      if (v === "CBSE" || v === "BSEB") return v;
+    } catch {}
+    return null;
+  });
+  const setActiveSessionBoard = (v: "CBSE" | "BSEB" | null) => {
+    _setActiveSessionBoardRaw(v);
+    try {
+      if (v === "CBSE" || v === "BSEB") {
+        localStorage.setItem(BOARD_CHOICE_KEY, v);
+      } else {
+        localStorage.removeItem(BOARD_CHOICE_KEY);
+      }
+    } catch {}
+  };
   const [showBoardPromptForClass, setShowBoardPromptForClass] = useState<
     string | null
   >(null);
@@ -853,6 +982,13 @@ export const StudentDashboard: React.FC<Props> = ({
   // Page-wise notes viewer for admin-added Lucent lessons
   const [lucentNoteViewer, setLucentNoteViewer] = useState<LucentNoteEntry | null>(null);
   const [lucentPageIndex, setLucentPageIndex] = useState(0);
+  // Live scroll % for the Lucent reader — drives the gradient progress bar at
+  // the very top, mirroring Sar Sangrah / Speedy. Reset on page change.
+  const [lucentScrollProgress, setLucentScrollProgress] = useState(0);
+  const lucentScrollContainerRef = useRef<HTMLDivElement>(null);
+  // Reset scroll % whenever the user moves to a different Lucent page or
+  // closes the viewer entirely.
+  useEffect(() => { setLucentScrollProgress(0); }, [lucentPageIndex, lucentNoteViewer?.id]);
   // Local Auto-Read & Sync state for the Lucent viewer (mirrors LessonView pattern).
   // Initialised from settings.isAutoTtsEnabled but stays local to this view.
   const [lucentAutoSync, setLucentAutoSync] = useState<boolean>(!!settings?.isAutoTtsEnabled);
@@ -892,11 +1028,30 @@ export const StudentDashboard: React.FC<Props> = ({
   const hwScrollContainerRef = useRef<HTMLDivElement>(null);
   const hwScrollSaveTimerRef = useRef<number | null>(null);
   const hwScrollRestoredRef = useRef(false);
+  // Resume reading lists
+  const [recentChapters, setRecentChapters] = useState<RecentChapterEntry[]>([]);
+  const [recentHw, setRecentHw] = useState<RecentHwEntry[]>([]);
+  const [homeResumeFilter, setHomeResumeFilter] = useState<'all' | 'chapter' | 'sarSangrah' | 'speedy' | 'mcq'>('all');
+  const [readingStreak, setReadingStreak] = useState<StreakInfo>({ current: 0, longest: 0, readToday: false });
+  const [showStreakPopup, setShowStreakPopup] = useState(false);
   // When the user taps a "Today" subject banner card with multiple items, this picker shows the list.
   const [hwTodayPickerSub, setHwTodayPickerSub] = useState<string | null>(null);
   // True when the active homework was opened directly from the Homework page (today banner / today picker).
   // In that case, Back should jump straight back to the Homework page (not into the Year/Month hierarchy).
   const [hwOpenedDirect, setHwOpenedDirect] = useState<boolean>(false);
+  // Where to send the user when they press Back from a directly-opened homework note.
+  // 'HOMEWORK' (default) returns to the Homework history page.
+  // 'HOME' returns to the Home tab — used when the note was opened from a Continue Reading
+  // card on Home, so empty/quick exits don't dump the user on the Homework tab.
+  const [hwOpenedFrom, setHwOpenedFrom] = useState<'HOMEWORK' | 'HOME'>('HOMEWORK');
+  // Same idea for chapter content (PDF / Video / Audio / MCQ players): if the chapter
+  // was opened from a Continue Reading card on Home, Back from the player should return
+  // straight to Home — not to the chapter list inside Courses.
+  const [chapterOpenedFrom, setChapterOpenedFrom] = useState<'COURSES' | 'HOME'>('COURSES');
+  // Per-tab ripple counter: incremented on tap of any non-HOME bottom-nav tab,
+  // forces a remount of the ripple <span> so its CSS animation re-fires.
+  // We deliberately skip HOME so the home tab feels clean and minimal.
+  const [navTapKeys, setNavTapKeys] = useState<Record<string, number>>({});
   const [speakingId, setSpeakingId] = useState<string | null>(null);
 
   // ---- HOMEWORK MCQ FULL-SCREEN PLAYER STATE ----
@@ -907,6 +1062,134 @@ export const StudentDashboard: React.FC<Props> = ({
   const playerScrollRefs = React.useRef<Record<number, HTMLDivElement | null>>({});
   const playerIsReadingAllRef = React.useRef<boolean>(false);
   React.useEffect(() => { playerIsReadingAllRef.current = playerIsReadingAll; }, [playerIsReadingAll]);
+
+  // Refresh "Resume reading" lists and streak when navigation context changes
+  React.useEffect(() => {
+    setRecentChapters(getRecentChapters());
+    setRecentHw(getRecentHomeworks());
+    setReadingStreak(getReadingStreak());
+  }, [activeTab, showHomeworkHistory, hwActiveHwId, contentViewStep]);
+
+  // Open a previously-read chapter (from "Resume reading" card on Home)
+  const openRecentChapter = (entry: RecentChapterEntry) => {
+    setSelectedSubject(entry.subject as any);
+    setSelectedChapter(entry.chapter);
+    setContentViewStep('PLAYER');
+    // Remember that this chapter came from Home so Back returns there.
+    setChapterOpenedFrom(currentLogicalTab === 'HOME' ? 'HOME' : 'COURSES');
+    onTabChange((entry.contentType || 'PDF') as any);
+    setFullScreen(true);
+  };
+
+  // Open a previously-read Lucent page (from History → Continue Reading).
+  // Looks up the original LucentNoteEntry from settings and restores the page index.
+  const openRecentLucent = (entry: RecentLucentEntry) => {
+    const allLucent = (settings?.lucentNotes || []) as any[];
+    const found = allLucent.find(l => l.id === entry.lucentId);
+    if (!found) {
+      showAlert('Yeh Lucent page ab uplabdh nahi hai.', 'ERROR');
+      return;
+    }
+    setLucentNoteViewer(found);
+    setLucentPageIndex(Math.min(entry.pageIndex, (found.pages?.length || 1) - 1));
+  };
+
+  // Closes any in-progress note reader BEFORE switching bottom-nav tabs.
+  // Whatever the user was reading is saved to Continue Reading first so they
+  // can resume later. Returns true if something was closed.
+  // `targetTabId` is the bottom-nav tab the user is switching to — used so we
+  // don't tear down the Homework overlay when they're going back to Homework.
+  const closeReadersBeforeNavSwitch = (targetTabId?: string): boolean => {
+    let closedSomething = false;
+    // Lucent Book viewer — also save current page to Continue Reading.
+    if (lucentNoteViewer) {
+      try {
+        const lv = lucentNoteViewer;
+        const pageIdx = Math.min(Math.max(0, lucentPageIndex), Math.max(0, (lv.pages?.length || 1) - 1));
+        const page = lv.pages?.[pageIdx];
+        if (page) {
+          const recId = `lucent_${lv.id}_${pageIdx}`;
+          saveRecentLucent({
+            id: recId,
+            lucentId: lv.id,
+            lessonTitle: lv.lessonTitle,
+            subject: lv.subject,
+            pageIndex: pageIdx,
+            pageNo: page.pageNo,
+            totalPages: lv.pages.length,
+            scrollY: 0,
+            scrollPct: 30, // partial — they were reading but didn't finish
+          });
+          markReadToday(recId);
+        }
+      } catch {}
+      try { stopSpeech(); } catch {}
+      setLucentAutoSync(false);
+      setLucentNoteViewer(null);
+      closedSomething = true;
+    }
+    // Homework MCQ player
+    if (homeworkPlayerHwId) {
+      try { closeHomeworkPlayer(); } catch {}
+      closedSomething = true;
+    }
+    // Homework note reader (Sar Sangrah / Speedy / etc) — auto-save already
+    // happens on scroll, so just close the active note. The scroll-position is
+    // already persisted via the onScroll handler.
+    if (showHomeworkHistory && hwActiveHwId) {
+      setHwActiveHwId(null);
+      closedSomething = true;
+    }
+    // If user is leaving the Homework area entirely, also tear down the
+    // Homework history overlay so the new tab's content actually shows.
+    if (showHomeworkHistory && targetTabId && targetTabId !== 'HOMEWORK') {
+      setShowHomeworkHistory(false);
+      closedSomething = true;
+    }
+    return closedSomething;
+  };
+
+  // Open a previously-read homework note (from "Resume reading" card on Homework page)
+  const openRecentHw = (entry: RecentHwEntry) => {
+    const subId = entry.targetSubject || (entry.hw && entry.hw.targetSubject) || 'sarSangrah';
+    const SUBJECT_LABELS: Record<string, string> = {
+      mcq: 'MCQ Practice',
+      sarSangrah: 'Sar Sangrah',
+      speedySocialScience: 'Speedy Social Science',
+      speedyScience: 'Speedy Science',
+    };
+    const hw = entry.hw;
+    const hasNotes = !!(hw && hw.notes && hw.notes.trim());
+    const hasMcq = !!(hw && hw.parsedMcqs && hw.parsedMcqs.length > 0);
+    if (hasNotes && hasMcq) setHwViewMode('notes'); // Resume into notes
+    else if (hasMcq) setHwViewMode('mcq');
+    else setHwViewMode('notes');
+
+    setShowHomeworkHistory(false);
+    setHwTodayPickerSub(null);
+    setHomeworkSubjectView(subId);
+    setSelectedSubject({ id: subId, name: SUBJECT_LABELS[subId] || subId, icon: 'Book', color: 'bg-slate-100' } as any);
+    setContentViewStep('SUBJECTS');
+    setLucentCategoryView(false);
+    setHwYear(null);
+    setHwMonth(null);
+    setHwWeek(null);
+    setHwActiveHwId(entry.id);
+    setHwOpenedDirect(true);
+    // Remember where the user came from so Back returns there (not Homework by default).
+    setHwOpenedFrom(currentLogicalTab === 'HOME' ? 'HOME' : 'HOMEWORK');
+    onTabChange('COURSES');
+  };
+
+  const dismissRecentChapter = (id: string) => {
+    removeRecentChapter(id);
+    setRecentChapters(getRecentChapters());
+  };
+
+  const dismissRecentHw = (id: string) => {
+    removeRecentHomework(id);
+    setRecentHw(getRecentHomeworks());
+  };
 
   // Restore last-read scroll position for the active homework note
   React.useEffect(() => {
@@ -1889,6 +2172,17 @@ export const StudentDashboard: React.FC<Props> = ({
           document.exitFullscreen().catch(err => console.log(err));
       }
       if (contentViewStep === "PLAYER") {
+        // If the chapter was opened from a Continue Reading card on Home,
+        // Back should go straight back to Home — not to the chapter list inside Courses.
+        if (chapterOpenedFrom === 'HOME') {
+          setContentViewStep("SUBJECTS");
+          setFullScreen(false);
+          setSelectedChapter(null);
+          setChapterOpenedFrom('COURSES');
+          onTabChange("HOME");
+          setCurrentLogicalTab('HOME');
+          return;
+        }
         setContentViewStep("CHAPTERS");
         setFullScreen(false);
         // If we entered the player via PDF/VIDEO/AUDIO/MCQ tab,
@@ -1938,14 +2232,43 @@ export const StudentDashboard: React.FC<Props> = ({
 
       const goBack = () => {
         if (hwActiveHwId) {
-          // If the note was opened directly from the Homework page (today banner / today picker),
-          // Back should jump straight back to that page — not into the Year/Month hierarchy.
+          // Before tearing down the active note, persist whatever the student
+          // has read so it shows up under "Continue Reading" — even if they
+          // opened the note and pressed Back without scrolling far.
+          try {
+            const cur = filteredHw.find(h => (h.id || '') === hwActiveHwId);
+            if (cur && cur.id && cur.notes && cur.notes.trim()) {
+              saveRecentHomework({
+                id: cur.id,
+                scrollY: 0,
+                scrollPct: Math.max(2, Math.round(hwScrollProgress)),
+                title: cur.title || 'Homework',
+                date: cur.date,
+                targetSubject: cur.targetSubject,
+                hw: cur,
+              });
+              markReadToday(cur.id);
+            }
+          } catch {}
+          // Stop any in-progress speech so it doesn't keep playing in the background.
+          try { stopSpeech(); } catch {}
+          // If the note was opened directly (today banner / today picker / Home Continue Reading),
+          // Back should jump back to where the user came FROM — not into the Year/Month hierarchy.
           if (hwOpenedDirect) {
+            const cameFromHome = hwOpenedFrom === 'HOME';
             setHwActiveHwId(null);
             setHwOpenedDirect(false);
+            setHwOpenedFrom('HOMEWORK');
             setHomeworkSubjectView(null);
             setSelectedSubject(null);
-            setShowHomeworkHistory(true);
+            if (cameFromHome) {
+              // Return to Home tab cleanly.
+              setShowHomeworkHistory(false);
+              onTabChange('HOME');
+              setCurrentLogicalTab('HOME');
+            } else {
+              setShowHomeworkHistory(true);
+            }
             return;
           }
           setHwActiveHwId(null);
@@ -2036,6 +2359,20 @@ export const StudentDashboard: React.FC<Props> = ({
                   style={{ width: `${hwScrollProgress}%` }}
                 />
               </div>
+            )}
+            {/* Back to top FAB (notes mode, after scrolling 30%) */}
+            {effectiveMode === 'notes' && hwScrollProgress > 30 && (
+              <button
+                onClick={() => {
+                  const node = hwScrollContainerRef.current;
+                  if (node) node.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                aria-label="Back to top"
+                title="Back to top"
+                className="fixed bottom-5 right-5 z-[200] w-11 h-11 rounded-full bg-slate-800/85 hover:bg-slate-900 text-white shadow-xl backdrop-blur-md flex items-center justify-center active:scale-90 transition-all animate-in fade-in slide-in-from-bottom-2"
+              >
+                <ChevronRight size={22} className="-rotate-90" />
+              </button>
             )}
             {/* Sticky header */}
             <div className={`${theme.btn} text-white px-4 py-3 flex items-center gap-2 shrink-0`}>
@@ -2134,11 +2471,25 @@ export const StudentDashboard: React.FC<Props> = ({
                 if (hwScrollRestoredRef.current && activeHw.id && effectiveMode === 'notes') {
                   if (hwScrollSaveTimerRef.current) window.clearTimeout(hwScrollSaveTimerRef.current);
                   const yNow = t.scrollTop;
+                  const pctNow = pct;
                   const key = `nst_hw_scroll_${activeHw.id}`;
                   hwScrollSaveTimerRef.current = window.setTimeout(() => {
                     try {
-                      if (yNow > 20) localStorage.setItem(key, String(Math.round(yNow)));
-                      else localStorage.removeItem(key);
+                      if (yNow > 20) {
+                        localStorage.setItem(key, String(Math.round(yNow)));
+                        saveRecentHomework({
+                          id: activeHw.id!,
+                          scrollY: Math.round(yNow),
+                          scrollPct: Math.round(pctNow),
+                          title: activeHw.title || 'Homework',
+                          date: activeHw.date,
+                          targetSubject: activeHw.targetSubject,
+                          hw: activeHw,
+                        });
+                        markReadToday(activeHw.id!);
+                      } else {
+                        localStorage.removeItem(key);
+                      }
                     } catch {}
                   }, 400);
                 }
@@ -2173,6 +2524,36 @@ export const StudentDashboard: React.FC<Props> = ({
                           setHwNotePositions(prev =>
                             prev[activeHw.id!] === idx ? prev : { ...prev, [activeHw.id!]: idx }
                           );
+                        }}
+                        // The moment Read All / tap-to-read starts, save this note to
+                        // Continue Reading so it survives a tab switch (see nav handler).
+                        onReadingStart={() => {
+                          if (!activeHw.id) return;
+                          try {
+                            saveRecentHomework({
+                              id: activeHw.id,
+                              scrollY: 0,
+                              scrollPct: Math.max(2, Math.round(hwScrollProgress)),
+                              title: activeHw.title || 'Homework',
+                              date: activeHw.date,
+                              targetSubject: activeHw.targetSubject,
+                              hw: activeHw,
+                            });
+                            markReadToday(activeHw.id);
+                          } catch {}
+                        }}
+                        // When TTS finishes the LAST topic, mark this note as fully read
+                        // so the History page can show a green Done badge.
+                        onComplete={() => {
+                          if (!activeHw.id) return;
+                          try {
+                            markNoteFullyRead({
+                              id: activeHw.id,
+                              kind: 'hw',
+                              title: activeHw.title || 'Homework',
+                              subtitle: activeHw.targetSubject || 'Homework',
+                            });
+                          } catch {}
                         }}
                       />
                     </div>
@@ -2866,6 +3247,223 @@ export const StudentDashboard: React.FC<Props> = ({
       return (
         <PullToRefresh onRefresh={() => window.location.reload()}>
         <div className="space-y-4 pb-4">
+          {/* RESUME READING — page-wise (chapters + ALL homework notes), sorted by latest activity */}
+          {(() => {
+            const HW_SUBJECT_META: Record<string, { label: string; chipBg: string; chipText: string; barFrom: string; barTo: string; btnBg: string; btnHover: string }> = {
+              sarSangrah:           { label: 'Sar Sangrah',           chipBg: 'bg-rose-100',    chipText: 'text-rose-700',    barFrom: 'from-rose-500',    barTo: 'to-pink-500',     btnBg: 'bg-rose-600',    btnHover: 'hover:bg-rose-700' },
+              speedySocialScience:  { label: 'Speedy SST',            chipBg: 'bg-amber-100',   chipText: 'text-amber-700',   barFrom: 'from-amber-500',   barTo: 'to-orange-500',   btnBg: 'bg-amber-600',   btnHover: 'hover:bg-amber-700' },
+              speedyScience:        { label: 'Speedy Science',        chipBg: 'bg-emerald-100', chipText: 'text-emerald-700', barFrom: 'from-emerald-500', barTo: 'to-teal-500',     btnBg: 'bg-emerald-600', btnHover: 'hover:bg-emerald-700' },
+              mcq:                  { label: 'MCQ',                   chipBg: 'bg-violet-100',  chipText: 'text-violet-700',  barFrom: 'from-violet-500',  barTo: 'to-fuchsia-500',  btnBg: 'bg-violet-600',  btnHover: 'hover:bg-violet-700' },
+              other:                { label: 'Homework',              chipBg: 'bg-slate-100',   chipText: 'text-slate-700',   barFrom: 'from-slate-500',   barTo: 'to-slate-600',    btnBg: 'bg-slate-700',   btnHover: 'hover:bg-slate-800' },
+            };
+            type Merged =
+              | { kind: 'chapter'; ts: number; entry: RecentChapterEntry }
+              | { kind: 'hw';      ts: number; entry: RecentHwEntry };
+            const allMerged: Merged[] = [
+              ...recentChapters.map(e => ({ kind: 'chapter' as const, ts: e.ts, entry: e })),
+              ...recentHw.map(e => ({ kind: 'hw' as const, ts: e.ts, entry: e })),
+            ];
+            // Compute available filter counts (used to hide empty chips)
+            const counts = {
+              all: allMerged.length,
+              chapter: allMerged.filter(m => m.kind === 'chapter').length,
+              sarSangrah: allMerged.filter(m => m.kind === 'hw' && m.entry.targetSubject === 'sarSangrah').length,
+              speedy: allMerged.filter(m => m.kind === 'hw' && (m.entry.targetSubject === 'speedyScience' || m.entry.targetSubject === 'speedySocialScience')).length,
+              mcq: allMerged.filter(m => m.kind === 'hw' && m.entry.targetSubject === 'mcq').length,
+            };
+            const showFilterChips = settings?.showHomeResumeFilter !== false && allMerged.length >= 3;
+            const activeFilter = showFilterChips ? homeResumeFilter : 'all';
+            const filtered: Merged[] = allMerged.filter(m => {
+              if (activeFilter === 'all') return true;
+              if (activeFilter === 'chapter') return m.kind === 'chapter';
+              if (m.kind !== 'hw') return false;
+              if (activeFilter === 'sarSangrah') return m.entry.targetSubject === 'sarSangrah';
+              if (activeFilter === 'speedy') return m.entry.targetSubject === 'speedyScience' || m.entry.targetSubject === 'speedySocialScience';
+              if (activeFilter === 'mcq') return m.entry.targetSubject === 'mcq';
+              return true;
+            });
+            const merged: Merged[] = filtered.sort((a, b) => {
+              // Page-line sort: items with pageNo (Sar Sangrah / Speedy) sort by page number ascending,
+              // mixed in by their latest activity timestamp. Items without pageNo fall back to ts desc.
+              const pa = a.kind === 'hw' ? parseInt(a.entry.hw?.pageNo || '', 10) : NaN;
+              const pb = b.kind === 'hw' ? parseInt(b.entry.hw?.pageNo || '', 10) : NaN;
+              const aHasPage = !isNaN(pa);
+              const bHasPage = !isNaN(pb);
+              // If both have page numbers AND same target subject, sort by page number ascending
+              if (aHasPage && bHasPage && a.kind === 'hw' && b.kind === 'hw' && a.entry.targetSubject === b.entry.targetSubject) {
+                return pa - pb;
+              }
+              // Otherwise, latest activity first
+              return b.ts - a.ts;
+            }).slice(0, 8);
+            // Hide entire card only if there's nothing at all (filter empty states still show chips)
+            if (allMerged.length === 0) return null;
+            const FILTER_CHIPS: { key: typeof homeResumeFilter; label: string; emoji: string; count: number; activeBg: string; activeText: string }[] = [
+              { key: 'all',         label: 'All',          emoji: '📚', count: counts.all,        activeBg: 'bg-indigo-600',   activeText: 'text-white' },
+              { key: 'chapter',     label: 'Class Notes',  emoji: '📖', count: counts.chapter,    activeBg: 'bg-blue-600',     activeText: 'text-white' },
+              { key: 'sarSangrah',  label: 'Sar Sangrah',  emoji: '📕', count: counts.sarSangrah, activeBg: 'bg-rose-600',     activeText: 'text-white' },
+              { key: 'speedy',      label: 'Speedy',       emoji: '⚡', count: counts.speedy,     activeBg: 'bg-emerald-600',  activeText: 'text-white' },
+              { key: 'mcq',         label: 'MCQ',          emoji: '❓', count: counts.mcq,        activeBg: 'bg-violet-600',   activeText: 'text-white' },
+            ].filter(c => c.count > 0);
+            return (
+              <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 border border-indigo-100 rounded-3xl p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                      <BookOpen size={16} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Continue Reading</p>
+                      <p className="text-xs text-slate-500 font-medium truncate">Where you left off</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold text-indigo-600 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
+                    {merged.length}{activeFilter !== 'all' ? `/${allMerged.length}` : ''}
+                  </span>
+                </div>
+                {/* SUBJECT FILTER CHIP ROW (admin-toggleable, only if 3+ items) */}
+                {showFilterChips && FILTER_CHIPS.length > 1 && (
+                  <div className="flex gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-3 snap-x">
+                    {FILTER_CHIPS.map(c => {
+                      const isActive = activeFilter === c.key;
+                      return (
+                        <button
+                          key={c.key}
+                          onClick={() => setHomeResumeFilter(c.key)}
+                          className={`shrink-0 snap-start flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black transition-all active:scale-95 border ${
+                            isActive
+                              ? `${c.activeBg} ${c.activeText} border-transparent shadow-sm`
+                              : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span className="text-[12px] leading-none">{c.emoji}</span>
+                          <span className="leading-none">{c.label}</span>
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none ${
+                            isActive ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
+                          }`}>{c.count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {merged.length === 0 ? (
+                  <div className="bg-white border border-dashed border-indigo-200 rounded-2xl p-4 text-center">
+                    <p className="text-xs font-bold text-slate-500">Is filter me kuch nahi hai abhi.</p>
+                    <button
+                      onClick={() => setHomeResumeFilter('all')}
+                      className="mt-2 text-[11px] font-black text-indigo-600 underline"
+                    >
+                      Show all
+                    </button>
+                  </div>
+                ) : (
+                <div className="flex gap-3 overflow-x-auto -mx-1 px-1 pb-1 scrollbar-hide snap-x">
+                  {merged.map(item => {
+                    if (item.kind === 'chapter') {
+                      const entry = item.entry;
+                      return (
+                        <div
+                          key={`ch_${entry.id}`}
+                          className="relative shrink-0 w-56 snap-start bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-col gap-2 active:scale-[0.98] transition-transform"
+                        >
+                          <button
+                            onClick={(e) => { e.stopPropagation(); dismissRecentChapter(entry.id); }}
+                            className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
+                            aria-label="Remove"
+                            title="Remove"
+                          >
+                            <X size={12} />
+                          </button>
+                          <button
+                            onClick={() => openRecentChapter(entry)}
+                            className="text-left"
+                          >
+                            <p className="text-[9px] font-black text-indigo-600 uppercase tracking-widest truncate pr-6">
+                              Class {entry.classLevel} · {entry.subject?.name || 'Subject'}
+                            </p>
+                            <p className="text-sm font-black text-slate-800 leading-snug line-clamp-2 mt-1 pr-6">
+                              {entry.chapter?.title || 'Chapter'}
+                            </p>
+                          </button>
+                          <div className="mt-1">
+                            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
+                                style={{ width: `${Math.max(2, entry.scrollPct)}%` }}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[10px] text-slate-500 font-semibold">{entry.scrollPct}% read</span>
+                              <button
+                                onClick={() => openRecentChapter(entry)}
+                                className="text-[10px] font-black text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1 rounded-full flex items-center gap-1 active:scale-95 transition-all"
+                              >
+                                Resume <ChevronRight size={10} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    // homework note (Sar Sangrah / Speedy) — page-wise card
+                    const entry = item.entry;
+                    const meta = HW_SUBJECT_META[entry.targetSubject || ''] || HW_SUBJECT_META.sarSangrah;
+                    return (
+                      <div
+                        key={`hw_${entry.id}`}
+                        className="relative shrink-0 w-56 snap-start bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-col gap-2 active:scale-[0.98] transition-transform"
+                      >
+                        <button
+                          onClick={(e) => { e.stopPropagation(); dismissRecentHw(entry.id); }}
+                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
+                          aria-label="Remove"
+                          title="Remove"
+                        >
+                          <X size={12} />
+                        </button>
+                        <button
+                          onClick={() => openRecentHw(entry)}
+                          className="text-left"
+                        >
+                          <div className="flex items-center gap-1 flex-wrap pr-6">
+                            <span className={`inline-block text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${meta.chipBg} ${meta.chipText}`}>
+                              {meta.label}
+                            </span>
+                            {entry.hw?.pageNo && (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest bg-slate-800 text-white">
+                                📖 P.{entry.hw.pageNo}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm font-black text-slate-800 leading-snug line-clamp-2 mt-1 pr-6">
+                            {entry.title}
+                          </p>
+                        </button>
+                        <div className="mt-1">
+                          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full bg-gradient-to-r ${meta.barFrom} ${meta.barTo}`}
+                              style={{ width: `${Math.max(2, entry.scrollPct)}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between mt-1.5">
+                            <span className="text-[10px] text-slate-500 font-semibold">{entry.scrollPct}% read</span>
+                            <button
+                              onClick={() => openRecentHw(entry)}
+                              className={`text-[10px] font-black text-white ${meta.btnBg} ${meta.btnHover} px-2.5 py-1 rounded-full flex items-center gap-1 active:scale-95 transition-all`}
+                            >
+                              Resume <ChevronRight size={10} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                )}
+              </div>
+            );
+          })()}
           <DashboardSectionWrapper
             id="section_main_actions"
             label="Main Actions"
@@ -3318,6 +3916,13 @@ export const StudentDashboard: React.FC<Props> = ({
           user={user}
           onUpdateUser={handleUserUpdate}
           settings={settings}
+          onResumeRecentChapter={(e) => openRecentChapter(e)}
+          onResumeRecentHw={(e) => {
+            // Open the homework history overlay then load the specific note.
+            setShowHomeworkHistory(true);
+            openRecentHw(e);
+          }}
+          onResumeRecentLucent={(e) => openRecentLucent(e)}
         />
       );
     // DOWNLOADS is handled in the main render flow so bottom nav shows
@@ -4105,10 +4710,24 @@ export const StudentDashboard: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar justify-end pl-2 z-10 ml-auto">
-            {/* Streak Badge */}
-            <div className="flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-xs font-black bg-orange-500/20 text-orange-100 border border-orange-400/30 backdrop-blur-sm whitespace-nowrap shrink-0">
-              🔥 {user.streak || 0}
-            </div>
+            {/* Streak Badge — tap to see details */}
+            <button
+              onClick={() => setShowStreakPopup(v => !v)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-xs font-black border backdrop-blur-sm whitespace-nowrap shrink-0 active:scale-95 transition-all ${
+                readingStreak.readToday
+                  ? 'bg-orange-500/30 text-orange-50 border-orange-300/50 animate-pulse-slow'
+                  : readingStreak.current > 0
+                    ? 'bg-orange-500/15 text-orange-100 border-orange-400/30'
+                    : 'bg-white/15 text-white/80 border-white/25'
+              }`}
+              title={`Reading streak: ${readingStreak.current} day${readingStreak.current === 1 ? '' : 's'}`}
+            >
+              <span className={readingStreak.current >= 7 ? 'text-base' : ''}>
+                {readingStreak.readToday ? '🔥' : readingStreak.current > 0 ? '🔥' : '💤'}
+              </span>
+              <span>{readingStreak.current}</span>
+              {readingStreak.current >= 7 && <span className="text-[9px] ml-0.5">DAY</span>}
+            </button>
 
             {/* Credits */}
             <button
@@ -4176,6 +4795,154 @@ export const StudentDashboard: React.FC<Props> = ({
           </div>
         </div>
       </div>
+
+      {/* STREAK DETAIL POPUP (anchored under top bar) */}
+      {showStreakPopup && !isFullscreenMode && !isTopBarHidden && (() => {
+        const dates = getReadDates().slice(0, 14);
+        const bestDay = getBestReadingDay();
+        const todayCount = getTodayItemCount();
+        const fmt = (s: string) => {
+          try {
+            return new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+          } catch { return s; }
+        };
+        const fmtFull = (s: string) => {
+          try {
+            return new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+          } catch { return s; }
+        };
+        const todayStr = (() => {
+          const d = new Date();
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        })();
+        // Build last-7-days indicator
+        const last7: { dateStr: string; label: string; read: boolean }[] = [];
+        const dateSet = new Set(getReadDates());
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setHours(0, 0, 0, 0);
+          d.setDate(d.getDate() - i);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          const ds = `${y}-${m}-${day}`;
+          last7.push({
+            dateStr: ds,
+            label: ['S','M','T','W','T','F','S'][d.getDay()],
+            read: dateSet.has(ds),
+          });
+        }
+        return (
+          <>
+            <div
+              className="fixed inset-0 z-[110] bg-transparent"
+              onClick={() => setShowStreakPopup(false)}
+            />
+            <div className="absolute top-full right-3 z-[120] mt-2 w-[280px] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-top-2">
+              <div className={`p-4 ${readingStreak.readToday ? 'bg-gradient-to-br from-orange-500 to-red-500' : 'bg-gradient-to-br from-slate-700 to-slate-800'} text-white`}>
+                <div className="flex items-center gap-3">
+                  <div className="text-3xl">{readingStreak.readToday ? '🔥' : readingStreak.current > 0 ? '🔥' : '💤'}</div>
+                  <div className="flex-1">
+                    <p className="text-3xl font-black leading-none">{readingStreak.current}</p>
+                    <p className="text-[11px] font-bold uppercase tracking-widest opacity-90 mt-0.5">
+                      day{readingStreak.current === 1 ? '' : 's'} streak
+                    </p>
+                  </div>
+                  {readingStreak.longest > 0 && (
+                    <div className="text-right border-l border-white/30 pl-3">
+                      <p className="text-[9px] font-black uppercase tracking-widest opacity-80">Best</p>
+                      <p className="text-xl font-black">{readingStreak.longest}d</p>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] font-medium opacity-90 mt-2">
+                  {readingStreak.readToday
+                    ? `Aaj ${todayCount > 0 ? todayCount : ''} ${todayCount > 0 ? 'note' + (todayCount === 1 ? '' : 's') + ' padh liye' : 'padh liya'} — keep it up!`
+                    : readingStreak.current > 0
+                      ? "Aaj bhi padho streak banaye rakhne ke liye"
+                      : "Aaj koi note kholo aur naya streak start karo"}
+                </p>
+              </div>
+              {/* TODAY + BEST DAY stats */}
+              {(todayCount > 0 || bestDay) && (
+                <div className="px-3 pt-3 pb-1 bg-white grid grid-cols-2 gap-2">
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-2.5">
+                    <p className="text-[9px] font-black text-blue-700 uppercase tracking-widest">Today</p>
+                    <p className="text-xl font-black text-blue-800 leading-tight mt-0.5">{todayCount}</p>
+                    <p className="text-[10px] text-blue-600 font-bold leading-tight">item{todayCount === 1 ? '' : 's'} read</p>
+                  </div>
+                  {bestDay ? (
+                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-2.5">
+                      <p className="text-[9px] font-black text-amber-700 uppercase tracking-widest flex items-center gap-1">
+                        🏆 Best Day
+                      </p>
+                      <p className="text-xl font-black text-amber-800 leading-tight mt-0.5">{bestDay.count}</p>
+                      <p className="text-[10px] text-amber-700 font-bold leading-tight truncate">
+                        on {fmt(bestDay.dateStr)}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">🏆 Best Day</p>
+                      <p className="text-xs text-slate-500 font-bold leading-tight mt-1">Padhna shuru karo!</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {bestDay && bestDay.count >= 3 && (
+                <div className="mx-3 mb-2 mt-2 bg-gradient-to-r from-amber-100 to-orange-100 border border-amber-200 rounded-lg p-2">
+                  <p className="text-[10px] text-amber-800 font-bold leading-snug">
+                    🎉 You read <span className="font-black">{bestDay.count} different items</span> on {fmtFull(bestDay.dateStr)} — that's your best day yet!
+                  </p>
+                </div>
+              )}
+              <div className="p-3 bg-white">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Last 7 Days</p>
+                <div className="flex items-center justify-between gap-1">
+                  {last7.map((d, i) => (
+                    <div key={i} className="flex flex-col items-center gap-1 flex-1">
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black ${
+                        d.read
+                          ? d.dateStr === todayStr
+                            ? 'bg-orange-500 text-white ring-2 ring-orange-300'
+                            : 'bg-orange-100 text-orange-700'
+                          : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        {d.read ? '🔥' : '·'}
+                      </div>
+                      <span className={`text-[9px] font-bold ${d.dateStr === todayStr ? 'text-orange-600' : 'text-slate-500'}`}>
+                        {d.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {dates.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Recent Reading Days</p>
+                    <div className="flex flex-wrap gap-1">
+                      {dates.slice(0, 8).map(d => (
+                        <span
+                          key={d}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            d === todayStr
+                              ? 'bg-orange-500 text-white'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {fmt(d)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* NOTIFICATION BAR (Only on Home) (COMPACT VERSION) */}
       {activeTab === "HOME" && settings?.noticeText && (
@@ -4815,7 +5582,19 @@ export const StudentDashboard: React.FC<Props> = ({
             <div className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-10">
               <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
                 <button
-                  onClick={() => setShowHomeworkHistory(false)}
+                  onClick={() => {
+                    // Closing the Homework page should always return the
+                    // student to the actual Home tab — both the underlying
+                    // active page AND the bottom-nav highlight. Without this,
+                    // the previous activeTab (e.g. COURSES from a sub-tap)
+                    // would leak through and the wrong page would appear.
+                    setShowHomeworkHistory(false);
+                    setHomeworkSubjectView(null);
+                    setHwActiveHwId(null);
+                    setHwOpenedDirect(false);
+                    onTabChange('HOME');
+                    setCurrentLogicalTab('HOME');
+                  }}
                   className="p-2 hover:bg-slate-100 rounded-full text-slate-700 transition-colors"
                   aria-label="Back"
                 >
@@ -4901,6 +5680,92 @@ export const StudentDashboard: React.FC<Props> = ({
                     <p className="text-xs mt-1">Admin ke add karne ka intezaar karein</p>
                   </div>
                 )}
+
+                {/* RESUME READING — date-wise (all homework notes) */}
+                {(() => {
+                  const dateWiseHw = recentHw;
+                  if (dateWiseHw.length === 0) return null;
+                  return (
+                  <div className="bg-gradient-to-br from-rose-50 via-white to-pink-50 border border-rose-100 rounded-2xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0">
+                          <BookOpen size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black text-rose-700 uppercase tracking-widest">Continue Reading</p>
+                          <p className="text-xs text-slate-500 font-medium truncate">Pick up where you left off</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold text-rose-600 bg-white px-2 py-0.5 rounded-full border border-rose-200">
+                        {dateWiseHw.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {dateWiseHw.slice(0, 5).map(entry => {
+                        const subInfo = SUBJECT_INFO[entry.targetSubject || 'other'] || SUBJECT_INFO.other;
+                        const dateLbl = (() => {
+                          try {
+                            return new Date(entry.date).toLocaleDateString('default', { day: 'numeric', month: 'short', year: 'numeric' });
+                          } catch { return entry.date; }
+                        })();
+                        return (
+                          <SwipeToDismiss
+                            key={entry.id}
+                            onDismiss={() => dismissRecentHw(entry.id)}
+                            className="relative bg-white rounded-xl border border-slate-200 shadow-sm p-3"
+                          >
+                            <button
+                              onClick={(e) => { e.stopPropagation(); dismissRecentHw(entry.id); }}
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
+                              aria-label="Remove"
+                              title="Remove"
+                            >
+                              <X size={12} />
+                            </button>
+                            <button
+                              onClick={() => openRecentHw(entry)}
+                              className="w-full text-left"
+                            >
+                              <div className="flex items-center gap-2 mb-1.5 pr-6 flex-wrap">
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${subInfo.chipBg} ${subInfo.chipText}`}>
+                                  {subInfo.label}
+                                </span>
+                                {entry.hw?.pageNo && (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest bg-slate-800 text-white">
+                                    📖 P.{entry.hw.pageNo}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-slate-500 font-semibold">{dateLbl}</span>
+                              </div>
+                              <p className="text-sm font-black text-slate-800 leading-snug line-clamp-2 pr-6">
+                                {entry.title}
+                              </p>
+                              <div className="mt-2">
+                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-gradient-to-r from-rose-500 to-pink-500"
+                                    style={{ width: `${Math.max(2, entry.scrollPct)}%` }}
+                                  />
+                                </div>
+                                <div className="flex items-center justify-between mt-1.5">
+                                  <span className="text-[10px] text-slate-500 font-semibold">{entry.scrollPct}% read</span>
+                                  <span className="text-[10px] font-black text-white bg-rose-600 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                    Resume <ChevronRight size={10} />
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          </SwipeToDismiss>
+                        );
+                      })}
+                      <p className="text-[10px] text-slate-400 font-semibold text-center pt-1 italic">
+                        Tip: Card ko bayein swipe karo to hatane ke liye
+                      </p>
+                    </div>
+                  </div>
+                  );
+                })()}
 
                 {/* CREATE / PRACTICE MCQ CARD */}
                 <div className="pt-1">
@@ -6339,6 +7204,35 @@ export const StudentDashboard: React.FC<Props> = ({
         })()}
       </div>
 
+      {/* Hidden printable container for the currently-open Lucent page —
+          used by the "Save Offline (HTML)" button in the Lucent header. */}
+      <div
+        id="lucent-note-printable"
+        style={{ position: 'fixed', left: '-99999px', top: 0, width: '1100px', background: '#ffffff', padding: '32px', color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif' }}
+        aria-hidden="true"
+      >
+        {(() => {
+          const lv = lucentNoteViewer;
+          if (!lv) return null;
+          const idx = Math.min(Math.max(0, lucentPageIndex), Math.max(0, (lv.pages?.length || 1) - 1));
+          const pg = lv.pages?.[idx];
+          if (!pg) return null;
+          return (
+            <>
+              <h1 style={{ fontSize: '28px', fontWeight: 900, marginBottom: '4px' }}>
+                {lv.lessonTitle} — Page {pg.pageNo}
+              </h1>
+              <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '24px' }}>
+                {lv.subject} · Page {idx + 1} of {lv.pages.length} · {settings?.appName || 'IIC'} · Saved {new Date().toLocaleString()}
+              </p>
+              <div style={{ fontSize: '14px', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                {pg.content || ''}
+              </div>
+            </>
+          );
+        })()}
+      </div>
+
       {/* MINI PLAYER */}
       <MiniPlayer
         track={currentAudioTrack}
@@ -6350,7 +7244,7 @@ export const StudentDashboard: React.FC<Props> = ({
         className={`fixed bottom-0 left-0 right-0 w-full mx-auto bg-white/95 backdrop-blur-md border-t border-slate-200/70 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.18)] z-[300] pb-safe ${activeExternalApp || isDocFullscreen || (contentViewStep === "PLAYER" && selectedChapter) ? "hidden" : ""}`}
         aria-label="Primary"
       >
-        <div className="flex justify-around items-stretch h-[64px] max-w-3xl mx-auto px-1">
+        <div className="relative flex justify-around items-stretch h-[64px] max-w-3xl mx-auto px-1">
           {(() => {
             // ---- PER-TAB SNAPSHOT / RESTORE ----
             // Capture every overlay/position state for the tab the user is leaving,
@@ -6551,78 +7445,121 @@ export const StudentDashboard: React.FC<Props> = ({
                 : []),
             ];
 
-            return tabs.map((tab) => {
-              const access = tab.featureId
-                ? getFeatureAccess(tab.featureId)
+            // Filter out hidden tabs first so the sliding indicator math
+            // matches what's actually rendered.
+            const visibleTabs = tabs.filter((t) => {
+              const access = t.featureId
+                ? getFeatureAccess(t.featureId)
                 : { hasAccess: true, isHidden: false };
-              if (access.isHidden) return null;
-              const isLocked = !access.hasAccess;
-              const { Icon } = tab;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => {
-                    if (isLocked) {
-                      showAlert("🔒 Locked by Admin.", "ERROR");
-                      return;
-                    }
-                    tab.onClick();
-                  }}
-                  aria-label={tab.label}
-                  aria-current={tab.isActive ? "page" : undefined}
-                  className={`group relative flex-1 flex flex-col items-center justify-center gap-1 pt-1.5 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 rounded-xl transition-[color,transform] duration-150 ease-out active:scale-[0.92] ${
-                    isLocked ? "opacity-50" : ""
-                  }`}
-                >
-                  {/* Top active accent bar */}
-                  <span
-                    className={`absolute top-0 left-1/2 -translate-x-1/2 h-[3px] rounded-b-full transition-all duration-300 ease-out ${
-                      tab.isActive
-                        ? "w-8 bg-gradient-to-r from-blue-500 to-indigo-600"
-                        : "w-0 bg-transparent"
-                    }`}
-                  />
-
-                  {/* Icon container with pill highlight on active */}
-                  <span
-                    className={`relative inline-flex items-center justify-center h-9 w-12 rounded-2xl transition-all duration-300 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] ${
-                      tab.isActive
-                        ? "bg-gradient-to-br from-blue-50 to-indigo-50 scale-110"
-                        : "bg-transparent group-active:bg-slate-100 scale-100"
-                    }`}
-                  >
-                    <Icon
-                      size={22}
-                      strokeWidth={tab.isActive ? 2.4 : 2}
-                      className={`transition-colors duration-200 ${
-                        tab.isActive ? "text-blue-600" : "text-slate-500"
-                      }`}
-                      fill={
-                        tab.filledOnActive && tab.isActive && !isLocked
-                          ? "currentColor"
-                          : "none"
-                      }
-                    />
-                    {isLocked && (
-                      <span className="absolute -top-0.5 -right-0.5 bg-red-500 rounded-full p-[2px] border border-white shadow-sm">
-                        <Lock size={8} className="text-white" />
-                      </span>
-                    )}
-                  </span>
-
-                  <span
-                    className={`text-[10.5px] leading-none tracking-wide transition-all duration-200 ${
-                      tab.isActive
-                        ? "text-blue-600 font-semibold"
-                        : "text-slate-500 font-medium"
-                    }`}
-                  >
-                    {tab.label}
-                  </span>
-                </button>
-              );
+              return !access.isHidden;
             });
+            const totalVisible = Math.max(visibleTabs.length, 1);
+            const activeIndex = Math.max(0, visibleTabs.findIndex((t) => t.isActive));
+            const tabWidthPct = 100 / totalVisible;
+
+            return (
+              <>
+                {/* SLIDING TOP ACCENT — single pill that glides between tabs */}
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute top-0 h-[3px] rounded-b-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 shadow-[0_2px_10px_-2px_rgba(79,70,229,0.55)]"
+                  style={{
+                    left: `calc(${activeIndex * tabWidthPct}% + ${tabWidthPct / 2}% - 18px)`,
+                    width: '36px',
+                    transition: 'left 380ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+                  }}
+                />
+                {/* SLIDING SOFT GLOW behind the active tab icon */}
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute top-1.5 h-9 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50/80 ring-1 ring-blue-100/60"
+                  style={{
+                    left: `calc(${activeIndex * tabWidthPct}% + ${tabWidthPct / 2}% - 24px)`,
+                    width: '48px',
+                    transition: 'left 420ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+                  }}
+                />
+                {visibleTabs.map((tab) => {
+                  const access = tab.featureId
+                    ? getFeatureAccess(tab.featureId)
+                    : { hasAccess: true, isHidden: false };
+                  const isLocked = !access.hasAccess;
+                  const { Icon } = tab;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => {
+                        if (isLocked) {
+                          showAlert("🔒 Locked by Admin.", "ERROR");
+                          return;
+                        }
+                        // Trigger ripple burst on every tab EXCEPT Home (Home stays minimal)
+                        if (tab.id !== 'HOME') {
+                          setNavTapKeys(prev => ({ ...prev, [tab.id]: (prev[tab.id] || 0) + 1 }));
+                        }
+                        // If user is currently inside a notes/MCQ reader (Lucent / HW),
+                        // save their progress to Continue Reading and close the reader
+                        // BEFORE switching tabs. So nav-tap "exits cleanly" and the
+                        // page they were reading shows up under Continue Reading next time.
+                        try { closeReadersBeforeNavSwitch(tab.id); } catch {}
+                        tab.onClick();
+                      }}
+                      aria-label={tab.label}
+                      aria-current={tab.isActive ? "page" : undefined}
+                      className={`group relative flex-1 flex flex-col items-center justify-center gap-1 pt-1.5 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 rounded-xl transition-[color,transform] duration-150 ease-out active:scale-[0.90] ${
+                        isLocked ? "opacity-50" : ""
+                      }`}
+                    >
+                      {/* Icon container — only the icon scales; background pill is the sliding glow above */}
+                      <span
+                        key={tab.isActive ? `${tab.id}-on` : `${tab.id}-off`}
+                        className={`relative z-10 inline-flex items-center justify-center h-9 w-12 rounded-2xl transition-transform duration-300 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] group-active:bg-slate-100/60 ${
+                          tab.isActive ? "nav-icon-pop scale-110" : "scale-100"
+                        }`}
+                      >
+                        {/* Tap ripple — only renders for non-HOME tabs. The key trick re-mounts
+                            the span on every tap so the CSS animation re-fires from 0. */}
+                        {tab.id !== 'HOME' && (navTapKeys[tab.id] || 0) > 0 && (
+                          <span
+                            key={`ripple-${tab.id}-${navTapKeys[tab.id]}`}
+                            aria-hidden
+                            className="nav-ripple-burst pointer-events-none absolute inset-0 m-auto rounded-full"
+                          />
+                        )}
+                        <Icon
+                          size={22}
+                          strokeWidth={tab.isActive ? 2.4 : 2}
+                          className={`transition-colors duration-300 ${
+                            tab.isActive ? "text-blue-600" : "text-slate-500"
+                          }`}
+                          fill={
+                            tab.filledOnActive && tab.isActive && !isLocked
+                              ? "currentColor"
+                              : "none"
+                          }
+                        />
+                        {isLocked && (
+                          <span className="absolute -top-0.5 -right-0.5 bg-red-500 rounded-full p-[2px] border border-white shadow-sm">
+                            <Lock size={8} className="text-white" />
+                          </span>
+                        )}
+                      </span>
+
+                      <span
+                        className={`relative z-10 text-[10.5px] leading-none tracking-wide transition-all duration-300 ${
+                          tab.isActive
+                            ? "text-blue-600 font-semibold translate-y-0 opacity-100"
+                            : "text-slate-500 font-medium translate-y-0 opacity-90"
+                        }`}
+                      >
+                        {tab.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </>
+            );
           })()}
         </div>
       </nav>
@@ -6939,11 +7876,63 @@ export const StudentDashboard: React.FC<Props> = ({
         const pageSpeakText = currentPage
           ? `Page ${currentPage.pageNo}. ${currentPage.content || ''}`
           : '';
+
+        // Save the current page to Continue Reading using the live scroll % so
+        // History / Home picks up wherever the student stopped.
+        const persistLucentProgress = (overridePct?: number) => {
+          if (!currentPage) return;
+          try {
+            const recId = `lucent_${entry.id}_${safeIndex}`;
+            saveRecentLucent({
+              id: recId,
+              lucentId: entry.id,
+              lessonTitle: entry.lessonTitle,
+              subject: entry.subject,
+              pageIndex: safeIndex,
+              pageNo: currentPage.pageNo,
+              totalPages,
+              scrollY: 0,
+              scrollPct: Math.max(2, Math.round(overridePct ?? lucentScrollProgress ?? 5)),
+            });
+            markReadToday(recId);
+          } catch {}
+        };
+
+        // Closes the Lucent viewer cleanly: saves partial progress so the page
+        // shows up in Continue Reading, stops TTS, and tears down auto-sync.
+        const closeLucentViewer = () => {
+          persistLucentProgress();
+          try { stopSpeech(); } catch {}
+          setLucentAutoSync(false);
+          setLucentNoteViewer(null);
+        };
+
         return (
           <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in fade-in">
+            {/* Reading progress bar — same gradient style as Sar Sangrah / Speedy */}
+            <div className="absolute top-0 left-0 right-0 h-1 bg-slate-200/60 z-[60] pointer-events-none">
+              <div
+                className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-[width] duration-150 ease-out"
+                style={{ width: `${Math.max(0, Math.min(100, lucentScrollProgress))}%` }}
+              />
+            </div>
+            {/* Back-to-top FAB once the user has scrolled meaningfully */}
+            {lucentScrollProgress > 30 && (
+              <button
+                onClick={() => {
+                  const node = lucentScrollContainerRef.current;
+                  if (node) node.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                aria-label="Back to top"
+                title="Back to top"
+                className="fixed bottom-24 right-5 z-[210] w-11 h-11 rounded-full bg-slate-800/85 hover:bg-slate-900 text-white shadow-xl backdrop-blur-md flex items-center justify-center active:scale-90 transition-all animate-in fade-in slide-in-from-bottom-2"
+              >
+                <ChevronRight size={22} className="-rotate-90" />
+              </button>
+            )}
             {/* Header */}
             <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-3 flex items-center gap-3 shrink-0">
-              <button onClick={() => { stopSpeech(); setLucentAutoSync(false); setLucentNoteViewer(null); }} className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors">
+              <button onClick={closeLucentViewer} className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors">
                 <ChevronRight size={18} className="rotate-180" />
               </button>
               <div className="flex-1 min-w-0">
@@ -6954,6 +7943,24 @@ export const StudentDashboard: React.FC<Props> = ({
                 <span className="bg-white/20 px-2.5 py-1 rounded-full text-[11px] font-black whitespace-nowrap">
                   {safeIndex + 1}/{totalPages}
                 </span>
+                {/* Save Offline (HTML) — works for current Lucent page */}
+                <button
+                  onClick={async () => {
+                    try {
+                      const safeTitle = `${entry.lessonTitle || 'Lucent'}_pg${currentPage?.pageNo || safeIndex + 1}`
+                        .replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
+                      await downloadAsMHTML('lucent-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                      showAlert('📥 Offline save ho gaya!', 'SUCCESS');
+                    } catch (e) {
+                      showAlert('Download fail ho gaya. Phir try karein.', 'ERROR');
+                    }
+                  }}
+                  className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors"
+                  aria-label="Save this Lucent page offline"
+                  title="Save offline (HTML)"
+                >
+                  <Download size={16} />
+                </button>
                 <button
                   onClick={() => { const next = !autoSyncOn; setLucentAutoSync(next); if (!next) stopSpeech(); }}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all ${autoSyncOn ? 'bg-white text-indigo-700' : 'bg-white/20 text-white'}`}
@@ -6965,7 +7972,21 @@ export const StudentDashboard: React.FC<Props> = ({
               </div>
             </div>
             {/* Notes scroll area */}
-            <div className="flex-1 overflow-y-auto">
+            <div
+              ref={lucentScrollContainerRef}
+              className="flex-1 overflow-y-auto"
+              onScroll={(e) => {
+                const t = e.currentTarget;
+                const max = t.scrollHeight - t.clientHeight;
+                const pct = max > 0 ? Math.min(100, Math.max(0, (t.scrollTop / max) * 100)) : 0;
+                setLucentScrollProgress(pct);
+                // Throttle persist via micro-debounce: only save once user has
+                // scrolled past 5% so we don't spam writes on tiny movements.
+                if (pct > 5) {
+                  persistLucentProgress(pct);
+                }
+              }}
+            >
               {currentPage ? (
                 <div className="px-4 pb-2">
                   <ChunkedNotesReader
@@ -6973,7 +7994,36 @@ export const StudentDashboard: React.FC<Props> = ({
                     content={pageSpeakText}
                     topBarLabel={`Page ${currentPage.pageNo}`}
                     autoStart={autoSyncOn}
+                    // Save this Lucent page to Continue Reading the moment TTS starts.
+                    onReadingStart={() => {
+                      try {
+                        const recId = `lucent_${entry.id}_${safeIndex}`;
+                        saveRecentLucent({
+                          id: recId,
+                          lucentId: entry.id,
+                          lessonTitle: entry.lessonTitle,
+                          subject: entry.subject,
+                          pageIndex: safeIndex,
+                          pageNo: currentPage.pageNo,
+                          totalPages,
+                          scrollY: 0,
+                          scrollPct: 5,
+                        });
+                        markReadToday(recId);
+                      } catch {}
+                    }}
                     onComplete={() => {
+                      // Mark this lucent page as fully read for the History badge.
+                      try {
+                        const recId = `lucent_${entry.id}_${safeIndex}`;
+                        markNoteFullyRead({
+                          id: recId,
+                          kind: 'lucent',
+                          title: `${entry.lessonTitle} — Page ${currentPage.pageNo}`,
+                          subtitle: entry.subject,
+                        });
+                      } catch {}
+                      // Auto-Sync: chain to next page after a small delay.
                       if (autoSyncOn && safeIndex < totalPages - 1) {
                         setTimeout(() => setLucentPageIndex(safeIndex + 1), 400);
                       }
@@ -7024,6 +8074,23 @@ export const StudentDashboard: React.FC<Props> = ({
               </p>
               <h2 className="text-base sm:text-lg font-black text-slate-800 truncate">{activePlayerHw.title}</h2>
             </div>
+            {/* Save Offline (HTML) — saves the full MCQ set + notes for this homework */}
+            <button
+              onClick={async () => {
+                try {
+                  const safeTitle = (activePlayerHw.title || 'Homework_MCQ').replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
+                  await downloadAsMHTML('hw-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                  showAlert('📥 Offline save ho gaya!', 'SUCCESS');
+                } catch (e) {
+                  showAlert('Download fail ho gaya. Phir try karein.', 'ERROR');
+                }
+              }}
+              className="shrink-0 bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-full active:scale-95 transition"
+              aria-label="Save MCQs offline"
+              title="Save offline (HTML)"
+            >
+              <Download size={16} />
+            </button>
             <button
               onClick={togglePlayerReadAll}
               disabled={playerChunks.length === 0}

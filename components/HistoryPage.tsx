@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LessonContent, User, SystemSettings, UsageHistoryEntry } from '../types';
-import { BookOpen, Calendar, ChevronDown, ChevronUp, Trash2, Search, FileText, CheckCircle2, Lock, AlertCircle, Folder, Download } from 'lucide-react';
+import { BookOpen, Calendar, ChevronDown, ChevronUp, Trash2, Search, FileText, CheckCircle2, Lock, AlertCircle, Folder, Download, ChevronRight, Play, X as XIcon } from 'lucide-react';
 import { LessonView } from './LessonView';
 import { saveUserToLive, getChapterData } from '../firebase';
 import { storage } from '../utils/storage';
@@ -8,16 +8,45 @@ import { CustomAlert, CustomConfirm } from './CustomDialogs';
 import { OfflineDownloads } from './OfflineDownloads';
 import { saveOfflineItem } from '../utils/offlineStorage';
 import { SubscriptionHistory } from './SubscriptionHistory';
+import {
+    getRecentChapters, getRecentHomeworks, getRecentLucent,
+    removeRecentChapter, removeRecentHomework, removeRecentLucent,
+    getFullyReadMap, removeFullyRead,
+    type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type FullyReadEntry,
+} from '../utils/recentReads';
 
 interface Props {
     user: User;
     onUpdateUser: (u: User) => void;
     settings?: SystemSettings;
-    initialTab?: 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY';
+    initialTab?: 'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY';
+    /** Resume a chapter from a "Continue Reading" entry — closes History and opens the chapter. */
+    onResumeRecentChapter?: (entry: RecentChapterEntry) => void;
+    /** Resume a homework note (Sar Sangrah / Speedy / etc). */
+    onResumeRecentHw?: (entry: RecentHwEntry) => void;
+    /** Resume a Lucent Book page. */
+    onResumeRecentLucent?: (entry: RecentLucentEntry) => void;
 }
 
-export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, initialTab }) => {
-  const [activeTab, setActiveTab] = useState<'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY'>(initialTab || 'SAVED');
+export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, initialTab, onResumeRecentChapter, onResumeRecentHw, onResumeRecentLucent }) => {
+  const [activeTab, setActiveTab] = useState<'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY'>(initialTab || 'READING');
+
+  // Continue Reading state — combined chapter + homework + lucent + fully-read map.
+  const [recentChapters, setRecentChapters] = useState<RecentChapterEntry[]>([]);
+  const [recentHw, setRecentHw] = useState<RecentHwEntry[]>([]);
+  const [recentLucent, setRecentLucent] = useState<RecentLucentEntry[]>([]);
+  const [fullyReadMap, setFullyReadMap] = useState<Record<string, FullyReadEntry>>({});
+
+  const refreshReading = React.useCallback(() => {
+    setRecentChapters(getRecentChapters());
+    setRecentHw(getRecentHomeworks());
+    setRecentLucent(getRecentLucent());
+    setFullyReadMap(getFullyReadMap());
+  }, []);
+
+  useEffect(() => {
+    refreshReading();
+  }, [activeTab, refreshReading]);
   
   // SAVED NOTES STATE
   const [history, setHistory] = useState<LessonContent[]>([]);
@@ -277,6 +306,12 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
         {/* TABS */}
         <div className="flex p-1 bg-slate-100 rounded-xl mb-6 overflow-x-auto no-scrollbar gap-1">
             <button
+                onClick={() => setActiveTab('READING')}
+                className={`flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'READING' ? 'bg-white shadow text-slate-800' : 'text-slate-600 hover:text-slate-700'}`}
+            >
+                Reading
+            </button>
+            <button
                 onClick={() => setActiveTab('SAVED')}
                 className={`flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'SAVED' ? 'bg-white shadow text-slate-800' : 'text-slate-600 hover:text-slate-700'}`}
             >
@@ -301,6 +336,22 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 Sub History
             </button>
         </div>
+
+        {activeTab === 'READING' && (
+            <ReadingProgressSection
+                recentChapters={recentChapters}
+                recentHw={recentHw}
+                recentLucent={recentLucent}
+                fullyReadMap={fullyReadMap}
+                onResumeChapter={(e) => { onResumeRecentChapter && onResumeRecentChapter(e); }}
+                onResumeHw={(e) => { onResumeRecentHw && onResumeRecentHw(e); }}
+                onResumeLucent={(e) => { onResumeRecentLucent && onResumeRecentLucent(e); }}
+                onRemoveChapter={(id) => { removeRecentChapter(id); refreshReading(); }}
+                onRemoveHw={(id) => { removeRecentHomework(id); refreshReading(); }}
+                onRemoveLucent={(id) => { removeRecentLucent(id); refreshReading(); }}
+                onClearDoneBadge={(id) => { removeFullyRead(id); refreshReading(); }}
+            />
+        )}
 
         {activeTab === 'SUB_HISTORY' && (
             <div className="animate-in fade-in duration-300">
@@ -518,4 +569,186 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
         )}
     </div>
   );
+};
+
+// =====================================================================
+// ReadingProgressSection — shows Continue Reading items + Done badges.
+// Renders three groups: Chapters, Homework Notes, Lucent Pages. Each row
+// has a progress bar (% scrolled), a Resume button, a remove (X) button,
+// and a green "Done" badge when the user has finished TTS for that note.
+// =====================================================================
+interface ReadingSectionProps {
+    recentChapters: RecentChapterEntry[];
+    recentHw: RecentHwEntry[];
+    recentLucent: RecentLucentEntry[];
+    fullyReadMap: Record<string, FullyReadEntry>;
+    onResumeChapter: (e: RecentChapterEntry) => void;
+    onResumeHw: (e: RecentHwEntry) => void;
+    onResumeLucent: (e: RecentLucentEntry) => void;
+    onRemoveChapter: (id: string) => void;
+    onRemoveHw: (id: string) => void;
+    onRemoveLucent: (id: string) => void;
+    onClearDoneBadge: (id: string) => void;
+}
+
+const ReadingProgressSection: React.FC<ReadingSectionProps> = ({
+    recentChapters, recentHw, recentLucent, fullyReadMap,
+    onResumeChapter, onResumeHw, onResumeLucent,
+    onRemoveChapter, onRemoveHw, onRemoveLucent, onClearDoneBadge,
+}) => {
+    const totalCount = recentChapters.length + recentHw.length + recentLucent.length;
+    const doneEntries = useMemo(() => {
+        const arr = Object.values(fullyReadMap);
+        arr.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+        return arr;
+    }, [fullyReadMap]);
+
+    const renderProgressBar = (pct: number, isDone: boolean) => (
+        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+            <div
+                className={`h-full rounded-full transition-all duration-500 ${isDone ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                style={{ width: `${isDone ? 100 : Math.max(2, Math.min(100, Math.round(pct || 0)))}%` }}
+            />
+        </div>
+    );
+
+    const renderRow = (key: string, opts: {
+        title: string;
+        subtitle?: string;
+        pct: number;
+        isDone: boolean;
+        emoji: string;
+        onResume: () => void;
+        onRemove: () => void;
+    }) => (
+        <div key={key} className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
+            <div className="flex items-start gap-3">
+                <div className="text-2xl flex-none mt-0.5">{opts.emoji}</div>
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-bold text-sm text-slate-800 truncate flex-1 min-w-0">{opts.title}</p>
+                        {opts.isDone && (
+                            <span className="flex-none inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                                <CheckCircle2 size={11} /> Done
+                            </span>
+                        )}
+                    </div>
+                    {opts.subtitle && <p className="text-xs text-slate-500 truncate">{opts.subtitle}</p>}
+                    <div className="mt-2">{renderProgressBar(opts.pct, opts.isDone)}</div>
+                    <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>{opts.isDone ? '100%' : `${Math.max(2, Math.min(100, Math.round(opts.pct || 0)))}%`} read</span>
+                        <div className="flex items-center gap-1">
+                            <button
+                                type="button"
+                                onClick={opts.onResume}
+                                className="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold px-3 py-1 rounded-full transition active:scale-95"
+                            >
+                                <Play size={11} /> Resume
+                            </button>
+                            <button
+                                type="button"
+                                onClick={opts.onRemove}
+                                aria-label="Remove from list"
+                                className="p-1 text-slate-400 hover:text-rose-500 rounded-full active:scale-95 transition"
+                            >
+                                <XIcon size={14} />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="space-y-6 animate-in fade-in duration-300">
+            {totalCount === 0 && doneEntries.length === 0 ? (
+                <div className="text-center text-slate-500 py-12">
+                    <BookOpen size={42} className="mx-auto mb-3 text-slate-300" />
+                    <p className="font-bold text-slate-700">Abhi tak kuch nahi padha.</p>
+                    <p className="text-xs mt-1">Koi note ya chapter padhna shuru karein — yahan progress save hogi.</p>
+                </div>
+            ) : (
+                <>
+                    {recentChapters.length > 0 && (
+                        <section>
+                            <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2 px-1">Chapters</h4>
+                            <div className="space-y-2">
+                                {recentChapters.map(c => renderRow(`ch_${c.id}`, {
+                                    title: c.title,
+                                    subtitle: c.subject,
+                                    pct: c.scrollPct,
+                                    isDone: false,
+                                    emoji: '📖',
+                                    onResume: () => onResumeChapter(c),
+                                    onRemove: () => onRemoveChapter(c.id),
+                                }))}
+                            </div>
+                        </section>
+                    )}
+
+                    {recentHw.length > 0 && (
+                        <section>
+                            <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2 px-1">Homework Notes</h4>
+                            <div className="space-y-2">
+                                {recentHw.map(h => renderRow(`hw_${h.id}`, {
+                                    title: h.title || 'Homework',
+                                    subtitle: h.targetSubject || 'Homework',
+                                    pct: h.scrollPct,
+                                    isDone: !!fullyReadMap[h.id],
+                                    emoji: '📝',
+                                    onResume: () => onResumeHw(h),
+                                    onRemove: () => onRemoveHw(h.id),
+                                }))}
+                            </div>
+                        </section>
+                    )}
+
+                    {recentLucent.length > 0 && (
+                        <section>
+                            <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2 px-1">Lucent Book Pages</h4>
+                            <div className="space-y-2">
+                                {recentLucent.map(l => renderRow(`lc_${l.id}`, {
+                                    title: `${l.lessonTitle} — Page ${l.pageNo}`,
+                                    subtitle: `${l.subject} • Page ${l.pageIndex + 1} of ${l.totalPages}`,
+                                    pct: l.scrollPct,
+                                    isDone: !!fullyReadMap[l.id],
+                                    emoji: '📚',
+                                    onResume: () => onResumeLucent(l),
+                                    onRemove: () => onRemoveLucent(l.id),
+                                }))}
+                            </div>
+                        </section>
+                    )}
+
+                    {doneEntries.length > 0 && (
+                        <section>
+                            <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2 px-1 flex items-center gap-1">
+                                <CheckCircle2 size={13} className="text-emerald-600" /> Completed
+                            </h4>
+                            <div className="space-y-1.5">
+                                {doneEntries.slice(0, 20).map(d => (
+                                    <div key={`done_${d.id}`} className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+                                        <CheckCircle2 size={14} className="text-emerald-600 flex-none" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-bold text-emerald-800 truncate">{d.title}</p>
+                                            {d.subtitle && <p className="text-[10px] text-emerald-700 truncate">{d.subtitle}</p>}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => onClearDoneBadge(d.id)}
+                                            aria-label="Remove"
+                                            className="p-1 text-emerald-400 hover:text-rose-500 rounded-full active:scale-95"
+                                        >
+                                            <XIcon size={12} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    )}
+                </>
+            )}
+        </div>
+    );
 };

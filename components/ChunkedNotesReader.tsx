@@ -12,6 +12,9 @@ interface Props {
   autoStart?: boolean;
   /** Fires after the last topic has finished being read aloud. */
   onComplete?: () => void;
+  /** Fires the moment "Read All" / tap-to-read TTS begins (start of any read session).
+   *  Used to immediately mark a note as "in progress" in Continue Reading. */
+  onReadingStart?: () => void;
   /** When true, hides the sticky "Read All" top bar (use when parent renders controls externally). */
   hideTopBar?: boolean;
   /** Topic index to scroll to / highlight on mount (used to restore reading position
@@ -23,7 +26,7 @@ interface Props {
 }
 
 
-export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, hideTopBar, initialIndex, onPositionChange }) => {
+export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, hideTopBar, initialIndex, onPositionChange }) => {
   const topics = useMemo(() => splitIntoTopics(content), [content]);
 
   const [activeIdx, setActiveIdx] = useState<number | null>(initialIndex ?? null);
@@ -82,11 +85,20 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     );
   }, [topics, language]);
 
+  // Stable ref to the latest onReadingStart so we can call it from startFromIndex
+  // without making the callback identity unstable.
+  const onReadingStartRef = useRef(onReadingStart);
+  useEffect(() => { onReadingStartRef.current = onReadingStart; }, [onReadingStart]);
+
   const startFromIndex = useCallback((startIdx: number) => {
     if (topics.length === 0) return;
     stopSpeech();
     isReadingRef.current = true;
     setIsReading(true);
+    // Notify parent so it can flag this note as "in progress" right away.
+    if (onReadingStartRef.current) {
+      try { onReadingStartRef.current(); } catch {}
+    }
     // Defer to next tick so cancel() flushes before speak()
     setTimeout(() => playFrom(startIdx), 80);
   }, [playFrom, topics.length]);

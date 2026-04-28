@@ -13,6 +13,7 @@ import { InfoPopup } from './InfoPopup';
 import { SpeakButton } from './SpeakButton';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_CONTENT_INFO_CONFIG } from '../constants';
+import { saveRecentChapter, markReadToday } from '../utils/recentReads';
 import { checkFeatureAccess } from '../utils/permissionUtils';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
 import { saveOfflineItem } from '../utils/offlineStorage';
@@ -348,6 +349,20 @@ export const PdfView: React.FC<Props> = ({
               try {
                   if (currentScrollY > 20) {
                       localStorage.setItem(SCROLL_STORAGE_KEY, String(Math.round(currentScrollY)));
+                      // Also push into recent-reads list so Home tab can show "Resume reading"
+                      const recentId = `${board}_${classLevel}_${subject?.name || ''}_${chapter.id}`;
+                      saveRecentChapter({
+                          id: recentId,
+                          scrollY: Math.round(currentScrollY),
+                          scrollPct: Math.round(pct),
+                          contentType: 'PDF',
+                          board: board || '',
+                          classLevel: classLevel || '',
+                          stream: stream || '',
+                          subject: subject as any,
+                          chapter,
+                      });
+                      markReadToday(recentId);
                   } else {
                       localStorage.removeItem(SCROLL_STORAGE_KEY);
                   }

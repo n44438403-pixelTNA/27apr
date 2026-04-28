@@ -426,7 +426,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // --- HOMEWORK STATE ---
   const [homeworkTab, setHomeworkTab] = useState<'ADD' | 'HISTORY' | 'COMP_MCQ'>('ADD');
   const [newCompMcqText, setNewCompMcqText] = useState('');
-  const [newHomework, setNewHomework] = useState({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', targetSubject: 'none' });
+  const [newHomework, setNewHomework] = useState({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', targetSubject: 'none', pageNo: '' });
 
   // --- LUCENT NOTES STATE (special form when targetSubject === 'lucent') ---
   const LUCENT_SUBJECT_OPTIONS: { id: string; name: string }[] = [
@@ -7176,6 +7176,23 @@ Statement 2"
                                   </div>
                               </div>
 
+                              {/* HOME RESUME FILTER CHIPS TOGGLE */}
+                              <div className="flex items-center justify-between bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                                  <div>
+                                      <p className="font-bold text-indigo-900 flex items-center gap-2">📑 Continue Reading Filter Chips</p>
+                                      <p className="text-xs text-indigo-700">Show subject filter row (All / Class Notes / Sar Sangrah / Speedy / MCQ) above Home "Continue Reading" card</p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-indigo-500 uppercase">{localSettings.showHomeResumeFilter !== false ? 'Visible' : 'Hidden'}</span>
+                                      <input
+                                          type="checkbox"
+                                          checked={localSettings.showHomeResumeFilter !== false}
+                                          onChange={() => toggleSetting('showHomeResumeFilter')}
+                                          className="w-5 h-5 accent-indigo-600"
+                                      />
+                                  </div>
+                              </div>
+
                               {/* MCQ MAKER URL */}
                               <div className="bg-teal-50 p-4 rounded-xl border border-teal-100">
                                   <label className="text-[10px] font-bold text-teal-700 uppercase">MCQ Maker App URL</label>
@@ -8686,6 +8703,24 @@ Statement 2"
                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Lesson Name / Title</label>
                                       <input type="text" value={newHomework.title} onChange={e => setNewHomework({...newHomework, title: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="e.g. Science Chapter 1 Review" />
                                   </div>
+                                  {(newHomework.targetSubject === 'sarSangrah' || newHomework.targetSubject === 'speedyScience' || newHomework.targetSubject === 'speedySocialScience') && (
+                                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                          <label className="text-[10px] font-bold text-amber-700 uppercase block mb-1 flex items-center gap-1">
+                                              📖 Page Number (Optional — for page-wise sorting)
+                                          </label>
+                                          <input
+                                              type="text"
+                                              inputMode="numeric"
+                                              value={newHomework.pageNo}
+                                              onChange={e => setNewHomework({...newHomework, pageNo: e.target.value.replace(/[^0-9]/g, '')})}
+                                              className="w-full p-2 border border-amber-300 rounded text-sm outline-none focus:border-amber-500 bg-white"
+                                              placeholder="e.g. 20"
+                                          />
+                                          <p className="text-[10px] text-amber-700 mt-1">
+                                              Page number dene par yeh note Home page par "Continue Reading" me page number ke saath dikhega aur student ke liye page-line wise sort hoga.
+                                          </p>
+                                      </div>
+                                  )}
                                   <div>
                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Notes (Optional)</label>
                                       <textarea value={newHomework.notes} onChange={e => setNewHomework({...newHomework, notes: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-20 focus:border-indigo-500" placeholder="Enter notes..." />
@@ -8714,7 +8749,8 @@ Statement 2"
                                                   alert("Failed to parse MCQs. Saving without MCQs.");
                                               }
                                           }
-                                          const hwItem = {
+                                          const isPageWiseSubject = ['sarSangrah', 'speedyScience', 'speedySocialScience'].includes(newHomework.targetSubject);
+                                          const hwItem: any = {
                                               id: Date.now().toString(),
                                               date: newHomework.date,
                                               title: newHomework.title,
@@ -8725,11 +8761,14 @@ Statement 2"
                                               videoUrl: newHomework.videoUrl,
                                               targetSubject: newHomework.targetSubject === 'none' ? undefined : newHomework.targetSubject
                                           };
+                                          if (isPageWiseSubject && newHomework.pageNo.trim()) {
+                                              hwItem.pageNo = newHomework.pageNo.trim();
+                                          }
                                           const updated = [...(localSettings.homework || []), hwItem];
                                           const newSettings = {...localSettings, homework: updated};
                                           setLocalSettings(newSettings);
                                           handleSaveSettings(newSettings);
-                                          setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', targetSubject: 'none' });
+                                          setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', targetSubject: 'none', pageNo: '' });
                                           setAlertConfig({isOpen: true, message: '✅ Homework Added Successfully!'});
                                       }} className="w-full bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-700 flex items-center justify-center gap-2 transition-colors">
                                           <Save size={18} /> Save Homework

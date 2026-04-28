@@ -412,6 +412,7 @@ export interface HomeworkItem {
   audioUrl?: string;
   videoUrl?: string;
   targetSubject?: string;
+  pageNo?: string; // Optional page number for page-wise notes (Sar Sangrah / Speedy etc.)
 }
 
 export interface LucentPageNote {
@@ -460,6 +461,7 @@ export interface SystemSettings {
   officialAppUrl?: string; // NEW: Play Store Link
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page
+  showHomeResumeFilter?: boolean; // NEW: Show subject filter chips above Home "Continue Reading" card
   mcqAppUrl?: string; // NEW: External MCQ Maker app URL (loaded in iframe)
   bannerConfig?: {
       top: BannerSettings;
