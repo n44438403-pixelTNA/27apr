@@ -417,12 +417,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
             >
                 Sub History
             </button>
-            <button
-                onClick={() => setActiveTab('STARRED')}
-                className={`flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1 ${activeTab === 'STARRED' ? 'bg-amber-500 shadow text-white' : 'text-amber-600 hover:text-amber-700'}`}
-            >
-                <Star size={11} fill={activeTab === 'STARRED' ? 'white' : 'currentColor'} /> Important Notes
-            </button>
+            {/* Important Notes tab removed — accessed from bottom-nav ⭐ Important tab */}
         </div>
 
         {activeTab === 'READING' && (

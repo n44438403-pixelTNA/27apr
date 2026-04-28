@@ -39,10 +39,19 @@ interface Props {
   isStarred?: (text: string) => boolean;
   /** Called when user taps the star on a topic. */
   onStarToggle?: (text: string) => void;
+  /** Optional search phrase. When set, the reader finds the first topic that
+   *  contains the phrase (case-insensitive), scrolls to it, highlights it,
+   *  and auto-starts TTS from that line. Used by Home search → "click result
+   *  → jump to exact line and read aloud" flow. */
+  searchQuery?: string;
+  /** Optional getter for the global "social proof" save count of a topic.
+   *  When provided and >0, the topic shows a small "⭐ N" pill so students see
+   *  how many other learners have marked the same line as Important. */
+  getStarCount?: (topicText: string) => number;
 }
 
 
-export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, hideTopBar, initialIndex, onPositionChange, noteKey, isStarred, onStarToggle }) => {
+export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, hideTopBar, initialIndex, onPositionChange, noteKey, isStarred, onStarToggle, searchQuery, getStarCount }) => {
   const topics = useMemo(() => splitIntoTopics(content), [content]);
 
   const [activeIdx, setActiveIdx] = useState<number | null>(initialIndex ?? null);
@@ -182,6 +191,29 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart, content]);
 
+  // When a `searchQuery` is provided (Home search → click result), locate the
+  // first topic that contains the phrase, scroll to it, highlight it, and
+  // auto-start TTS from that line so the user instantly hears the matched part.
+  const searchHandledRef = useRef<string>('');
+  useEffect(() => {
+    const q = (searchQuery || '').trim().toLowerCase();
+    if (!q) return;
+    if (topics.length === 0) return;
+    // Avoid re-firing for the same query on incidental re-renders.
+    const sig = `${q}::${topics.length}`;
+    if (searchHandledRef.current === sig) return;
+    searchHandledRef.current = sig;
+
+    const matchIdx = topics.findIndex(t => (t.text || '').toLowerCase().includes(q));
+    if (matchIdx < 0) return;
+    const t = setTimeout(() => {
+      itemRefs.current[matchIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      startFromIndex(matchIdx);
+    }, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, content]);
+
   if (topics.length === 0) {
     return (
       <div className={`text-center py-10 text-slate-400 ${className || ''}`}>
@@ -279,6 +311,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
 
           // Whole topic is a button so taps anywhere on the line start/stop TTS.
           const starred = isStarred ? isStarred(topic.text) : false;
+          const starCount = getStarCount ? getStarCount(topic.text) : 0;
           return (
             <div
               key={`tp-${idx}`}
@@ -309,6 +342,15 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   <span className={`font-bold mr-1.5 ${starred ? 'text-amber-400' : 'text-indigo-400'}`}>•</span>
                   {topic.text}
                 </p>
+                {starCount > 0 && (
+                  <span
+                    className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-black"
+                    title={`${starCount} student${starCount === 1 ? '' : 's'} ne is line ko Important mark kiya hai`}
+                  >
+                    <Star size={9} className="fill-amber-500 text-amber-500" />
+                    {starCount.toLocaleString('en-IN')} {starCount === 1 ? 'student' : 'students'} ne save kiya
+                  </span>
+                )}
               </button>
               {/* TTS active indicator */}
               {isActive && (

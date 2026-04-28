@@ -155,11 +155,35 @@ export const numberToHindiWords = (input: number | string): string => {
  * Replace every numeric token (e.g. "2019", "1,250", "7.5") in the input with its
  * spoken Hindi-words equivalent. Leaves non-numeric text untouched.
  */
+/**
+ * Read 4-digit year-like numbers in the natural Indian style:
+ *   1901 → "unnees sau ek", 1947 → "unnees sau saintaalees",
+ *   1501 → "pandrah sau ek", 2019 → "bees sau unnees".
+ * Returns null if the value is not a clean 4-digit token in [1100, 9999].
+ */
+const yearStyleHindi = (cleaned: string): string | null => {
+    if (!/^\d{4}$/.test(cleaned)) return null;
+    const num = parseInt(cleaned, 10);
+    if (num < 1100 || num > 9999) return null;
+    const head = parseInt(cleaned.slice(0, 2), 10);
+    const tail = parseInt(cleaned.slice(2, 4), 10);
+    const headStr = HINDI_ONES_TEENS_TO_99[head];
+    if (!headStr) return null;
+    if (tail === 0) return `${headStr} sau`;
+    const tailStr = HINDI_ONES_TEENS_TO_99[tail];
+    return `${headStr} sau ${tailStr}`;
+};
+
 export const replaceNumbersWithHindiWords = (text: string): string => {
     if (!text) return text;
     // Match optional minus, digits with optional commas, optional .decimals
     return text.replace(/-?\d+(?:,\d+)*(?:\.\d+)?/g, (match) => {
         const cleaned = match.replace(/,/g, '');
+        // Use year-style "X sau Y" for plain 4-digit numbers (1100–9999)
+        // so years like 1947, 1857, 2019 read naturally instead of as
+        // "ek hazaar nau sau saintaalees".
+        const yearForm = yearStyleHindi(cleaned);
+        if (yearForm) return yearForm;
         const words = numberToHindiWords(cleaned);
         return words || match;
     });

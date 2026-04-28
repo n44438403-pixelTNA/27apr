@@ -19,6 +19,7 @@ import { UniversalChat } from './UniversalChat';
 import { ChallengeCreator20 } from './admin/ChallengeCreator20';
 import { FeatureAccessPage } from './admin/FeatureAccessPage';
 import { AdminPowerManager } from './AdminPowerManager';
+import { AdminTrendingNotes } from './AdminTrendingNotes';
 import { SyllabusManager } from './SyllabusManager';
 import { FeatureGroupList } from './admin/FeatureGroupList';
 import { ALL_FEATURES } from '../utils/featureRegistry';
@@ -3143,6 +3144,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   userRole={currentUser?.role || 'STUDENT'}
                   settings={localSettings}
               />
+              <AdminTrendingNotes />
+
               <div className="mt-4 flex justify-end">
                   <button onClick={() => onNavigate('STUDENT_DASHBOARD')} className="bg-slate-800 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-900 transition-all shadow-md text-xs">
                       <LogOut size={16} /> Exit

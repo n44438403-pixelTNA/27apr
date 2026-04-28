@@ -23,13 +23,22 @@ export const ClassSelection: React.FC<Props> = ({ selectedBoard, allowedClasses,
       ? (settings?.appMode?.allowedModesForPremium || ['SCHOOL', 'COMPETITION'])
       : (settings?.appMode?.allowedModesForFree || ['SCHOOL']);
 
-  // Filter visible classes based on allowed modes
-  const classes = all_classes.filter(c => {
-      // Always show SCHOOL classes
+  // Admins see everything (incl. hidden) so they can preview the impact.
+  const isAdminView = user?.role === 'ADMIN';
+  const hiddenSet = new Set<string>(isAdminView ? [] : (settings?.hiddenClasses || []));
+
+  // Include any admin-defined custom classes alongside the standard ones.
+  const customClasses = (settings?.customClasses || []) as ClassLevel[];
+  const baseList: ClassLevel[] = [...all_classes, ...customClasses];
+
+  // Filter visible classes based on allowed modes AND admin-set Visibility (hiddenClasses).
+  const classes = baseList.filter(c => {
+      // Hidden by admin → drop from student view entirely.
+      if (hiddenSet.has(c as string)) return false;
+      // Always show SCHOOL classes (subject to mode allowance)
       if (c !== 'COMPETITION') return allowedModes.includes('SCHOOL');
-      // Always show COMPETITION (to allow locking visual) unless explicitly excluded by some other logic?
-      // Actually, we want to show it so we can LOCK it.
-      return true; 
+      // Always show COMPETITION (to allow locking visual) unless explicitly hidden above.
+      return true;
   });
 
 

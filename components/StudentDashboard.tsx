@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   User,
   Subject,
@@ -122,6 +122,7 @@ import {
   Newspaper,
   PlusCircle,
   Search,
+  Users,
 } from "lucide-react";
 import { speakText, stopSpeech } from "../utils/textToSpeech";
 import { hapticLight, hapticMedium, hapticStrong } from "../utils/haptic";
@@ -158,7 +159,10 @@ import { CustomBloggerPage } from "./CustomBloggerPage";
 import { ReferralPopup } from "./ReferralPopup";
 import { StudentAiAssistant } from "./StudentAiAssistant";
 import { SpeakButton } from "./SpeakButton";
+import { McqSpeakButtons } from "./McqSpeakButtons";
+import { FlashcardMcqView } from "./FlashcardMcqView";
 import { ChunkedNotesReader } from "./ChunkedNotesReader";
+import { recordNoteStar, recordNoteUnstar, subscribeToTopNoteStars, hashTopic, NoteStarEntry } from "../services/noteStars";
 import { PerformanceGraph } from "./PerformanceGraph";
 import { StudentSidebar } from "./StudentSidebar";
 import { StudyGoalTimer } from "./StudyGoalTimer";
@@ -1109,6 +1113,14 @@ export const StudentDashboard: React.FC<Props> = ({
   const [lucentMcqsByPage, setLucentMcqsByPage] = useState<Record<string, MCQItem[]>>({});
   const [lucentMcqLoading, setLucentMcqLoading] = useState(false);
   const [lucentMcqRevealed, setLucentMcqRevealed] = useState<Record<string, number>>({});
+  // T2/T3: per-page Lucent + per-hw Sar Sangrah/Speedy MCQ display mode toggle.
+  // 'reveal' = direct-answer "show answer" flow; 'interactive' = build-answer quiz flow.
+  const [lucentMcqMode, setLucentMcqMode] = useState<Record<string, 'reveal' | 'interactive'>>({});
+  // Flashcard launcher (Lucent + Homework MCQs share this single overlay)
+  const [flashcardMcqs, setFlashcardMcqs] = useState<{ items: any[]; title: string; subtitle: string } | null>(null);
+  const [hwMcqMode, setHwMcqMode] = useState<Record<string, 'interactive' | 'reveal'>>({});
+  // Per-question selected option for Lucent interactive-mode MCQs (key = `${pageKey}_${qi}`)
+  const [lucentMcqAnswers, setLucentMcqAnswers] = useState<Record<string, number>>({});
   // Reset MCQ tab when page or note changes
   useEffect(() => { setLucentActiveTab('NOTES'); }, [lucentPageIndex, lucentNoteViewer?.id]);
   const [hwScrollProgress, setHwScrollProgress] = useState(0);
@@ -1122,6 +1134,33 @@ export const StudentDashboard: React.FC<Props> = ({
   const [homeResumeFilter, setHomeResumeFilter] = useState<'all' | 'chapter' | 'sarSangrah' | 'speedy' | 'mcq' | 'lucent'>('all');
   const [showHomeSearch, setShowHomeSearch] = useState(false);
   const [homeSearchQuery, setHomeSearchQuery] = useState('');
+  // When the user clicks a search result, we stash the query here so the
+  // ChunkedNotesReader on the next screen (Lucent / Homework notes) can find
+  // the matching topic and auto-read from that exact line. Cleared shortly
+  // after so re-visits don't keep auto-reading.
+  const [pendingReadQuery, setPendingReadQuery] = useState<string>('');
+  useEffect(() => {
+    if (!pendingReadQuery) return;
+    const t = setTimeout(() => setPendingReadQuery(''), 1500);
+    return () => clearTimeout(t);
+  }, [pendingReadQuery]);
+
+  // Global "social proof" counts for Important Notes — top 200 most-saved
+  // topics across all students. Backed by Firebase Realtime DB at
+  // `note_stars/{topicHash}`. Used to show "⭐ N students saved this" badges
+  // and to power the community "Most Saved" leaderboard.
+  const [globalNoteStars, setGlobalNoteStars] = useState<Record<string, NoteStarEntry>>({});
+  const [showCommunityStarsPage, setShowCommunityStarsPage] = useState(false);
+  const [starredPageTab, setStarredPageTab] = useState<'mine' | 'global'>('mine');
+  useEffect(() => {
+    const unsub = subscribeToTopNoteStars(200, setGlobalNoteStars);
+    return () => { try { unsub(); } catch {} };
+  }, []);
+  const getNoteStarCount = useCallback((topicText: string): number => {
+    if (!topicText) return 0;
+    const h = hashTopic(topicText);
+    return globalNoteStars[h]?.count || 0;
+  }, [globalNoteStars]);
   const [readingStreak, setReadingStreak] = useState<StreakInfo>({ current: 0, longest: 0, readToday: false });
   const [showStreakPopup, setShowStreakPopup] = useState(false);
   // When the user taps a "Today" subject banner card with multiple items, this picker shows the list.
@@ -1340,20 +1379,31 @@ export const StudentDashboard: React.FC<Props> = ({
   const allNotifications: AppNotification[] = settings?.notifications || [];
   const unreadNotifCount = allNotifications.filter(n => !seenNotifIds.includes(n.id)).length;
 
-  // Star/unstar a note topic
+  // Star/unstar a note topic. Also syncs to Firebase so we can show
+  // global "X students saved this" social-proof counts.
   const toggleStarNote = (noteKey: string, topicText: string) => {
+    let didStar = false;
     setStarredNotes(prev => {
       const existing = prev.find(n => n.noteKey === noteKey && n.topicText === topicText);
       let updated: typeof prev;
       if (existing) {
         updated = prev.filter(n => !(n.noteKey === noteKey && n.topicText === topicText));
+        didStar = false;
       } else {
         updated = [...prev, { id: Date.now().toString(), noteKey, topicText, savedAt: new Date().toISOString() }];
+        didStar = true;
       }
       try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
       return updated;
     });
     try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
+    // Fire-and-forget global count sync so other students see it.
+    try {
+      if (user?.id) {
+        if (didStar) recordNoteStar(user.id, noteKey, topicText);
+        else recordNoteUnstar(user.id, topicText);
+      }
+    } catch {}
   };
 
   const isNoteTopicStarred = (noteKey: string, topicText: string) =>
@@ -2735,6 +2785,8 @@ export const StudentDashboard: React.FC<Props> = ({
                       <ChunkedNotesReader
                         content={activeHw.notes!}
                         topBarLabel={activeHw.title}
+                        searchQuery={pendingReadQuery}
+                        getStarCount={getNoteStarCount}
                         initialIndex={activeHw.id ? hwNotePositions[activeHw.id] ?? null : null}
                         onPositionChange={(idx) => {
                           if (!activeHw.id) return;
@@ -2867,32 +2919,93 @@ export const StudentDashboard: React.FC<Props> = ({
                       </button>
                     )}
                   </div>
+                  {/* T3/T4: Mode selector — Khud Banao · Sidha Answer · Flashcard.
+                      All three modes share the same parsedMcqs source. */}
+                  {(() => {
+                    const hwModeKey = hwKey;
+                    const hwMode = hwMcqMode[hwModeKey] || 'interactive';
+                    return (
+                      <div className="bg-white border border-slate-200 rounded-2xl p-1.5 grid grid-cols-3 gap-1 shadow-sm mb-3">
+                        <button
+                          onClick={() => setHwMcqMode(prev => ({ ...prev, [hwModeKey]: 'interactive' }))}
+                          className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
+                            hwMode === 'interactive'
+                              ? `${theme.btn} text-white shadow-sm`
+                              : 'bg-transparent text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          ✋ Khud Banao
+                        </button>
+                        <button
+                          onClick={() => setHwMcqMode(prev => ({ ...prev, [hwModeKey]: 'reveal' }))}
+                          className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
+                            hwMode === 'reveal'
+                              ? 'bg-purple-600 text-white shadow-sm'
+                              : 'bg-transparent text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          👁 Sidha
+                        </button>
+                        <button
+                          onClick={() => {
+                            setFlashcardMcqs({
+                              items: (activeHw.parsedMcqs || []) as any,
+                              title: activeHw.title || 'Homework MCQs',
+                              subtitle: 'Flashcard Mode',
+                            });
+                          }}
+                          className="text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 active:scale-95"
+                        >
+                          🃏 Flashcard
+                        </button>
+                      </div>
+                    );
+                  })()}
                   <div className="space-y-3">
                     {activeHw.parsedMcqs!.map((mcq, qi) => {
                       const ansKey = `${hwKey}_${qi}`;
+                      const hwMode = hwMcqMode[hwKey] || 'interactive';
                       const selected = hwAnswers[ansKey];
+                      // In reveal mode, treat all questions as "answered correctly" so the
+                      // correct option is highlighted and the explanation is visible without
+                      // any tap. The student can flip to Khud Banao any time to actually quiz.
+                      const isRevealMode = hwMode === 'reveal';
+                      const showResult = isRevealMode || selected !== undefined;
                       return (
                         <div key={qi} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-                          <p className="text-sm font-bold text-slate-800 mb-3 leading-snug">{qi + 1}. {mcq.question}</p>
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <p className="text-sm font-bold text-slate-800 leading-snug flex-1">{qi + 1}. {mcq.question}</p>
+                            <McqSpeakButtons
+                              question={mcq.question}
+                              options={mcq.options}
+                              correctAnswer={mcq.correctAnswer}
+                              className="shrink-0"
+                            />
+                          </div>
                           <div className="space-y-2">
                             {mcq.options.map((opt, oi) => {
                               const isSelected = selected === oi;
                               const isCorrect = mcq.correctAnswer === oi;
-                              const showResult = selected !== undefined;
                               return (
-                                <button key={oi} onClick={() => { if (selected === undefined) setHwAnswers(prev => ({ ...prev, [ansKey]: oi })); }}
+                                <button
+                                  key={oi}
+                                  disabled={isRevealMode}
+                                  onClick={() => { if (!isRevealMode && selected === undefined) setHwAnswers(prev => ({ ...prev, [ansKey]: oi })); }}
                                   className={`w-full text-left text-sm px-4 py-2.5 rounded-xl border-2 transition-all font-medium ${showResult
                                     ? (isCorrect ? 'bg-green-50 border-green-400 text-green-800 font-bold'
                                       : isSelected ? 'bg-red-50 border-red-400 text-red-800'
                                       : 'bg-slate-50 border-slate-200 text-slate-500')
                                     : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50'}`}>
                                   <span className="font-black mr-2">{String.fromCharCode(65 + oi)}.</span>{opt}
+                                  {showResult && isCorrect && <span className="ml-2 text-green-700">✅</span>}
                                 </button>
                               );
                             })}
                           </div>
-                          {selected !== undefined && mcq.explanation && (
-                            <p className="text-xs text-slate-600 mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 leading-relaxed">{mcq.explanation}</p>
+                          {(isRevealMode || selected !== undefined) && mcq.explanation && (
+                            <p className="text-xs text-slate-600 mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 leading-relaxed">
+                              <span className="font-black text-amber-700">💡 Explanation:</span> {mcq.explanation}
+                            </p>
                           )}
                         </div>
                       );
@@ -4091,18 +4204,20 @@ export const StudentDashboard: React.FC<Props> = ({
                         });
                       });
                       const lucentResults = lucentHits.slice(0, 8);
-                      // 5) Match inside admin homework notes (text body)
+                      // 5) Match inside admin homework notes (notes body — the
+                      //    HomeworkItem field is `notes`, not `text`).
                       type HwHit = { hw: any; snippet: string };
                       const hwHits: HwHit[] = [];
                       (settings?.homework || []).forEach((hw: any) => {
-                        const text = stripHtml(hw.text || '').toLowerCase();
+                        const body = hw.notes || hw.text || '';
+                        const text = stripHtml(body).toLowerCase();
                         const titleHit = hw.title?.toLowerCase().includes(q);
                         if (text.includes(q) || titleHit) {
                           const idx = text.indexOf(q);
                           const start = Math.max(0, idx - 30);
                           const snippet = idx >= 0
-                            ? stripHtml(hw.text || '').substring(start, start + 120)
-                            : stripHtml(hw.text || '').substring(0, 120);
+                            ? stripHtml(body).substring(start, start + 120)
+                            : stripHtml(body).substring(0, 120);
                           hwHits.push({ hw, snippet });
                         }
                       });
@@ -4189,6 +4304,7 @@ export const StudentDashboard: React.FC<Props> = ({
                                   onClick={() => {
                                     setLucentNoteViewer(h.entry);
                                     setLucentPageIndex(h.pageIndex);
+                                    setPendingReadQuery(homeSearchQuery.trim());
                                     setShowHomeSearch(false);
                                     setHomeSearchQuery('');
                                   }}
@@ -4220,6 +4336,12 @@ export const StudentDashboard: React.FC<Props> = ({
                                       setSelectedSubject({ id: sub, name: sub, icon: 'book', color: 'bg-rose-50 text-rose-600' } as any);
                                       onTabChange('COURSES');
                                     }
+                                    // Open the exact homework item directly + show its notes view
+                                    if (hw.id) {
+                                      setHwActiveHwId(hw.id);
+                                      setHwViewMode('notes');
+                                    }
+                                    setPendingReadQuery(homeSearchQuery.trim());
                                     setShowHomeSearch(false);
                                     setHomeSearchQuery('');
                                   }}
@@ -4917,33 +5039,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 );
               })()}
 
-              {/* IMPORTANT NOTES — distinctive "rare" look (gradient + sparkle) */}
-              <button
-                onClick={() => setShowStarredPage(true)}
-                className="w-full p-4 flex items-center gap-3 bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 hover:from-amber-100 hover:via-yellow-100 hover:to-amber-100 transition-colors active:scale-[0.99] border-y border-amber-200/70 relative overflow-hidden"
-              >
-                <div className="relative shrink-0">
-                  <div className="bg-gradient-to-br from-amber-400 to-yellow-500 w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md shadow-amber-200">
-                    <Star size={18} fill="currentColor" />
-                  </div>
-                  <Sparkles size={10} className="absolute -top-0.5 -right-0.5 text-yellow-500 fill-yellow-300 drop-shadow" />
-                </div>
-                <div className="flex-1 text-left min-w-0">
-                  <p className="text-sm font-black text-amber-900 flex items-center gap-1.5">
-                    Important Notes
-                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-500 text-white uppercase tracking-wider">Rare</span>
-                  </p>
-                  <p className="text-[11px] text-amber-700/80 font-semibold">
-                    {starredNotes.length > 0 ? `${starredNotes.length} note${starredNotes.length !== 1 ? 's' : ''} saved · Read All & TTS` : 'Note pe ⭐ daba ke yahan save karo'}
-                  </p>
-                </div>
-                {starredNotes.length > 0 && (
-                  <span className="text-[10px] font-black text-white bg-amber-500 px-2 py-0.5 rounded-full shadow-sm">
-                    {starredNotes.length}
-                  </span>
-                )}
-                <ChevronRight size={16} className="text-amber-500 shrink-0" />
-              </button>
+              {/* Important Notes shortcut moved to bottom-nav (⭐ Important tab). */}
 
               {/* SETTINGS */}
               <button
@@ -6388,6 +6484,16 @@ export const StudentDashboard: React.FC<Props> = ({
                     Today's Homework
                   </p>
                 </div>
+                {/* GK SHORTCUT — moved here since GK was removed from bottom-nav */}
+                <button
+                  onClick={() => setShowDailyGkHistory(true)}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-black bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm hover:from-emerald-600 hover:to-teal-700 active:scale-95 transition-all"
+                  title="Daily GK"
+                  aria-label="Open Daily GK"
+                >
+                  <Sparkles size={13} />
+                  GK
+                </button>
               </div>
             </div>
 
@@ -8264,10 +8370,11 @@ export const StudentDashboard: React.FC<Props> = ({
               })(),
               {
                 id: "GK",
-                label: "GK",
-                Icon: Newspaper,
-                isActive: currentLogicalTab === "GK",
-                onClick: () => switchToLogicalTab("GK"),
+                label: "Important",
+                Icon: Star,
+                filledOnActive: true,
+                isActive: showStarredPage,
+                onClick: () => setShowStarredPage(true),
               },
               {
                 id: "VIDEO",
@@ -8918,6 +9025,8 @@ export const StudentDashboard: React.FC<Props> = ({
                     content={pageSpeakText}
                     topBarLabel={`Page ${currentPage.pageNo}`}
                     autoStart={autoSyncOn}
+                    searchQuery={pendingReadQuery}
+                    getStarCount={getNoteStarCount}
                     // Save this Lucent page to Continue Reading the moment TTS starts.
                     onReadingStart={() => {
                       try {
@@ -9085,6 +9194,48 @@ RULES:
                       )}
                     </div>
 
+                    {/* T2/T4: Mode selector — Sidha Answer · Khud Banao · Flashcard.
+                        Same MCQ set, three different study experiences. */}
+                    {mcqs.length > 0 && (() => {
+                      const mode = lucentMcqMode[pageKey] || 'reveal';
+                      return (
+                        <div className="bg-white border border-purple-100 rounded-2xl p-1.5 grid grid-cols-3 gap-1 shadow-sm">
+                          <button
+                            onClick={() => setLucentMcqMode(prev => ({ ...prev, [pageKey]: 'reveal' }))}
+                            className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
+                              mode === 'reveal'
+                                ? 'bg-purple-600 text-white shadow-sm'
+                                : 'bg-transparent text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            👁 Sidha
+                          </button>
+                          <button
+                            onClick={() => setLucentMcqMode(prev => ({ ...prev, [pageKey]: 'interactive' }))}
+                            className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
+                              mode === 'interactive'
+                                ? 'bg-indigo-600 text-white shadow-sm'
+                                : 'bg-transparent text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            ✋ Khud Banao
+                          </button>
+                          <button
+                            onClick={() => {
+                              setFlashcardMcqs({
+                                items: mcqs as any,
+                                title: entry.lessonTitle || 'Lucent MCQs',
+                                subtitle: `Page ${currentPage?.pageNo || ''} · Flashcards`,
+                              });
+                            }}
+                            className="text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 active:scale-95"
+                          >
+                            🃏 Flashcard
+                          </button>
+                        </div>
+                      );
+                    })()}
+
                     {/* Empty / loading / generate state — only when no admin MCQs are present */}
                     {!usingAdminMcqs && mcqs.length === 0 && (
                       <div className="bg-white border border-purple-100 rounded-2xl p-6 text-center">
@@ -9111,61 +9262,111 @@ RULES:
                       </div>
                     )}
 
-                    {/* MCQ cards (Speedy-style inline) */}
-                    {mcqs.map((q, qi) => {
-                      const isRevealed = qi < revealedCount;
-                      return (
-                        <div key={(q as any).id || qi} className="bg-white border border-purple-100 rounded-2xl p-4 shadow-sm">
-                          <div className="flex items-start gap-2 mb-2">
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 shrink-0">Q {qi + 1}</span>
-                            {q.topic && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 truncate">{q.topic}</span>}
-                            {q.difficulty && (
-                              <span className={`ml-auto text-[10px] font-black px-2 py-0.5 rounded-full ${
-                                q.difficulty === 'EASY' ? 'bg-emerald-100 text-emerald-700' :
-                                q.difficulty === 'HARD' ? 'bg-rose-100 text-rose-700' :
-                                'bg-amber-100 text-amber-700'
-                              }`}>📊 {q.difficulty}</span>
+                    {/* MCQ cards (Speedy-style inline) — supports both 'reveal' and 'interactive' modes */}
+                    {(() => {
+                      const mode = lucentMcqMode[pageKey] || 'reveal';
+                      return mcqs.map((q, qi) => {
+                        const isRevealed = qi < revealedCount;
+                        const ansKey = `${pageKey}_${qi}`;
+                        const selected = lucentMcqAnswers[ansKey];
+                        const interactiveAnswered = mode === 'interactive' && selected !== undefined;
+                        const showAnswerColors = mode === 'interactive' ? interactiveAnswered : isRevealed;
+                        const showExplanations = mode === 'interactive' ? interactiveAnswered : isRevealed;
+
+                        return (
+                          <div key={(q as any).id || qi} className="bg-white border border-purple-100 rounded-2xl p-4 shadow-sm">
+                            <div className="flex items-start gap-2 mb-2">
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 shrink-0">Q {qi + 1}</span>
+                              {q.topic && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 truncate">{q.topic}</span>}
+                              {q.difficulty && (
+                                <span className={`ml-auto text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                  q.difficulty === 'EASY' ? 'bg-emerald-100 text-emerald-700' :
+                                  q.difficulty === 'HARD' ? 'bg-rose-100 text-rose-700' :
+                                  'bg-amber-100 text-amber-700'
+                                }`}>📊 {q.difficulty}</span>
+                              )}
+                            </div>
+                            <div className="flex items-start justify-between gap-2 mb-3">
+                              <p className="text-sm font-black text-slate-800 leading-snug flex-1">{q.question}</p>
+                              <McqSpeakButtons
+                                question={q.question}
+                                options={q.options || []}
+                                correctAnswer={q.correctAnswer}
+                                className="shrink-0"
+                              />
+                            </div>
+                            <div className="space-y-1.5 mb-3">
+                              {(q.options || []).map((opt: string, oi: number) => {
+                                const isCorrect = oi === q.correctAnswer;
+                                const isSelected = mode === 'interactive' && selected === oi;
+                                let cls = 'px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-start gap-2';
+                                if (showAnswerColors) {
+                                  if (isCorrect) cls += ' bg-emerald-50 border-emerald-300 text-emerald-800';
+                                  else if (isSelected) cls += ' bg-rose-50 border-rose-300 text-rose-800';
+                                  else cls += ' bg-slate-50 border-slate-200 text-slate-500 opacity-70';
+                                } else {
+                                  cls += mode === 'interactive'
+                                    ? ' bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer'
+                                    : ' bg-slate-50 border-slate-200 text-slate-700';
+                                }
+                                const onClick = () => {
+                                  if (mode !== 'interactive') return;
+                                  if (selected !== undefined) return;
+                                  setLucentMcqAnswers(prev => ({ ...prev, [ansKey]: oi }));
+                                };
+                                return (
+                                  <button
+                                    type="button"
+                                    key={oi}
+                                    onClick={onClick}
+                                    disabled={mode !== 'interactive' || selected !== undefined}
+                                    className={`${cls} w-full text-left`}
+                                  >
+                                    <span className="font-black mr-1">{String.fromCharCode(65 + oi)}.</span>
+                                    <span className="flex-1">{opt}</span>
+                                    {showAnswerColors && isCorrect && <span>✅</span>}
+                                    {showAnswerColors && isSelected && !isCorrect && <span>❌</span>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {/* Reveal mode trigger */}
+                            {mode === 'reveal' && !isRevealed && (
+                              <button
+                                onClick={() => setLucentMcqRevealed(prev => ({ ...prev, [pageKey]: Math.max(prev[pageKey] || 0, qi + 1) }))}
+                                className="w-full py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-700 font-black text-xs active:scale-95 transition"
+                              >
+                                Show Answer & Explanation
+                              </button>
+                            )}
+                            {/* Interactive mode hint when not yet answered */}
+                            {mode === 'interactive' && selected === undefined && (
+                              <p className="text-[10px] font-bold text-slate-400 text-center py-1">Koi option select karein</p>
+                            )}
+                            {/* Reset for interactive */}
+                            {mode === 'interactive' && selected !== undefined && (
+                              <button
+                                onClick={() => setLucentMcqAnswers(prev => { const n = { ...prev }; delete n[ansKey]; return n; })}
+                                className="w-full mt-1 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[11px] active:scale-95 transition"
+                              >
+                                🔄 Phir try karein
+                              </button>
+                            )}
+                            {showExplanations && (
+                              <div className="space-y-1.5 text-[11px] leading-relaxed mt-2">
+                                {q.concept && <p className="bg-blue-50 border border-blue-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-blue-700">💡 Concept:</span> {q.concept}</p>}
+                                {q.explanation && <p className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-slate-700">🔎 Explanation:</span> {q.explanation}</p>}
+                                {q.examTip && <p className="bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-amber-700">🎯 Exam Tip:</span> {q.examTip}</p>}
+                                {q.commonMistake && <p className="bg-rose-50 border border-rose-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-rose-700">⚠ Common Mistake:</span> {q.commonMistake}</p>}
+                                {q.mnemonic && <p className="bg-purple-50 border border-purple-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-purple-700">🧠 Memory Trick:</span> {q.mnemonic}</p>}
+                              </div>
                             )}
                           </div>
-                          <p className="text-sm font-black text-slate-800 leading-snug mb-3">{q.question}</p>
-                          <div className="space-y-1.5 mb-3">
-                            {(q.options || []).map((opt: string, oi: number) => {
-                              const isCorrect = oi === q.correctAnswer;
-                              return (
-                                <div
-                                  key={oi}
-                                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
-                                    isRevealed && isCorrect
-                                      ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                                      : 'bg-slate-50 border-slate-200 text-slate-700'
-                                  }`}
-                                >
-                                  {isRevealed && isCorrect ? '✅ ' : ''}{opt}
-                                </div>
-                              );
-                            })}
-                          </div>
-                          {!isRevealed ? (
-                            <button
-                              onClick={() => setLucentMcqRevealed(prev => ({ ...prev, [pageKey]: Math.max(prev[pageKey] || 0, qi + 1) }))}
-                              className="w-full py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-700 font-black text-xs active:scale-95 transition"
-                            >
-                              Show Answer & Explanation
-                            </button>
-                          ) : (
-                            <div className="space-y-1.5 text-[11px] leading-relaxed">
-                              {q.concept && <p className="bg-blue-50 border border-blue-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-blue-700">💡 Concept:</span> {q.concept}</p>}
-                              {q.explanation && <p className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-slate-700">🔎 Explanation:</span> {q.explanation}</p>}
-                              {q.examTip && <p className="bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-amber-700">🎯 Exam Tip:</span> {q.examTip}</p>}
-                              {q.commonMistake && <p className="bg-rose-50 border border-rose-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-rose-700">⚠ Common Mistake:</span> {q.commonMistake}</p>}
-                              {q.mnemonic && <p className="bg-purple-50 border border-purple-100 rounded-lg px-2.5 py-1.5 text-slate-700"><span className="font-black text-purple-700">🧠 Memory Trick:</span> {q.mnemonic}</p>}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
 
-                    {mcqs.length > 0 && revealedCount < mcqs.length && (
+                    {mcqs.length > 0 && (lucentMcqMode[pageKey] || 'reveal') === 'reveal' && revealedCount < mcqs.length && (
                       <button
                         onClick={() => setLucentMcqRevealed(prev => ({ ...prev, [pageKey]: mcqs.length }))}
                         className="w-full py-2.5 rounded-xl bg-white border-2 border-purple-200 text-purple-700 font-black text-xs active:scale-95 transition"
@@ -9604,11 +9805,28 @@ RULES:
         </div>
       )}
 
-      {/* ===================== STARRED NOTES PAGE ===================== */}
+      {/* ===================== FLASHCARD MCQ OVERLAY (shared by Lucent + Homework) ===================== */}
+      {flashcardMcqs && (
+        <FlashcardMcqView
+          questions={flashcardMcqs.items}
+          title={flashcardMcqs.title}
+          subtitle={flashcardMcqs.subtitle}
+          onBack={() => setFlashcardMcqs(null)}
+        />
+      )}
+
+      {/* ===================== STARRED NOTES PAGE (My Saved + Global tabs) ===================== */}
       {showStarredPage && (() => {
         const filtered = [...starredNotes].reverse().filter(n =>
           n.topicText?.toLowerCase().includes(profileStarSearch.toLowerCase())
         );
+        // Build the global list. Includes EVERY note that has at least one save
+        // (not just the top counts). Sorted by save count desc.
+        const globalList = Object.values(globalNoteStars)
+          .filter(e => e.count > 0 && e.label)
+          .filter(e => !profileStarSearch || e.label.toLowerCase().includes(profileStarSearch.toLowerCase()))
+          .sort((a, b) => b.count - a.count);
+        const globalTopCount = globalList[0]?.count || 0;
         return (
         <div className="fixed inset-0 z-[9000] bg-white flex flex-col animate-in slide-in-from-right-full duration-300">
           <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-white sticky top-0 z-10">
@@ -9621,10 +9839,12 @@ RULES:
                 Important Notes
               </h2>
               <p className="text-[11px] text-slate-500">
-                {profileStarSearch ? `${filtered.length}/${starredNotes.length}` : starredNotes.length} note{starredNotes.length !== 1 ? 's' : ''} saved
+                {starredPageTab === 'mine'
+                  ? `${profileStarSearch ? `${filtered.length}/${starredNotes.length}` : starredNotes.length} note${starredNotes.length !== 1 ? 's' : ''} saved`
+                  : `${globalList.length} note${globalList.length !== 1 ? 's' : ''} from community`}
               </p>
             </div>
-            {starredNotes.length > 0 && (
+            {starredPageTab === 'mine' && starredNotes.length > 0 && (
               <button
                 onClick={() => {
                   if (!confirm('Saare starred notes delete karne hain?')) return;
@@ -9638,7 +9858,42 @@ RULES:
               </button>
             )}
           </div>
+
+          {/* MY SAVED / GLOBAL tab toggle */}
+          <div className="px-4 pt-3 pb-2 bg-white border-b border-amber-50">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-amber-50 rounded-2xl border border-amber-100">
+              <button
+                onClick={() => { stopProfileStarRead(); setStarredPageTab('mine'); }}
+                className={`py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                  starredPageTab === 'mine'
+                    ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
+                    : 'text-amber-600 hover:text-amber-800'
+                }`}
+              >
+                <Star size={12} className="fill-amber-500 text-amber-500" />
+                My Saved
+                <span className={`text-[9px] px-1.5 rounded-full ${starredPageTab === 'mine' ? 'bg-amber-500 text-white' : 'bg-amber-200 text-amber-800'}`}>
+                  {starredNotes.length}
+                </span>
+              </button>
+              <button
+                onClick={() => { stopProfileStarRead(); setStarredPageTab('global'); }}
+                className={`py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                  starredPageTab === 'global'
+                    ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
+                    : 'text-amber-600 hover:text-amber-800'
+                }`}
+              >
+                <Users size={12} />
+                Global
+                <span className={`text-[9px] px-1.5 rounded-full ${starredPageTab === 'global' ? 'bg-amber-500 text-white' : 'bg-amber-200 text-amber-800'}`}>
+                  {globalList.length}
+                </span>
+              </button>
+            </div>
+          </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {starredPageTab === 'mine' && (<>
             {/* Read All toolbar */}
             {filtered.length > 0 && (
               <div className="flex items-center gap-2">
@@ -9714,6 +9969,7 @@ RULES:
             ) : (
               filtered.map((note, idx) => {
                 const isCurrentlyReading = isReadingProfileStars && readingProfileStarIdx === idx;
+                const socialCount = getNoteStarCount(note.topicText);
                 return (
                   <div
                     key={note.id}
@@ -9738,9 +9994,20 @@ RULES:
                     </button>
                     <div className="flex-1 min-w-0">
                       <p className={`font-bold text-sm leading-snug ${isCurrentlyReading ? 'text-amber-800' : 'text-slate-800'}`}>{note.topicText}</p>
-                      <p className="text-[10px] text-amber-500 font-bold mt-1">
-                        {note.savedAt ? new Date(note.savedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                        <p className="text-[10px] text-amber-500 font-bold">
+                          {note.savedAt ? new Date(note.savedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                        </p>
+                        {socialCount > 1 && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-100 to-orange-100 border border-amber-300 text-amber-800 text-[10px] font-black"
+                            title={`${socialCount} students ne is note ko Important mark kiya hai`}
+                          >
+                            <Star size={9} className="fill-amber-500 text-amber-500" />
+                            {socialCount.toLocaleString('en-IN')} students saved
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       onClick={() => {
@@ -9759,8 +10026,204 @@ RULES:
                 );
               })
             )}
+          </>)}
+
+          {starredPageTab === 'global' && (<>
+            {/* Search bar (shared placeholder) */}
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-400 pointer-events-none" />
+              <input
+                type="text"
+                value={profileStarSearch}
+                onChange={e => setProfileStarSearch(e.target.value)}
+                placeholder="Global notes mein search karo..."
+                className="w-full pl-8 pr-8 py-2.5 text-xs font-semibold bg-amber-50 border border-amber-200 rounded-xl text-slate-700 placeholder-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-300 transition-all"
+              />
+              {profileStarSearch && (
+                <button
+                  onClick={() => setProfileStarSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-400 hover:text-amber-600 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            <div className="text-[11px] font-bold text-slate-500 px-1 flex items-center gap-1.5">
+              <Users size={11} className="text-amber-500" />
+              Sare students kya save kar rahe hain — tap to add to your saved
+            </div>
+
+            {globalList.length === 0 ? (
+              <div className="text-center py-14 bg-amber-50 rounded-2xl border border-amber-100">
+                <Users size={40} className="text-amber-300 mx-auto mb-3" />
+                <p className="font-bold text-slate-600 text-sm">Abhi koi global note nahi.</p>
+                <p className="text-xs text-slate-400 mt-1">Pehla student ban ke ⭐ daba ke trend shuru karo.</p>
+              </div>
+            ) : (
+              globalList.map((entry, idx) => {
+                const minePulled = starredNotes.find(n => n.topicText === entry.label);
+                const isMine = !!minePulled;
+                const pct = globalTopCount > 0 ? Math.max(6, Math.round((entry.count / globalTopCount) * 100)) : 0;
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
+                return (
+                  <div
+                    key={entry.hash || idx}
+                    className={`rounded-2xl p-3 shadow-sm border transition-all ${
+                      isMine ? 'bg-amber-50 border-amber-300' : 'bg-white border-amber-200'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br from-amber-100 to-orange-100 border border-amber-200 text-amber-700 font-black text-xs">
+                        {medal || `#${idx + 1}`}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-sm leading-snug text-slate-800 line-clamp-2">{entry.label}</p>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-black text-amber-700 shrink-0">
+                            {entry.count.toLocaleString('en-IN')} ⭐
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (isMine && minePulled) {
+                            // Untap: remove from local + decrement global count
+                            setStarredNotes(prev => {
+                              const updated = prev.filter(n => n.id !== minePulled.id);
+                              try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
+                              return updated;
+                            });
+                            try {
+                              if (user?.id) {
+                                import('../services/noteStars').then(m => m.recordNoteUnstar(entry.label, user.id)).catch(()=>{});
+                              }
+                            } catch {}
+                          } else {
+                            // Tap to save → add to My Saved + increment global
+                            const newEntry = {
+                              id: `global_${entry.hash || Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+                              noteKey: `community_${entry.hash || ''}`,
+                              topicText: entry.label,
+                              savedAt: Date.now(),
+                            };
+                            setStarredNotes(prev => {
+                              if (prev.some(n => n.topicText === entry.label)) return prev;
+                              const updated = [...prev, newEntry];
+                              try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
+                              return updated;
+                            });
+                            try {
+                              if (user?.id) {
+                                import('../services/noteStars').then(m => m.recordNoteStar(entry.label, user.id)).catch(()=>{});
+                              }
+                            } catch {}
+                          }
+                        }}
+                        className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all active:scale-95 ${
+                          isMine
+                            ? 'bg-amber-500 text-white shadow-sm'
+                            : 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200'
+                        }`}
+                        title={isMine ? 'Saved — tap to remove' : 'Tap to save'}
+                      >
+                        <Star size={11} fill={isMine ? 'currentColor' : 'none'} />
+                        {isMine ? 'Saved' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </>)}
           </div>
         </div>
+        );
+      })()}
+
+      {/* ===================== COMMUNITY "MOST SAVED" / TRENDING NOTES PAGE ===================== */}
+      {showCommunityStarsPage && (() => {
+        const ranked = Object.values(globalNoteStars)
+          .filter(e => e.count > 0 && e.label)
+          .sort((a, b) => b.count - a.count);
+        const topCount = ranked[0]?.count || 0;
+        return (
+          <div className="fixed inset-0 z-[9100] bg-gradient-to-b from-amber-50 to-white flex flex-col animate-in slide-in-from-right-full duration-300">
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-amber-100 bg-white/95 backdrop-blur sticky top-0 z-10">
+              <button
+                onClick={() => setShowCommunityStarsPage(false)}
+                className="p-2 rounded-full hover:bg-amber-100 text-amber-700"
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <div className="flex-1 min-w-0">
+                <h2 className="font-black text-base text-slate-800 flex items-center gap-2">
+                  <Star size={16} className="text-amber-500" fill="currentColor" />
+                  Trending Important Notes
+                </h2>
+                <p className="text-[11px] text-slate-500 font-bold">
+                  Sare students kya save kar rahe hain — live count
+                </p>
+              </div>
+              <span className="text-[10px] font-black uppercase text-amber-600 bg-amber-100 px-2 py-1 rounded-full border border-amber-200">
+                {ranked.length} notes
+              </span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+              {ranked.length === 0 ? (
+                <div className="text-center py-16 bg-white rounded-2xl border border-amber-100 shadow-sm">
+                  <Star size={40} className="text-amber-300 mx-auto mb-3" />
+                  <p className="font-bold text-slate-600 text-sm">Abhi koi trending note nahi.</p>
+                  <p className="text-xs text-slate-400 mt-1">Jaise hi students notes ko ⭐ karna shuru karenge,<br/>yahan top saved notes dikhne lagengi.</p>
+                </div>
+              ) : (
+                ranked.map((entry, idx) => {
+                  const pct = topCount > 0 ? Math.max(8, Math.round((entry.count / topCount) * 100)) : 0;
+                  const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+                  return (
+                    <div
+                      key={entry.hash}
+                      className="bg-white rounded-2xl p-3.5 border border-amber-200 shadow-sm flex items-start gap-3"
+                    >
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-black text-sm ${
+                        idx < 3 ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                      }`}>
+                        {medal}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-sm text-slate-800 leading-snug line-clamp-3">
+                          {entry.label}
+                        </p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full transition-all duration-700"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[11px] font-black text-amber-700 shrink-0 inline-flex items-center gap-1">
+                            <Star size={10} className="fill-amber-500 text-amber-500" />
+                            {entry.count.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              {ranked.length > 0 && (
+                <p className="text-center text-[10px] font-bold text-amber-500 pt-3 pb-6">
+                  Aap akele nahi padh rahe — poori community saath padh rahi hai 🌟
+                </p>
+              )}
+            </div>
+          </div>
         );
       })()}
     </div>

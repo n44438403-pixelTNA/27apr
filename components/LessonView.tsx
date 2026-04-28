@@ -11,6 +11,7 @@ import { decodeHtml } from '../utils/htmlDecoder';
 import { storage } from '../utils/storage';
 import { getChapterData, saveUserHistory, saveTestResult, saveUserToLive } from '../firebase';
 import { SpeakButton } from './SpeakButton';
+import { McqSpeakButtons } from './McqSpeakButtons';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
 import { renderMathInHtml } from '../utils/mathUtils';
 import { stopSpeaking } from '../utils/ttsHighlighter';
@@ -1504,7 +1505,14 @@ export const LessonView: React.FC<Props> = ({
                                                                    )}
                                                                </div>
                                                            </div>
-                                                           <SpeakButton text={fullQuestionText} className="shrink-0" settings={settings} />
+                                                           <McqSpeakButtons
+                                                               question={q.question}
+                                                               options={q.options}
+                                                               correctAnswer={q.correctAnswer}
+                                                               className="shrink-0"
+                                                               allQuestions={group.questions as any}
+                                                               index={localI}
+                                                           />
                                                        </div>
                                                        <div className="space-y-2">
                                                            {q.options.map((opt, oIdx) => {
@@ -1587,13 +1595,24 @@ export const LessonView: React.FC<Props> = ({
                                                    )}
                                                </div>
                                            </div>
-                                           <SpeakButton
-                                               text={fullQuestionText}
-                                               className="shrink-0"
-                                               settings={settings}
-                                               autoPlay={autoReadEnabled && !showResults && !showSubmitModal}
-                                               onToggleAutoTts={onToggleAutoTts}
-                                           />
+                                           <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                               <McqSpeakButtons
+                                                   question={q.question}
+                                                   options={q.options}
+                                                   correctAnswer={q.correctAnswer}
+                                                   allQuestions={currentBatchData as any}
+                                                   index={localIdx}
+                                               />
+                                               {autoReadEnabled && !showResults && !showSubmitModal && (
+                                                   <SpeakButton
+                                                       text={fullQuestionText}
+                                                       className="hidden"
+                                                       settings={settings}
+                                                       autoPlay={autoReadEnabled && !showResults && !showSubmitModal}
+                                                       onToggleAutoTts={onToggleAutoTts}
+                                                   />
+                                               )}
+                                           </div>
                                        </div>
                                        <div className="space-y-2">
                                            {q.options.map((opt, oIdx) => {

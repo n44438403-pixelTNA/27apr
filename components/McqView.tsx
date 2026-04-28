@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Chapter, User, Subject, SystemSettings, MCQResult, PerformanceTag } from '../types';
-import { CheckCircle, Lock, ArrowLeft, Crown, PlayCircle, HelpCircle, Trophy, Clock, BrainCircuit, FileText } from 'lucide-react';
+import { CheckCircle, Lock, ArrowLeft, Crown, PlayCircle, HelpCircle, Trophy, Clock, BrainCircuit, FileText, Layers } from 'lucide-react';
 import { checkFeatureAccess } from '../utils/permissionUtils';
 import { CustomAlert, CustomConfirm } from './CustomDialogs';
 import { getChapterData, saveUserToLive, saveUserHistory, savePublicActivity } from '../firebase';
@@ -10,6 +10,7 @@ import { saveOfflineItem } from '../utils/offlineStorage';
 import { LessonView } from './LessonView'; 
 import { MarksheetCard } from './MarksheetCard';
 import { AiInterstitial } from './AiInterstitial';
+import { FlashcardMcqView } from './FlashcardMcqView';
 
 interface Props {
   chapter: Chapter;
@@ -28,7 +29,8 @@ export const McqView: React.FC<Props> = ({
   chapter, subject, user, board, classLevel, stream, onBack, onUpdateUser, settings, topicFilter
 }) => {
   const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'SELECTION' | 'PRACTICE' | 'TEST'>('SELECTION');
+  const [viewMode, setViewMode] = useState<'SELECTION' | 'PRACTICE' | 'TEST' | 'FLASHCARD'>('SELECTION');
+  const [flashcardData, setFlashcardData] = useState<any[] | null>(null);
   const [lessonContent, setLessonContent] = useState<any>(null); // To pass to LessonView
   const [resultData, setResultData] = useState<MCQResult | null>(null);
   const [completedMcqData, setCompletedMcqData] = useState<any[]>([]); // Store used data for analysis
@@ -69,6 +71,43 @@ export const McqView: React.FC<Props> = ({
           } catch(e) {}
       }
   }, [board, classLevel, stream, subject, chapter]);
+
+  const handleStartFlashcard = async () => {
+      setLoading(true);
+      const streamKey = (classLevel === '11' || classLevel === '12') && stream ? `-${stream}` : '';
+      const key = `nst_content_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
+      let data: any = null;
+      try {
+          const fetchWithTimeout = (promise: Promise<any>, ms: number) =>
+              Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject('timeout'), ms))]);
+          data = await fetchWithTimeout(getChapterData(key), 2500);
+      } catch {}
+      if (!data) {
+          const stored = localStorage.getItem(key);
+          if (stored) data = JSON.parse(stored);
+      }
+      if (!data || !data.manualMcqData || data.manualMcqData.length === 0) {
+          setAlertConfig({ isOpen: true, title: 'Coming Soon', message: 'Is chapter ke MCQs abhi tak available nahi hain.' });
+          setLoading(false);
+          return;
+      }
+      let qs = [...data.manualMcqData];
+      const activeFilter = topicFilter || selectedTopic;
+      if (activeFilter) qs = qs.filter((q: any) => q.topic === activeFilter);
+      // Shuffle so flashcard order varies
+      for (let i = qs.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [qs[i], qs[j]] = [qs[j], qs[i]];
+      }
+      if (qs.length === 0) {
+          setAlertConfig({ isOpen: true, title: 'No Questions', message: `Topic "${activeFilter}" ke liye koi MCQ nahi mila.` });
+          setLoading(false);
+          return;
+      }
+      setFlashcardData(qs);
+      setViewMode('FLASHCARD');
+      setLoading(false);
+  };
 
   const handleStart = async (mode: 'PRACTICE' | 'TEST') => {
       // DAILY LIMIT CHECK
@@ -742,7 +781,14 @@ export const McqView: React.FC<Props> = ({
            onCancel={() => setConfirmConfig({...confirmConfig, isOpen: false})}
        />
 
-       {viewMode !== 'SELECTION' && lessonContent ? (
+       {viewMode === 'FLASHCARD' && flashcardData ? (
+          <FlashcardMcqView
+              questions={flashcardData as any}
+              title={chapter.title}
+              subtitle={`${subject.name} • Flashcard Mode`}
+              onBack={() => { setViewMode('SELECTION'); setFlashcardData(null); }}
+          />
+       ) : viewMode !== 'SELECTION' && lessonContent ? (
           <LessonView
               content={lessonContent}
               subject={subject}
@@ -917,6 +963,33 @@ export const McqView: React.FC<Props> = ({
                );
            })()}
            
+           {/* FLASHCARD MODE — quick study; no scoring */}
+           {(() => {
+               return (
+                   <button
+                       onClick={() => handleStartFlashcard()}
+                       disabled={loading}
+                       className="w-full p-6 rounded-3xl border-2 border-slate-200 hover:border-amber-300 hover:bg-amber-50 transition-all group text-left relative overflow-hidden bg-white"
+                   >
+                       <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                           <Layers size={80} className="text-amber-600" />
+                       </div>
+                       <div className="relative z-10">
+                           <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mb-4">
+                               <Layers size={24} />
+                           </div>
+                           <h4 className="text-xl font-black text-slate-800 mb-1">Flashcard Mode</h4>
+                           <p className="text-sm text-slate-600 mb-4">
+                               MCQ ko flashcard ki tarah dekhein. Tap karke answer flip karein. Prev/Next se navigate.
+                           </p>
+                           <span className="px-4 py-2 rounded-lg text-xs font-bold shadow-lg bg-amber-600 text-white shadow-amber-200">
+                               START FLASHCARDS
+                           </span>
+                       </div>
+                   </button>
+               );
+           })()}
+
            {loading && <div className="text-center py-4 text-slate-600 font-bold animate-pulse">Loading Questions...</div>}
        </div>
 
