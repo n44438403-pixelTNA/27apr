@@ -1157,11 +1157,50 @@ export const StudentDashboard: React.FC<Props> = ({
     const unsub = subscribeToTopNoteStars(200, setGlobalNoteStars);
     return () => { try { unsub(); } catch {} };
   }, []);
+  // Admin-controlled "social proof" inflation. When admin sets these in
+  // System Settings, displayed ⭐ counts show actual+boost (and at least
+  // `min`). Real DB values are unchanged — this is purely a display layer.
+  // If max > min, each note gets a DIFFERENT boost in [min, max] seeded by
+  // its own hash — stable across renders, but varied across notes (so it
+  // doesn't look like every note magically got the same +N). 200, 500,
+  // 11901... har note ka apna number.
+  const fakeStarBoost = Math.max(0, Math.floor(Number(settings?.globalNotesFakeBoost) || 0));
+  const fakeStarBoostMax = Math.max(0, Math.floor(Number(settings?.globalNotesFakeBoostMax) || 0));
+  const fakeStarMin = Math.max(0, Math.floor(Number(settings?.globalNotesFakeMin) || 0));
+  // djb2-style positive 32-bit hash → mapped to [0, 1) for deterministic per-note variation.
+  const seedRand = useCallback((seed: string): number => {
+    if (!seed) return 0;
+    let h = 5381;
+    for (let i = 0; i < seed.length; i++) {
+      h = (h * 33) ^ seed.charCodeAt(i);
+    }
+    return ((h >>> 0) % 1000003) / 1000003;
+  }, []);
+  const applyStarBoost = useCallback((rawCount: number, seed?: string): number => {
+    const base = Math.max(0, Math.floor(Number(rawCount) || 0));
+    if (base <= 0 && fakeStarBoost <= 0 && fakeStarMin <= 0) return 0;
+    let perNoteBoost = fakeStarBoost;
+    // Vary per-note when admin set a wider range. We mix the per-note seed
+    // with a slow-moving time bucket (changes every ~6 hours) so the same
+    // note shows DIFFERENT counts at different times — kabhi 200, kabhi 500,
+    // kabhi 11901 — making it look like organic activity instead of a
+    // suspicious flat boost. Without a seed we still fall back to flat boost.
+    if (fakeStarBoostMax > fakeStarBoost && seed) {
+      const timeBucket = Math.floor(Date.now() / (6 * 60 * 60 * 1000)); // 6-hour window
+      const r = seedRand(seed + ':' + timeBucket);
+      perNoteBoost = fakeStarBoost + Math.floor(r * (fakeStarBoostMax - fakeStarBoost + 1));
+    } else if (fakeStarBoostMax > fakeStarBoost) {
+      perNoteBoost = fakeStarBoost; // no seed → use min end
+    }
+    const boosted = base + perNoteBoost;
+    return Math.max(boosted, fakeStarMin);
+  }, [fakeStarBoost, fakeStarBoostMax, fakeStarMin, seedRand]);
   const getNoteStarCount = useCallback((topicText: string): number => {
     if (!topicText) return 0;
     const h = hashTopic(topicText);
-    return globalNoteStars[h]?.count || 0;
-  }, [globalNoteStars]);
+    const raw = globalNoteStars[h]?.count || 0;
+    return applyStarBoost(raw, h);
+  }, [globalNoteStars, applyStarBoost]);
   const [readingStreak, setReadingStreak] = useState<StreakInfo>({ current: 0, longest: 0, readToday: false });
   const [showStreakPopup, setShowStreakPopup] = useState(false);
   // When the user taps a "Today" subject banner card with multiple items, this picker shows the list.
@@ -2351,9 +2390,18 @@ export const StudentDashboard: React.FC<Props> = ({
     setLoadingChapters(true);
     const lang =
       (activeSessionBoard || user.board) === "BSEB" ? "Hindi" : "English";
+    const currentClass = (activeSessionClass as any) || user.classLevel || "10";
+    // Inject admin-added Lucent books targeted to this class (page-wise notes/MCQ — Competition-style)
+    const adminLucentForClass: Chapter[] = ((settings?.lucentNotes || []) as LucentNoteEntry[])
+      .filter(n => (n.classLevel || 'COMPETITION') === currentClass)
+      .map(n => ({
+        id: `lucent_admin_${n.id}`,
+        title: `📘 ${n.bookName || n.lessonTitle} — ${n.lessonTitle}`,
+        description: `Admin Notes • ${n.pages.length} page${n.pages.length === 1 ? '' : 's'}`,
+      }));
     fetchChapters(
       activeSessionBoard || user.board || "CBSE",
-      (activeSessionClass as any) || user.classLevel || "10",
+      currentClass,
       user.stream || "Science",
       subject,
       lang,
@@ -2370,7 +2418,7 @@ export const StudentDashboard: React.FC<Props> = ({
         }
         return a.title.localeCompare(b.title);
       });
-      setChapters(sortedData);
+      setChapters([...adminLucentForClass, ...sortedData]);
       setLoadingChapters(false);
     });
   };
@@ -9924,8 +9972,9 @@ RULES:
         const globalList = Object.values(globalNoteStars)
           .filter(e => e.count > 0 && e.label)
           .filter(e => !profileStarSearch || e.label.toLowerCase().includes(profileStarSearch.toLowerCase()))
-          .sort((a, b) => b.count - a.count);
-        const globalTopCount = globalList[0]?.count || 0;
+          .map(e => ({ ...e, displayCount: applyStarBoost(e.count, e.hash) }))
+          .sort((a, b) => b.displayCount - a.displayCount);
+        const globalTopCount = globalList[0]?.displayCount || 0;
         return (
         <div className="fixed inset-0 z-[9000] bg-white flex flex-col animate-in slide-in-from-right-full duration-300">
           <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-white sticky top-0 z-10">
@@ -10163,7 +10212,7 @@ RULES:
               globalList.map((entry, idx) => {
                 const minePulled = starredNotes.find(n => n.topicText === entry.label);
                 const isMine = !!minePulled;
-                const pct = globalTopCount > 0 ? Math.max(6, Math.round((entry.count / globalTopCount) * 100)) : 0;
+                const pct = globalTopCount > 0 ? Math.max(6, Math.round((entry.displayCount / globalTopCount) * 100)) : 0;
                 const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
                 return (
                   <div
@@ -10186,7 +10235,7 @@ RULES:
                             />
                           </div>
                           <span className="text-[10px] font-black text-amber-700 shrink-0">
-                            {entry.count.toLocaleString('en-IN')} ⭐
+                            {entry.displayCount.toLocaleString('en-IN')} ⭐
                           </span>
                         </div>
                       </div>
@@ -10258,8 +10307,9 @@ RULES:
         const ranked = Object.values(globalNoteStars)
           .filter(e => e.count > 0 && e.label)
           .filter(e => cutoff === 0 ? true : (e.lastUpdated || 0) >= cutoff)
-          .sort((a, b) => b.count - a.count);
-        const topCount = ranked[0]?.count || 0;
+          .map(e => ({ ...e, displayCount: applyStarBoost(e.count, e.hash) }))
+          .sort((a, b) => b.displayCount - a.displayCount);
+        const topCount = ranked[0]?.displayCount || 0;
         const rangeLabel =
           globalNotesRange === 'weekly' ? 'is hafte' :
           globalNotesRange === 'monthly' ? 'is mahine' :
@@ -10328,7 +10378,7 @@ RULES:
                 </div>
               ) : (
                 ranked.map((entry, idx) => {
-                  const pct = topCount > 0 ? Math.max(8, Math.round((entry.count / topCount) * 100)) : 0;
+                  const pct = topCount > 0 ? Math.max(8, Math.round((entry.displayCount / topCount) * 100)) : 0;
                   const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
                   return (
                     <div
@@ -10353,7 +10403,7 @@ RULES:
                           </div>
                           <span className="text-[11px] font-black text-amber-700 shrink-0 inline-flex items-center gap-1">
                             <Star size={10} className="fill-amber-500 text-amber-500" />
-                            {entry.count.toLocaleString('en-IN')}
+                            {entry.displayCount.toLocaleString('en-IN')}
                           </span>
                         </div>
                       </div>

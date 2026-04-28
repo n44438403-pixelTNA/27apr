@@ -446,13 +446,36 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
     { id: 'speedySocialScience', name: 'Speedy Social Science (Page-wise)' },
     { id: 'sarSangrah', name: 'Sar Sangrah (Page-wise)' },
   ];
-  const [newLucent, setNewLucent] = useState<{ subject: string; lessonTitle: string; pages: LucentPageNote[] }>({
+  // Class targets a Lucent book can be assigned to. COMPETITION = original
+  // Competition mode (default). Class 6-12 entries appear in that class's
+  // chapter list using the same page-wise viewer (notes + MCQ only — video/
+  // audio rendering for the class is untouched).
+  const LUCENT_CLASS_TARGETS: { id: 'COMPETITION' | '6' | '7' | '8' | '9' | '10' | '11' | '12'; label: string }[] = [
+    { id: 'COMPETITION', label: '🏆 Competition Mode' },
+    { id: '6', label: '📘 Class 6' },
+    { id: '7', label: '📘 Class 7' },
+    { id: '8', label: '📘 Class 8' },
+    { id: '9', label: '📘 Class 9' },
+    { id: '10', label: '📘 Class 10' },
+    { id: '11', label: '📘 Class 11' },
+    { id: '12', label: '📘 Class 12' },
+  ];
+  const [newLucent, setNewLucent] = useState<{ subject: string; bookName: string; classLevel: 'COMPETITION' | '6' | '7' | '8' | '9' | '10' | '11' | '12'; lessonTitle: string; pages: LucentPageNote[] }>({
     subject: 'biology',
+    bookName: '',
+    classLevel: 'COMPETITION',
     lessonTitle: '',
     pages: [{ id: Date.now().toString(), pageNo: '1', content: '' }],
   });
   // Per-page bulk MCQ paste: keyed by page id -> textarea content. When non-undefined the paste UI is open.
   const [lucentPageBulk, setLucentPageBulk] = useState<Record<string, string>>({});
+
+  // Homework History UI: subject filter + per-entry expanded state. Collapsed entries
+  // render only a small header so the page stays snappy when there are many entries.
+  const [homeworkHistoryFilter, setHomeworkHistoryFilter] = useState<string>('all');
+  const [expandedHomework, setExpandedHomework] = useState<Record<string, boolean>>({});
+  const [expandedLucent, setExpandedLucent] = useState<Record<string, boolean>>({});
+  const [expandedLucentPage, setExpandedLucentPage] = useState<Record<string, boolean>>({});
 
   // Normalize common Hindi / shorthand MCQ paste formats so they parse with parseMCQText().
   // Handles: **प्रश्न:**, **सही उत्तर:** B) ..., **Ans: B) ...**, **Q 1: ...**, ### topic headers, --- separators.
@@ -2932,7 +2955,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   onClick={(e) => {
                                       e.stopPropagation();
                                       const updated = toggleItemInList(localSettings.hiddenClasses, c);
-                                      setLocalSettings({...localSettings, hiddenClasses: updated});
+                                      const next = {...localSettings, hiddenClasses: updated};
+                                      setLocalSettings(next);
+                                      handleSaveSettings(next);
                                   }}
                                   className={`absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center shadow-sm border ${isHidden ? 'bg-red-500 text-white border-red-600' : 'bg-white text-slate-500 border-slate-200'}`}
                               >
@@ -8699,15 +8724,30 @@ Statement 2"
                           {newHomework.targetSubject === 'lucent' ? (
                               <div className="space-y-4 border-t border-indigo-100 pt-4">
                                   <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-800">
-                                      <strong>Lucent Mode:</strong> Choose subject → enter lesson name → add page-no wise notes. Yeh notes student ko Lucent Book ke andar lesson kholne par page-wise dikhenge (year/month/week wise nahi).
+                                      <strong>Lucent Mode:</strong> Choose target class → subject category → custom book name → page-wise notes/MCQ. Class 6-12 ke liye book Competition jaisa page-wise format me dikhega (sirf notes/MCQ — video/audio same purana). Competition mode select karne par Competition page pe dikhega.
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🎯 Target Class</label>
+                                          <select value={newLucent.classLevel} onChange={e => setNewLucent({...newLucent, classLevel: e.target.value as any})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-white">
+                                              {LUCENT_CLASS_TARGETS.map(opt => (
+                                                  <option key={opt.id} value={opt.id}>{opt.label}</option>
+                                              ))}
+                                          </select>
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Subject Category</label>
+                                          <select value={newLucent.subject} onChange={e => setNewLucent({...newLucent, subject: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-white">
+                                              {LUCENT_SUBJECT_OPTIONS.map(opt => (
+                                                  <option key={opt.id} value={opt.id}>{opt.name}</option>
+                                              ))}
+                                          </select>
+                                      </div>
                                   </div>
                                   <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Lucent Subject</label>
-                                      <select value={newLucent.subject} onChange={e => setNewLucent({...newLucent, subject: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-white">
-                                          {LUCENT_SUBJECT_OPTIONS.map(opt => (
-                                              <option key={opt.id} value={opt.id}>{opt.name}</option>
-                                          ))}
-                                      </select>
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">📖 Book Name (apne man se rakho — optional)</label>
+                                      <input type="text" value={newLucent.bookName} onChange={e => setNewLucent({...newLucent, bookName: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="e.g. RS Aggarwal, NCERT Exemplar, BPSC GK..." />
+                                      <p className="text-[10px] text-slate-500 mt-0.5">Khaali chhodne par subject ka naam use hoga.</p>
                                   </div>
                                   <div>
                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Lesson Name / Title</label>
@@ -8884,6 +8924,8 @@ Statement 2"
                                           const entry: LucentNoteEntry = {
                                               id: Date.now().toString(),
                                               subject: newLucent.subject,
+                                              bookName: newLucent.bookName.trim() || undefined,
+                                              classLevel: newLucent.classLevel,
                                               lessonTitle: newLucent.lessonTitle.trim(),
                                               pages: validPages,
                                               createdAt: new Date().toISOString(),
@@ -8892,8 +8934,8 @@ Statement 2"
                                           const newSettings = { ...localSettings, lucentNotes: updated };
                                           setLocalSettings(newSettings);
                                           handleSaveSettings(newSettings);
-                                          setNewLucent({ subject: newLucent.subject, lessonTitle: '', pages: [{ id: Date.now().toString(), pageNo: '1', content: '' }] });
-                                          setAlertConfig({ isOpen: true, message: '✅ Lucent Lesson Added Successfully!' });
+                                          setNewLucent({ subject: newLucent.subject, bookName: '', classLevel: newLucent.classLevel, lessonTitle: '', pages: [{ id: Date.now().toString(), pageNo: '1', content: '' }] });
+                                          setAlertConfig({ isOpen: true, message: `✅ Lucent Lesson Added → ${newLucent.classLevel === 'COMPETITION' ? 'Competition Mode' : 'Class ' + newLucent.classLevel}!` });
                                       }} className="w-full bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-700 flex items-center justify-center gap-2 transition-colors">
                                           <Save size={18} /> Save Lucent Lesson
                                       </button>
@@ -9059,37 +9101,88 @@ Statement 2"
                           )}
                       </div>
                   )}
-                  {homeworkTab === 'HISTORY' && (
+                  {homeworkTab === 'HISTORY' && (() => {
+                      const SUBJECT_FILTERS: { id: string; label: string; color: string }[] = [
+                          { id: 'all', label: 'All', color: 'bg-slate-700 text-white' },
+                          { id: 'lucent', label: 'Lucent GK', color: 'bg-purple-600 text-white' },
+                          { id: 'sarSangrah', label: 'Sar Sangrah', color: 'bg-amber-600 text-white' },
+                          { id: 'speedyScience', label: 'Speedy Science', color: 'bg-emerald-600 text-white' },
+                          { id: 'speedySocialScience', label: 'Speedy Social Science', color: 'bg-rose-600 text-white' },
+                          { id: 'mcq', label: 'MCQ', color: 'bg-blue-600 text-white' },
+                          { id: 'none', label: 'Standard', color: 'bg-slate-500 text-white' },
+                      ];
+                      const subjectMeta = (s?: string) => SUBJECT_FILTERS.find(f => f.id === (s || 'none')) || SUBJECT_FILTERS[6];
+                      const filterFn = (hw: HomeworkItem) => {
+                          if (homeworkHistoryFilter === 'all') return true;
+                          if (homeworkHistoryFilter === 'none') return !hw.targetSubject || hw.targetSubject === 'none';
+                          return hw.targetSubject === homeworkHistoryFilter;
+                      };
+                      const allHw = localSettings.homework || [];
+                      const filteredHw = allHw.filter(filterFn);
+                      // Counts per subject for badge display.
+                      const subjectCounts: Record<string, number> = { all: allHw.length };
+                      SUBJECT_FILTERS.forEach(f => {
+                          if (f.id === 'all') return;
+                          subjectCounts[f.id] = allHw.filter(hw => f.id === 'none' ? (!hw.targetSubject || hw.targetSubject === 'none') : hw.targetSubject === f.id).length;
+                      });
+                      return (
                       <div className="animate-in fade-in">
-                          <div className="flex justify-between items-center mb-4 mt-2">
-                              <p className="text-xs font-bold text-indigo-800 uppercase tracking-wider">Saved Homework ({(localSettings.homework || []).length})</p>
-                              <button onClick={() => {
-                                  const updated = (localSettings.homework || []).map(hw => {
-                                      if (hw.mcqText && hw.mcqText.trim()) {
-                                          const parsed = parseMCQText(hw.mcqText.trim());
-                                          return { ...hw, parsedMcqs: parsed.questions };
-                                      }
-                                      return { ...hw, parsedMcqs: [] };
-                                  });
-                                  setLocalSettings({...localSettings, homework: updated});
-                                  handleSaveSettings({...localSettings, homework: updated});
-                                  setAlertConfig({isOpen: true, message: '✅ Edits Saved Successfully!'});
-                              }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-xs shadow hover:bg-indigo-700 flex items-center gap-2 transition-colors">
-                                  <Save size={14} /> Save Edits
-                              </button>
+                          <div className="flex justify-between items-center mb-4 mt-2 flex-wrap gap-2">
+                              <p className="text-xs font-bold text-indigo-800 uppercase tracking-wider">Saved Homework ({filteredHw.length}/{allHw.length})</p>
+                              <div className="flex gap-2">
+                                  <button onClick={() => setExpandedHomework({})} className="bg-slate-100 text-slate-700 px-3 py-2 rounded-lg font-bold text-xs hover:bg-slate-200 transition-colors">
+                                      Collapse All
+                                  </button>
+                                  <button onClick={() => {
+                                      handleSaveSettings(localSettings);
+                                      setAlertConfig({isOpen: true, message: '✅ Edits Saved Successfully!'});
+                                  }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-xs shadow hover:bg-indigo-700 flex items-center gap-2 transition-colors">
+                                      <Save size={14} /> Save Edits
+                                  </button>
+                              </div>
                           </div>
-                          <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                              {[...(localSettings.homework || [])].reverse().map((hw, reversedIndex) => {
-                                  const i = (localSettings.homework || []).length - 1 - reversedIndex;
-                                  return (<div key={hw.id} className="bg-white p-4 rounded-xl border border-indigo-200 shadow-sm relative group hover:border-indigo-400 transition-colors">
-                                      <button onClick={() => {
+                          {/* --- Subject filter chips --- */}
+                          <div className="flex flex-wrap gap-2 mb-4 p-2 bg-slate-50 rounded-xl border border-slate-200">
+                              {SUBJECT_FILTERS.map(f => {
+                                  const active = homeworkHistoryFilter === f.id;
+                                  return (
+                                      <button key={f.id} onClick={() => setHomeworkHistoryFilter(f.id)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1.5 ${active ? f.color + ' shadow' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}>
+                                          {f.label}
+                                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${active ? 'bg-white/25' : 'bg-slate-100 text-slate-500'}`}>{subjectCounts[f.id] || 0}</span>
+                                      </button>
+                                  );
+                              })}
+                          </div>
+                          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                              {filteredHw.slice().reverse().map((hw, reversedIndex) => {
+                                  const i = allHw.findIndex(x => x.id === hw.id);
+                                  const meta = subjectMeta(hw.targetSubject);
+                                  const isExpanded = !!expandedHomework[hw.id];
+                                  return (<div key={hw.id} className="bg-white rounded-xl border border-indigo-200 shadow-sm relative group hover:border-indigo-400 transition-colors">
+                                      {/* Compact header — always visible. Click to toggle full editor. */}
+                                      <button
+                                          type="button"
+                                          onClick={() => setExpandedHomework(prev => ({ ...prev, [hw.id]: !prev[hw.id] }))}
+                                          className="w-full flex items-center gap-3 p-3 text-left"
+                                      >
+                                          <span className={`shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${meta.color}`}>{meta.label}</span>
+                                          <span className="shrink-0 text-[11px] font-mono text-slate-500">{hw.date || '—'}</span>
+                                          {hw.pageNo && <span className="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">📄 p.{hw.pageNo}</span>}
+                                          <span className="flex-1 min-w-0 truncate text-sm font-bold text-slate-800">{hw.title || '(untitled)'}</span>
+                                          {(hw.parsedMcqs || []).length > 0 && <span className="shrink-0 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">{(hw.parsedMcqs || []).length} MCQ</span>}
+                                          <span className="shrink-0 text-slate-400 text-xs">{isExpanded ? '▲' : '▼'}</span>
+                                      </button>
+                                      <button onClick={(e) => {
+                                          e.stopPropagation();
                                           if(!confirm('Delete this homework?')) return;
-                                          const updated = (localSettings.homework || []).filter((_, idx) => idx !== i);
+                                          const updated = allHw.filter((_, idx) => idx !== i);
                                           setLocalSettings({...localSettings, homework: updated});
-                                      }} className="absolute top-2 right-2 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors opacity-50 group-hover:opacity-100">
+                                      }} className="absolute top-2 right-10 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors opacity-50 group-hover:opacity-100">
                                           <Trash2 size={16} />
                                       </button>
-                                      <div className="grid grid-cols-1 md:grid-cols-[150px_1fr] gap-4">
+                                      {!isExpanded ? null : (
+                                      <div className="px-4 pb-4 pt-1 border-t border-slate-100">
+                                      <div className="grid grid-cols-1 md:grid-cols-[150px_1fr] gap-4 mt-3">
                                           <div>
                                               <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Date</label>
                                               <input type="date" value={hw.date} onChange={e => {
@@ -9099,6 +9192,31 @@ Statement 2"
                                               }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50" />
                                           </div>
                                           <div className="space-y-3">
+                                              <div className="grid grid-cols-2 gap-2">
+                                                  <div>
+                                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Target Subject</label>
+                                                      <select value={hw.targetSubject || 'none'} onChange={e => {
+                                                          const updated = [...(localSettings.homework || [])];
+                                                          updated[i] = { ...updated[i], targetSubject: e.target.value === 'none' ? undefined : e.target.value };
+                                                          setLocalSettings({...localSettings, homework: updated});
+                                                      }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50">
+                                                          <option value="none">None (Standard)</option>
+                                                          <option value="mcq">MCQ</option>
+                                                          <option value="sarSangrah">Sar Sangrah</option>
+                                                          <option value="speedySocialScience">Speedy Social Science</option>
+                                                          <option value="speedyScience">Speedy Science</option>
+                                                          <option value="lucent">Lucent GK</option>
+                                                      </select>
+                                                  </div>
+                                                  <div>
+                                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Page No. (optional)</label>
+                                                      <input type="text" value={hw.pageNo || ''} onChange={e => {
+                                                          const updated = [...(localSettings.homework || [])];
+                                                          updated[i] = { ...updated[i], pageNo: e.target.value || undefined };
+                                                          setLocalSettings({...localSettings, homework: updated});
+                                                      }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50" placeholder="e.g. 12 or 12-15" />
+                                                  </div>
+                                              </div>
                                               <div>
                                                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Title</label>
                                                   <input type="text" value={hw.title} onChange={e => {
@@ -9113,15 +9231,96 @@ Statement 2"
                                                       const updated = [...(localSettings.homework || [])];
                                                       updated[i] = { ...updated[i], notes: e.target.value };
                                                       setLocalSettings({...localSettings, homework: updated});
-                                                  }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-16 focus:border-indigo-500 bg-slate-50" />
+                                                  }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-24 focus:border-indigo-500 bg-slate-50" />
                                               </div>
                                               <div>
-                                                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">MCQ Text (Re-parse on save)</label>
+                                                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">MCQ Text (Re-parse on Save Edits)</label>
                                                   <textarea value={hw.mcqText || ''} onChange={e => {
                                                       const updated = [...(localSettings.homework || [])];
                                                       updated[i] = { ...updated[i], mcqText: e.target.value };
                                                       setLocalSettings({...localSettings, homework: updated});
                                                   }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-16 focus:border-indigo-500 bg-slate-50" />
+                                              </div>
+
+                                              {/* --- Inline Parsed MCQ Editor --- */}
+                                              <div className="border border-emerald-200 rounded-lg p-3 bg-emerald-50/40">
+                                                  <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                                                      <label className="text-[10px] font-bold text-emerald-700 uppercase">📝 Parsed MCQs ({(hw.parsedMcqs || []).length})</label>
+                                                      <div className="flex gap-1">
+                                                          <button type="button" onClick={() => {
+                                                              const updated = [...(localSettings.homework || [])];
+                                                              const existing = updated[i].parsedMcqs || [];
+                                                              updated[i] = {
+                                                                  ...updated[i],
+                                                                  parsedMcqs: [...existing, { question: '', options: ['', '', '', ''], correctAnswer: 0, explanation: '' } as MCQItem]
+                                                              };
+                                                              setLocalSettings({...localSettings, homework: updated});
+                                                          }} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1">
+                                                              <Plus size={10} /> Add MCQ
+                                                          </button>
+                                                          {(hw.mcqText || '').trim() && (
+                                                              <button type="button" onClick={() => {
+                                                                  const parsed = parseMCQText((hw.mcqText || '').trim());
+                                                                  const updated = [...(localSettings.homework || [])];
+                                                                  updated[i] = { ...updated[i], parsedMcqs: parsed.questions || [] };
+                                                                  setLocalSettings({...localSettings, homework: updated});
+                                                              }} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600">
+                                                                  Re-parse Text
+                                                              </button>
+                                                          )}
+                                                      </div>
+                                                  </div>
+                                                  {(hw.parsedMcqs || []).length === 0 && (
+                                                      <p className="text-[11px] text-slate-500 italic">No parsed MCQs. Add manually or paste in MCQ Text and click Re-parse.</p>
+                                                  )}
+                                                  {(hw.parsedMcqs || []).map((mcq, mIdx) => (
+                                                      <div key={mIdx} className="bg-white border border-emerald-100 rounded p-2 mb-2 space-y-1.5 relative">
+                                                          <button type="button" onClick={() => {
+                                                              const updated = [...(localSettings.homework || [])];
+                                                              updated[i] = { ...updated[i], parsedMcqs: (updated[i].parsedMcqs || []).filter((_, idx) => idx !== mIdx) };
+                                                              setLocalSettings({...localSettings, homework: updated});
+                                                          }} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
+                                                              <Trash2 size={11} />
+                                                          </button>
+                                                          <input type="text" value={mcq.question} onChange={e => {
+                                                              const updated = [...(localSettings.homework || [])];
+                                                              const mcqs = [...(updated[i].parsedMcqs || [])];
+                                                              mcqs[mIdx] = { ...mcqs[mIdx], question: e.target.value };
+                                                              updated[i] = { ...updated[i], parsedMcqs: mcqs };
+                                                              setLocalSettings({...localSettings, homework: updated});
+                                                          }} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx + 1}: Question?`} />
+                                                          <div className="grid grid-cols-2 gap-1">
+                                                              {(mcq.options || ['', '', '', '']).map((opt, oi) => (
+                                                                  <div key={oi} className="flex items-center gap-1">
+                                                                      <input type="radio" name={`hw-correct-${hw.id}-${mIdx}`} checked={(mcq.correctAnswer ?? 0) === oi} onChange={() => {
+                                                                          const updated = [...(localSettings.homework || [])];
+                                                                          const mcqs = [...(updated[i].parsedMcqs || [])];
+                                                                          mcqs[mIdx] = { ...mcqs[mIdx], correctAnswer: oi };
+                                                                          updated[i] = { ...updated[i], parsedMcqs: mcqs };
+                                                                          setLocalSettings({...localSettings, homework: updated});
+                                                                      }} className="shrink-0" />
+                                                                      <input type="text" value={opt} onChange={e => {
+                                                                          const updated = [...(localSettings.homework || [])];
+                                                                          const mcqs = [...(updated[i].parsedMcqs || [])];
+                                                                          const opts = [...(mcqs[mIdx].options || ['', '', '', ''])];
+                                                                          opts[oi] = e.target.value;
+                                                                          mcqs[mIdx] = { ...mcqs[mIdx], options: opts };
+                                                                          updated[i] = { ...updated[i], parsedMcqs: mcqs };
+                                                                          setLocalSettings({...localSettings, homework: updated});
+                                                                      }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65 + oi)}`} />
+                                                                  </div>
+                                                              ))}
+                                                          </div>
+                                                          <textarea value={mcq.explanation || ''} onChange={e => {
+                                                              const updated = [...(localSettings.homework || [])];
+                                                              const mcqs = [...(updated[i].parsedMcqs || [])];
+                                                              mcqs[mIdx] = { ...mcqs[mIdx], explanation: e.target.value };
+                                                              updated[i] = { ...updated[i], parsedMcqs: mcqs };
+                                                              setLocalSettings({...localSettings, homework: updated});
+                                                          }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none h-12 focus:border-emerald-500" placeholder="Explanation (optional)" />
+                                                          <p className="text-[9px] text-slate-500">✓ Sahi answer ke saamne radio click karein</p>
+                                                      </div>
+                                                  ))}
                                               </div>
                                               <div className="grid grid-cols-2 gap-2">
                                                 <div>
@@ -9151,12 +9350,135 @@ Statement 2"
                                               </div>
                                           </div>
                                       </div>
+                                      </div>
+                                      )}
                                   </div>
                               )})}
-                              {(localSettings.homework || []).length === 0 && (
-                                  <div className="text-center py-8 text-slate-500 text-sm">No Homework entries saved yet.</div>
+                              {filteredHw.length === 0 && (
+                                  <div className="text-center py-8 text-slate-500 text-sm">
+                                      {allHw.length === 0 ? 'No Homework entries saved yet.' : `No entries match the "${(SUBJECT_FILTERS.find(f => f.id === homeworkHistoryFilter) || {}).label || ''}" filter.`}
+                                  </div>
                               )}
                           </div>
+
+                          {/* --- GLOBAL ⭐ SAVED COUNT BOOST (FAKE NUMBERS for Trending Notes page) --- */}
+                          {(() => {
+                              const boost = Math.max(0, Math.floor(Number(localSettings.globalNotesFakeBoost) || 0));
+                              const boostMax = Math.max(0, Math.floor(Number(localSettings.globalNotesFakeBoostMax) || 0));
+                              const minVal = Math.max(0, Math.floor(Number(localSettings.globalNotesFakeMin) || 0));
+                              const enabled = boost > 0 || boostMax > 0 || minVal > 0;
+                              const variesPerNote = boostMax > boost;
+                              return (
+                                  <div className={`mt-6 rounded-2xl p-4 border-2 shadow-sm ${enabled ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'}`}>
+                                      <div className="flex items-start gap-3 mb-3">
+                                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 ${enabled ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-500'}`}>⭐</div>
+                                          <div className="flex-1 min-w-0">
+                                              <p className="font-black text-sm text-slate-900">Global Saved-Count Boost (Social Proof)</p>
+                                              <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">
+                                                  Trending Notes page aur ⭐ saved badges pe jo numbers students ko dikhte hain — unme yeh boost <b>add</b> ho jayega. Real DB count nahi badlega, sirf display inflate hoga.
+                                                  <br/><b className="text-emerald-700">Tip:</b> Min aur Max alag rakho (jaise 200 → 12000) → har note ka apna alag random number aayega (200, 547, 11901…), saare same nahi dikhenge — students ko shak nahi hoga.
+                                                  {enabled && (
+                                                      <span className="block mt-1 font-bold text-amber-700">
+                                                          Currently active: {variesPerNote
+                                                              ? <>actual + random({boost.toLocaleString('en-IN')}–{boostMax.toLocaleString('en-IN')})</>
+                                                              : <>actual + {boost.toLocaleString('en-IN')} (flat)</>
+                                                          }
+                                                          {minVal > 0 ? `, minimum ${minVal.toLocaleString('en-IN')}` : ''}
+                                                      </span>
+                                                  )}
+                                          </p>
+                                          </div>
+                                      </div>
+                                      <div className="grid grid-cols-3 gap-2">
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Boost Min</label>
+                                              <input
+                                                  type="number"
+                                                  min={0}
+                                                  step={1}
+                                                  value={boost || ''}
+                                                  onChange={e => {
+                                                      const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                                      setLocalSettings({ ...localSettings, globalNotesFakeBoost: v });
+                                                  }}
+                                                  placeholder="0"
+                                                  className="w-full p-2 border border-slate-300 rounded-lg text-sm font-mono focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                                              />
+                                          </div>
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Boost Max</label>
+                                              <input
+                                                  type="number"
+                                                  min={0}
+                                                  step={1}
+                                                  value={boostMax || ''}
+                                                  onChange={e => {
+                                                      const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                                      setLocalSettings({ ...localSettings, globalNotesFakeBoostMax: v });
+                                                  }}
+                                                  placeholder="(same as min)"
+                                                  className="w-full p-2 border border-slate-300 rounded-lg text-sm font-mono focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                                              />
+                                          </div>
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Min Displayed</label>
+                                              <input
+                                                  type="number"
+                                                  min={0}
+                                                  step={1}
+                                                  value={minVal || ''}
+                                                  onChange={e => {
+                                                      const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                                      setLocalSettings({ ...localSettings, globalNotesFakeMin: v });
+                                                  }}
+                                                  placeholder="0"
+                                                  className="w-full p-2 border border-slate-300 rounded-lg text-sm font-mono focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                                              />
+                                          </div>
+                                      </div>
+                                      <div className="flex gap-2 mt-3">
+                                          <button
+                                              onClick={() => {
+                                                  // Auto-fix: if Max < Min, set Max = Min so user input is sane.
+                                                  let ns = { ...localSettings };
+                                                  if ((ns.globalNotesFakeBoostMax || 0) > 0 && (ns.globalNotesFakeBoostMax || 0) < (ns.globalNotesFakeBoost || 0)) {
+                                                      ns.globalNotesFakeBoostMax = ns.globalNotesFakeBoost;
+                                                      setLocalSettings(ns);
+                                                  }
+                                                  handleSaveSettings(ns);
+                                                  setAlertConfig({ isOpen: true, message: '✅ Boost settings saved! Students ko ab varied numbers dikhenge.' });
+                                              }}
+                                              className="flex-1 bg-amber-600 text-white py-2 rounded-lg font-bold text-xs shadow hover:bg-amber-700 flex items-center justify-center gap-1.5 transition-colors"
+                                          >
+                                              <Save size={12} /> Apply Boost
+                                          </button>
+                                          <button
+                                              onClick={() => {
+                                                  const ns = { ...localSettings, globalNotesFakeBoost: 200, globalNotesFakeBoostMax: 12000, globalNotesFakeMin: 0 };
+                                                  setLocalSettings(ns);
+                                                  handleSaveSettings(ns);
+                                                  setAlertConfig({ isOpen: true, message: '✅ Quick preset applied: 200–12,000 random per note.' });
+                                              }}
+                                              className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-[11px] border border-emerald-300 hover:bg-emerald-200 transition-colors"
+                                          >
+                                              200–12K Preset
+                                          </button>
+                                          {enabled && (
+                                              <button
+                                                  onClick={() => {
+                                                      const ns = { ...localSettings, globalNotesFakeBoost: 0, globalNotesFakeBoostMax: 0, globalNotesFakeMin: 0 };
+                                                      setLocalSettings(ns);
+                                                      handleSaveSettings(ns);
+                                                  }}
+                                                  className="px-3 py-2 bg-white text-slate-700 rounded-lg font-bold text-xs border border-slate-300 hover:bg-slate-50 transition-colors"
+                                              >
+                                                  Reset
+                                              </button>
+                                          )}
+                                      </div>
+                                  </div>
+                              );
+                          })()}
 
                           {/* --- LUCENT NOTES HISTORY --- */}
                           <div className="mt-8 pt-6 border-t border-indigo-200">
@@ -9189,25 +9511,55 @@ Statement 2"
                               <div className="flex justify-between items-center mb-4">
                                   <p className="text-xs font-bold text-indigo-800 uppercase tracking-wider">📘 Saved Lucent Lessons ({(localSettings.lucentNotes || []).length})</p>
                               </div>
+                              <div className="flex justify-end mb-2">
+                                  <button onClick={() => setExpandedLucent({})} className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg font-bold text-[11px] hover:bg-slate-200 transition-colors">
+                                      Collapse All
+                                  </button>
+                              </div>
                               <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                                   {[...(localSettings.lucentNotes || [])].reverse().map((entry, reversedIndex) => {
                                       const i = (localSettings.lucentNotes || []).length - 1 - reversedIndex;
                                       const subjLabel = LUCENT_SUBJECT_OPTIONS.find(o => o.id === entry.subject)?.name || entry.subject;
+                                      const isExpanded = !!expandedLucent[entry.id];
                                       return (
-                                          <div key={entry.id} className="bg-white p-4 rounded-xl border border-indigo-200 shadow-sm relative group hover:border-indigo-400 transition-colors">
-                                              <button onClick={() => {
+                                          <div key={entry.id} className="bg-white rounded-xl border border-indigo-200 shadow-sm relative group hover:border-indigo-400 transition-colors">
+                                              <button
+                                                  type="button"
+                                                  onClick={() => setExpandedLucent(prev => ({ ...prev, [entry.id]: !prev[entry.id] }))}
+                                                  className="w-full flex items-center gap-3 p-3 text-left"
+                                              >
+                                                  <span className="shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-purple-600 text-white">{subjLabel}</span>
+                                                  <span className="flex-1 min-w-0 truncate text-sm font-bold text-slate-800">{entry.lessonTitle || '(untitled lesson)'}</span>
+                                                  <span className="shrink-0 text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{entry.pages.length} page{entry.pages.length !== 1 ? 's' : ''}</span>
+                                                  <span className="shrink-0 text-slate-400 text-xs">{isExpanded ? '▲' : '▼'}</span>
+                                              </button>
+                                              <button onClick={(e) => {
+                                                  e.stopPropagation();
                                                   if (!confirm('Delete this Lucent lesson?')) return;
                                                   const updated = (localSettings.lucentNotes || []).filter((_, idx) => idx !== i);
                                                   const newSettings = { ...localSettings, lucentNotes: updated };
                                                   setLocalSettings(newSettings);
                                                   handleSaveSettings(newSettings);
-                                              }} className="absolute top-2 right-2 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors opacity-50 group-hover:opacity-100">
+                                              }} className="absolute top-2 right-10 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors opacity-50 group-hover:opacity-100">
                                                   <Trash2 size={16} />
                                               </button>
-                                              <div className="space-y-3">
+                                              {!isExpanded ? null : (
+                                              <div className="px-4 pb-4 pt-1 border-t border-slate-100 space-y-3 mt-2">
                                                   <div className="grid grid-cols-2 gap-2">
                                                       <div>
-                                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Subject</label>
+                                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🎯 Target Class</label>
+                                                          <select value={entry.classLevel || 'COMPETITION'} onChange={e => {
+                                                              const updated = [...(localSettings.lucentNotes || [])];
+                                                              updated[i] = { ...updated[i], classLevel: e.target.value as any };
+                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                          }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50">
+                                                              {LUCENT_CLASS_TARGETS.map(opt => (
+                                                                  <option key={opt.id} value={opt.id}>{opt.label}</option>
+                                                              ))}
+                                                          </select>
+                                                      </div>
+                                                      <div>
+                                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Subject Category</label>
                                                           <select value={entry.subject} onChange={e => {
                                                               const updated = [...(localSettings.lucentNotes || [])];
                                                               updated[i] = { ...updated[i], subject: e.target.value };
@@ -9217,6 +9569,16 @@ Statement 2"
                                                                   <option key={opt.id} value={opt.id}>{opt.name}</option>
                                                               ))}
                                                           </select>
+                                                      </div>
+                                                  </div>
+                                                  <div className="grid grid-cols-2 gap-2">
+                                                      <div>
+                                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">📖 Book Name</label>
+                                                          <input type="text" value={entry.bookName || ''} onChange={e => {
+                                                              const updated = [...(localSettings.lucentNotes || [])];
+                                                              updated[i] = { ...updated[i], bookName: e.target.value || undefined };
+                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                          }} placeholder="(optional — falls back to subject name)" className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50" />
                                                       </div>
                                                       <div>
                                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Lesson Title</label>
@@ -9240,34 +9602,216 @@ Statement 2"
                                                               <Plus size={10} /> Add Page
                                                           </button>
                                                       </div>
-                                                      {entry.pages.map((pg, pgIdx) => (
-                                                          <div key={pg.id} className="border border-slate-200 rounded-lg p-2 bg-slate-50 grid grid-cols-[80px_1fr_30px] gap-2 items-start">
-                                                              <input type="text" value={pg.pageNo} onChange={e => {
-                                                                  const updated = [...(localSettings.lucentNotes || [])];
-                                                                  const pages = [...updated[i].pages];
-                                                                  pages[pgIdx] = { ...pages[pgIdx], pageNo: e.target.value };
-                                                                  updated[i] = { ...updated[i], pages };
-                                                                  setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                              }} className="w-full p-1.5 border border-slate-200 rounded text-xs outline-none focus:border-indigo-500" placeholder="Page #" />
-                                                              <textarea value={pg.content} onChange={e => {
-                                                                  const updated = [...(localSettings.lucentNotes || [])];
-                                                                  const pages = [...updated[i].pages];
-                                                                  pages[pgIdx] = { ...pages[pgIdx], content: e.target.value };
-                                                                  updated[i] = { ...updated[i], pages };
-                                                                  setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                              }} className="w-full p-1.5 border border-slate-200 rounded text-xs outline-none h-16 focus:border-indigo-500" placeholder="Note..." />
+                                                      {/* Per-lesson "Collapse All Pages" + total count */}
+                                                      <div className="flex items-center justify-between gap-2 mb-1">
+                                                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                                              {entry.pages.length} page{entry.pages.length !== 1 ? 's' : ''} • {entry.pages.reduce((s, p) => s + ((p.mcqs || []).length), 0)} MCQ
+                                                          </span>
+                                                          <div className="flex gap-1">
+                                                              <button type="button" onClick={() => {
+                                                                  const next = { ...expandedLucentPage };
+                                                                  entry.pages.forEach(p => { next[p.id] = true; });
+                                                                  setExpandedLucentPage(next);
+                                                              }} className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 underline">Expand All</button>
+                                                              <button type="button" onClick={() => {
+                                                                  const next = { ...expandedLucentPage };
+                                                                  entry.pages.forEach(p => { delete next[p.id]; });
+                                                                  setExpandedLucentPage(next);
+                                                              }} className="text-[10px] font-bold text-slate-500 hover:text-slate-700 underline">Collapse All</button>
+                                                          </div>
+                                                      </div>
+                                                      {entry.pages.map((pg, pgIdx) => {
+                                                          const pageExpanded = !!expandedLucentPage[pg.id];
+                                                          const mcqCount = (pg.mcqs || []).length;
+                                                          const contentPreview = (pg.content || '').replace(/\s+/g, ' ').trim().slice(0, 70);
+                                                          return (
+                                                          <div key={pg.id} className="border border-slate-200 rounded-lg bg-slate-50 relative overflow-hidden">
+                                                              {/* Collapsible page header — click to drill into per-page notes + MCQ history */}
+                                                              <button
+                                                                  type="button"
+                                                                  onClick={() => setExpandedLucentPage(prev => ({ ...prev, [pg.id]: !prev[pg.id] }))}
+                                                                  className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-100 transition-colors"
+                                                              >
+                                                                  <span className="shrink-0 px-2 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-black">📄 p.{pg.pageNo || (pgIdx + 1)}</span>
+                                                                  {pg.date && <span className="shrink-0 text-[10px] font-mono text-slate-500">{pg.date}</span>}
+                                                                  <span className="flex-1 min-w-0 truncate text-[11px] text-slate-600">{contentPreview || <em className="text-slate-400">(no notes yet)</em>}</span>
+                                                                  {mcqCount > 0 && <span className="shrink-0 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">📝 {mcqCount}</span>}
+                                                                  <span className="shrink-0 text-slate-400 text-xs">{pageExpanded ? '▲' : '▼'}</span>
+                                                              </button>
                                                               {entry.pages.length > 1 && (
-                                                                  <button type="button" onClick={() => {
+                                                                  <button type="button" onClick={(e) => {
+                                                                      e.stopPropagation();
+                                                                      if (!confirm(`Delete page ${pg.pageNo || pgIdx + 1}?`)) return;
                                                                       const updated = [...(localSettings.lucentNotes || [])];
                                                                       const pages = updated[i].pages.filter((_, idx) => idx !== pgIdx);
                                                                       updated[i] = { ...updated[i], pages };
                                                                       setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                                  }} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
-                                                                      <Trash2 size={12} />
+                                                                  }} className="absolute top-1.5 right-8 p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
+                                                                      <Trash2 size={14} />
                                                                   </button>
                                                               )}
+                                                              {!pageExpanded ? null : (
+                                                              <div className="px-3 pb-3 pt-1 space-y-2 border-t border-slate-200">
+                                                              <div className="grid grid-cols-[80px_120px_1fr] gap-2 items-start">
+                                                                  <div>
+                                                                      <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Page No.</label>
+                                                                      <input type="text" value={pg.pageNo} onChange={e => {
+                                                                          const updated = [...(localSettings.lucentNotes || [])];
+                                                                          const pages = [...updated[i].pages];
+                                                                          pages[pgIdx] = { ...pages[pgIdx], pageNo: e.target.value };
+                                                                          updated[i] = { ...updated[i], pages };
+                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                      }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="Page #" />
+                                                                  </div>
+                                                                  <div>
+                                                                      <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Date</label>
+                                                                      <input type="date" value={pg.date || ''} onChange={e => {
+                                                                          const updated = [...(localSettings.lucentNotes || [])];
+                                                                          const pages = [...updated[i].pages];
+                                                                          pages[pgIdx] = { ...pages[pgIdx], date: e.target.value };
+                                                                          updated[i] = { ...updated[i], pages };
+                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                      }} className="w-full p-2 border border-slate-200 rounded text-xs outline-none focus:border-indigo-500" />
+                                                                  </div>
+                                                                  <div>
+                                                                      <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Note Content</label>
+                                                                      <textarea value={pg.content} onChange={e => {
+                                                                          const updated = [...(localSettings.lucentNotes || [])];
+                                                                          const pages = [...updated[i].pages];
+                                                                          pages[pgIdx] = { ...pages[pgIdx], content: e.target.value };
+                                                                          updated[i] = { ...updated[i], pages };
+                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                      }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-24 focus:border-indigo-500" placeholder="Page ke notes likhein..." />
+                                                                  </div>
+                                                              </div>
+                                                              {/* Per-page MCQ editor */}
+                                                              <div className="border-t border-slate-200 pt-2 mt-1">
+                                                                  <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                                                                      <label className="text-[9px] font-bold text-emerald-700 uppercase">📝 Page MCQs ({(pg.mcqs || []).length})</label>
+                                                                      <div className="flex gap-1">
+                                                                          <button type="button" onClick={() => {
+                                                                              setLucentPageBulk(prev => {
+                                                                                  const cp = { ...prev };
+                                                                                  if (cp[pg.id] === undefined) cp[pg.id] = '';
+                                                                                  else delete cp[pg.id];
+                                                                                  return cp;
+                                                                              });
+                                                                          }} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600 flex items-center gap-1">
+                                                                              📋 Bulk Paste
+                                                                          </button>
+                                                                          <button type="button" onClick={() => {
+                                                                              const updated = [...(localSettings.lucentNotes || [])];
+                                                                              const pages = [...updated[i].pages];
+                                                                              const existing = pages[pgIdx].mcqs || [];
+                                                                              pages[pgIdx] = {
+                                                                                  ...pages[pgIdx],
+                                                                                  mcqs: [...existing, { id: `mcq_${Date.now()}_${Math.random()}`, question: '', options: ['', '', '', ''], correctAnswer: 0 } as any]
+                                                                              };
+                                                                              updated[i] = { ...updated[i], pages };
+                                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                          }} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1">
+                                                                              <Plus size={10} /> Add MCQ
+                                                                          </button>
+                                                                      </div>
+                                                                  </div>
+                                                                  {lucentPageBulk[pg.id] !== undefined && (
+                                                                      <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2 space-y-1.5">
+                                                                          <p className="text-[9px] text-amber-800 font-bold">Yahan poora MCQ block paste karein. Hindi/English dono format support karta hai.</p>
+                                                                          <textarea
+                                                                              value={lucentPageBulk[pg.id]}
+                                                                              onChange={e => setLucentPageBulk(prev => ({ ...prev, [pg.id]: e.target.value }))}
+                                                                              placeholder={"**प्रश्न:** ... ?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."}
+                                                                              className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500"
+                                                                          />
+                                                                          <div className="flex gap-1">
+                                                                              <button type="button" onClick={() => {
+                                                                                  const raw = (lucentPageBulk[pg.id] || '').trim();
+                                                                                  if (!raw) return alert('Text khaali hai.');
+                                                                                  const norm = normalizeMcqPaste(raw);
+                                                                                  const parsed = parseMCQText(norm);
+                                                                                  if (!parsed.questions || parsed.questions.length === 0) {
+                                                                                      return alert('Parse fail. Format check karein.');
+                                                                                  }
+                                                                                  const updated = [...(localSettings.lucentNotes || [])];
+                                                                                  const pages = [...updated[i].pages];
+                                                                                  const existing = pages[pgIdx].mcqs || [];
+                                                                                  const added = parsed.questions.map(q => ({
+                                                                                      id: `mcq_${Date.now()}_${Math.random()}`,
+                                                                                      question: (q.question || '').replace(/<br\/?>/g, '\n').trim(),
+                                                                                      options: (q.options || ['', '', '', '']).slice(0, 4),
+                                                                                      correctAnswer: q.correctAnswer ?? 0,
+                                                                                  })) as any[];
+                                                                                  pages[pgIdx] = { ...pages[pgIdx], mcqs: [...existing, ...added] };
+                                                                                  updated[i] = { ...updated[i], pages };
+                                                                                  setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                                  setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
+                                                                                  setAlertConfig({ isOpen: true, message: `✅ ${added.length} MCQ add ho gaye!` });
+                                                                              }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">
+                                                                                  Parse & Add All
+                                                                              </button>
+                                                                              <button type="button" onClick={() => {
+                                                                                  setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
+                                                                              }} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">
+                                                                                  Cancel
+                                                                              </button>
+                                                                          </div>
+                                                                      </div>
+                                                                  )}
+                                                                  {(pg.mcqs || []).map((mcq, mIdx) => (
+                                                                      <div key={(mcq as any).id || mIdx} className="bg-white border border-emerald-100 rounded p-2 mb-2 space-y-1.5 relative">
+                                                                          <button type="button" onClick={() => {
+                                                                              const updated = [...(localSettings.lucentNotes || [])];
+                                                                              const pages = [...updated[i].pages];
+                                                                              pages[pgIdx] = { ...pages[pgIdx], mcqs: (pages[pgIdx].mcqs || []).filter((_, idx) => idx !== mIdx) };
+                                                                              updated[i] = { ...updated[i], pages };
+                                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                          }} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
+                                                                              <Trash2 size={11} />
+                                                                          </button>
+                                                                          <input type="text" value={mcq.question} onChange={e => {
+                                                                              const updated = [...(localSettings.lucentNotes || [])];
+                                                                              const pages = [...updated[i].pages];
+                                                                              const mcqs = [...(pages[pgIdx].mcqs || [])];
+                                                                              mcqs[mIdx] = { ...mcqs[mIdx], question: e.target.value };
+                                                                              pages[pgIdx] = { ...pages[pgIdx], mcqs };
+                                                                              updated[i] = { ...updated[i], pages };
+                                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                          }} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx + 1}: Question?`} />
+                                                                          <div className="grid grid-cols-2 gap-1">
+                                                                              {(mcq.options || ['', '', '', '']).map((opt, oi) => (
+                                                                                  <div key={oi} className="flex items-center gap-1">
+                                                                                      <input type="radio" name={`hist-correct-${pg.id}-${mIdx}`} checked={(mcq.correctAnswer ?? 0) === oi} onChange={() => {
+                                                                                          const updated = [...(localSettings.lucentNotes || [])];
+                                                                                          const pages = [...updated[i].pages];
+                                                                                          const mcqs = [...(pages[pgIdx].mcqs || [])];
+                                                                                          mcqs[mIdx] = { ...mcqs[mIdx], correctAnswer: oi };
+                                                                                          pages[pgIdx] = { ...pages[pgIdx], mcqs };
+                                                                                          updated[i] = { ...updated[i], pages };
+                                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                                      }} className="shrink-0" />
+                                                                                      <input type="text" value={opt} onChange={e => {
+                                                                                          const updated = [...(localSettings.lucentNotes || [])];
+                                                                                          const pages = [...updated[i].pages];
+                                                                                          const mcqs = [...(pages[pgIdx].mcqs || [])];
+                                                                                          const opts = [...(mcqs[mIdx].options || ['', '', '', ''])];
+                                                                                          opts[oi] = e.target.value;
+                                                                                          mcqs[mIdx] = { ...mcqs[mIdx], options: opts };
+                                                                                          pages[pgIdx] = { ...pages[pgIdx], mcqs };
+                                                                                          updated[i] = { ...updated[i], pages };
+                                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                                      }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65 + oi)}`} />
+                                                                                  </div>
+                                                                              ))}
+                                                                          </div>
+                                                                          <p className="text-[9px] text-slate-500">✓ Sahi answer ke saamne radio click karein</p>
+                                                                      </div>
+                                                                  ))}
+                                                              </div>
+                                                              </div>
+                                                              )}
                                                           </div>
-                                                      ))}
+                                                          );
+                                                      })}
                                                   </div>
                                                   <button onClick={() => {
                                                       handleSaveSettings(localSettings);
@@ -9276,6 +9820,7 @@ Statement 2"
                                                       <Save size={12} /> Save Changes
                                                   </button>
                                               </div>
+                                              )}
                                           </div>
                                       );
                                   })}
@@ -9285,7 +9830,8 @@ Statement 2"
                               </div>
                           </div>
                       </div>
-                  )}
+                      );
+                  })()}
                   {homeworkTab === 'COMP_MCQ' && (
                       <div className="bg-white p-6 rounded-xl border border-indigo-200 shadow-sm animate-in fade-in space-y-4 w-full">
                           <p className="text-xs text-indigo-700 mb-2">Competition page ke "Practice MCQ Maker" me dikhne wale official MCQs. Paste karein, parse karein, save karein. Student users yahan se attempt karenge instant feedback ke saath.</p>

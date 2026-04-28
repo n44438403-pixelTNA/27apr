@@ -77,7 +77,23 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
   }
   flush();
 
-  return topics
-    .map(t => ({ ...t, text: t.text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\s+/g, ' ').trim() }))
-    .filter(t => t.text.length > 0);
+  // Post-process: explode any topic line that contains Hindi danda (।) into
+  // multiple topics — one per sentence — because for Hindi notes the danda is
+  // the natural sentence boundary (equivalent to "."). Headings are left
+  // intact. Empty / whitespace-only fragments are dropped.
+  const exploded: NotesTopic[] = [];
+  for (const t of topics) {
+    const cleaned = t.text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\s+/g, ' ').trim();
+    if (!cleaned) continue;
+    if (t.isHeading || !cleaned.includes('।')) {
+      exploded.push({ ...t, text: cleaned });
+      continue;
+    }
+    // Keep the danda attached to each sentence so TTS pauses naturally.
+    const parts = cleaned.split(/(?<=।)\s*/).map(p => p.trim()).filter(Boolean);
+    for (const p of parts) {
+      exploded.push({ text: p, isHeading: false });
+    }
+  }
+  return exploded;
 };

@@ -89,17 +89,6 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
     }
   });
 
-  // Optional logo URL (base64 or http) for the splash — falls back to text only.
-  const [appLogoUrl] = useState<string | null>(() => {
-    try {
-      const settingsRaw = localStorage.getItem('nst_system_settings');
-      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
-      return settingsObj?.appLogo || null;
-    } catch {
-      return null;
-    }
-  });
-
   const onCompleteRef = useRef(onComplete);
   const appNameRef = useRef(appName);
 
@@ -188,14 +177,6 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
           className="mb-12 text-center animate-in slide-in-from-bottom-4 duration-700 fade-in focus:outline-none select-none"
           style={{ WebkitTapHighlightColor: 'transparent' }}
         >
-          {appLogoUrl && (
-            <img
-              src={appLogoUrl}
-              alt="App Logo"
-              className={`mx-auto mb-3 object-contain transition-transform duration-300 ease-out ${logoTapped ? 'scale-[1.6]' : 'scale-100'}`}
-              style={{ width: Math.round(appNameSize * 2), height: Math.round(appNameSize * 2), maxWidth: '60vw', maxHeight: '40vh' }}
-            />
-          )}
           <h1
             className={`font-black tracking-tight mb-2 uppercase text-center leading-tight transition-transform duration-300 ease-out ${
               logoTapped ? 'scale-[2.2]' : 'scale-100'

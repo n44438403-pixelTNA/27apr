@@ -431,6 +431,18 @@ export interface LucentPageNote {
 export interface LucentNoteEntry {
   id: string;
   subject: string; // 'biology' | 'chemistry' | 'physics' | 'economics' | 'geography' | 'polity' | 'history'
+  /** Custom-named "book" label as the admin entered it. Optional — falls back
+   *  to the matching LUCENT_SUBJECT name when absent. Used as the displayed
+   *  book title in Class 6-12 / Competition chapter list. */
+  bookName?: string;
+  /**
+   * Target class for this lesson. When set to a Class 6-12 value, this lesson
+   * appears in that class's chapter list using the same Competition-style
+   * page-wise notes/MCQ viewer (video/audio rendering for that class is
+   * untouched — only notes & MCQ format borrows from Competition mode).
+   * Defaults to 'COMPETITION' for backward compat with existing entries.
+   */
+  classLevel?: '6' | '7' | '8' | '9' | '10' | '11' | '12' | 'COMPETITION';
   lessonTitle: string;
   pages: LucentPageNote[];
   createdAt?: string;
@@ -457,6 +469,26 @@ export interface SystemSettings {
    * are shown — organised subject-wise, then page-wise.
    */
   hideLucentSyllabus?: boolean;
+  /**
+   * Admin-controlled "social proof" boost for the global Trending Notes page
+   * and ⭐ saved-count badges. This is the LOW end of the per-note boost
+   * range. If `globalNotesFakeBoostMax` is greater, each note gets a
+   * deterministic random boost in [min, max] (seeded by note hash, so it
+   * stays stable across renders) — this prevents every note from showing
+   * the same boosted number which would look fake. 0 = no boost.
+   */
+  globalNotesFakeBoost?: number;
+  /**
+   * Upper end of the per-note boost range. When > `globalNotesFakeBoost`,
+   * each note's display boost varies between min and max (deterministically
+   * per note). When equal/less, behaves as flat boost.
+   */
+  globalNotesFakeBoostMax?: number;
+  /**
+   * Optional minimum displayed ⭐ count. If a note's actual+boost count is
+   * below this, it will display as this minimum instead. 0 = disabled.
+   */
+  globalNotesFakeMin?: number;
   globalChallengeMcq?: MCQItem[]; // NEW: Global Challenge MCQ
   competitionMcqs?: MCQItem[]; // Admin-created MCQs visible on Competition page
   googleAuthOnly?: boolean;

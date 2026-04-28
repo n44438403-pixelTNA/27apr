@@ -117,6 +117,61 @@
       ".write": "auth != null" // Written by users via savePublicActivity, or admin
     },
 
+    // ---------------------------------------------------------
+    // GLOBAL NOTE STARS (community "saved by N users" counter)
+    // ---------------------------------------------------------
+    // Powers the social-proof ⭐ count and "Most Saved" community
+    // leaderboard. Anyone authenticated can read the global tally so the
+    // counts show up everywhere. Each $hash node is a community counter:
+    //   - count: number (kept in sync via a transaction)
+    //   - label / noteKey / lastUpdated
+    //   - users/$uid: true (per-user save flag)
+    // Students need write access here so they can star their own notes
+    // and contribute to the count. Only the user's own save flag may be
+    // toggled by them; the aggregated `count` is recomputed from the
+    // `users` map so it cannot be inflated arbitrarily.
+    "note_stars": {
+      ".read": "auth != null",
+      "$hash": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['count']) || !newData.exists()",
+        "count":       { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "label":       { ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 400)" },
+        "noteKey":     { ".validate": "!newData.exists() || newData.isString()" },
+        "lastUpdated": { ".validate": "!newData.exists() || newData.isNumber()" },
+        "users": {
+          // Only the owning user may toggle their own membership flag.
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isBoolean() || !newData.exists()"
+          }
+        }
+      }
+    },
+
+    // ---------------------------------------------------------
+    // STUDENT-PUBLISHED MCQS / SHARED NOTES (community pool)
+    // ---------------------------------------------------------
+    // Anyone authenticated can read the community pool. Each entry is
+    // owned by its publisher ($uid), so only that user (or an admin)
+    // may edit/delete it. New publishes must carry the publisher's UID
+    // so we can attribute / moderate later.
+    "community_mcqs": {
+      ".read": "auth != null",
+      "$mcqId": {
+        ".write": "auth != null && (!data.exists() || data.child('publisherUid').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+        ".validate": "!newData.exists() || newData.child('publisherUid').val() === auth.uid || data.child('publisherUid').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN'"
+      }
+    },
+
+    "community_notes": {
+      ".read": "auth != null",
+      "$noteId": {
+        ".write": "auth != null && (!data.exists() || data.child('publisherUid').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+        ".validate": "!newData.exists() || newData.child('publisherUid').val() === auth.uid || data.child('publisherUid').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN'"
+      }
+    },
+
     "universal_analysis_logs": {
       ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
       ".write": "auth != null" // Written by users/admin
