@@ -39,11 +39,30 @@
       // Any logged-in user can check if a code exists
       ".read": "auth != null",
       "$codeId": {
-        // Users can only modify specific usage fields (increment count, mark redeemed)
-        // They cannot change the type, amount, or limits.
-        ".write": "auth != null && (!data.exists() || (newData.child('usedCount').val() >= data.child('usedCount').val()))",
-        // Prevent changing the core structure of the code upon redemption
-        ".validate": "newData.hasChildren(['type']) && (newData.child('type').val() === data.child('type').val() || !data.exists())"
+        // Logged-in users can write here (so the redeem flow + transaction works).
+        // - Reward fields (type, amount, maxUses, subTier, subLevel, code) are
+        //   protected by the per-child ".validate" rules below — they cannot be
+        //   changed once an admin has set them.
+        // - usedCount can only go up (never reset by a student).
+        // Admins (role ADMIN / SUB_ADMIN) bypass all per-child checks.
+        ".write": "auth != null",
+
+        // Lock immutable reward fields once set by admin
+        "type":     { ".validate": "!data.exists() || newData.val() === data.val() || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN'" },
+        "amount":   { ".validate": "!data.exists() || newData.val() === data.val() || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN'" },
+        "maxUses":  { ".validate": "!data.exists() || newData.val() === data.val() || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN'" },
+        "subTier":  { ".validate": "!data.exists() || newData.val() === data.val() || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN'" },
+        "subLevel": { ".validate": "!data.exists() || newData.val() === data.val() || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN'" },
+        "code":     { ".validate": "!data.exists() || newData.val() === data.val() || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN' || root.child('nst_users').child(auth.uid).child('role').val() === 'SUB_ADMIN'" },
+
+        // usedCount may only increase (prevents abuse)
+        "usedCount": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() >= data.val())" },
+
+        // redeemedBy: students append their UID; admins manage freely
+        "redeemedBy": { ".validate": "true" },
+
+        // isRedeemed is just a flag mirror
+        "isRedeemed": { ".validate": "newData.isBoolean()" }
       }
     },
 

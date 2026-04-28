@@ -68,9 +68,35 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
     try {
       const settingsRaw = localStorage.getItem('nst_system_settings');
       const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
-      return settingsObj?.appName || 'IIC';
+      // Prefer short name (used as the splash logo word) — falls back to long name, then "IIC".
+      return settingsObj?.appShortName || settingsObj?.appName || 'IIC';
     } catch {
       return 'IIC';
+    }
+  });
+
+  // Admin-controlled font-size for the splash short name (in pixels).
+  // Reads from systemSettings.appShortNameSize. Clamped to [24, 120].
+  const [appNameSize] = useState<number>(() => {
+    try {
+      const settingsRaw = localStorage.getItem('nst_system_settings');
+      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
+      const raw = Number(settingsObj?.appShortNameSize);
+      if (Number.isFinite(raw) && raw > 0) return Math.min(120, Math.max(24, raw));
+      return 30; // default = matches old text-3xl
+    } catch {
+      return 30;
+    }
+  });
+
+  // Optional logo URL (base64 or http) for the splash — falls back to text only.
+  const [appLogoUrl] = useState<string | null>(() => {
+    try {
+      const settingsRaw = localStorage.getItem('nst_system_settings');
+      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
+      return settingsObj?.appLogo || null;
+    } catch {
+      return null;
     }
   });
 
@@ -162,14 +188,23 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
           className="mb-12 text-center animate-in slide-in-from-bottom-4 duration-700 fade-in focus:outline-none select-none"
           style={{ WebkitTapHighlightColor: 'transparent' }}
         >
+          {appLogoUrl && (
+            <img
+              src={appLogoUrl}
+              alt="App Logo"
+              className={`mx-auto mb-3 object-contain transition-transform duration-300 ease-out ${logoTapped ? 'scale-[1.6]' : 'scale-100'}`}
+              style={{ width: Math.round(appNameSize * 2), height: Math.round(appNameSize * 2), maxWidth: '60vw', maxHeight: '40vh' }}
+            />
+          )}
           <h1
-            className={`text-3xl font-black tracking-tight mb-2 uppercase text-center leading-tight transition-transform duration-300 ease-out ${
+            className={`font-black tracking-tight mb-2 uppercase text-center leading-tight transition-transform duration-300 ease-out ${
               logoTapped ? 'scale-[2.2]' : 'scale-100'
             } ${
               themeVariant === 'light'
                 ? 'bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent'
                 : 'bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent'
             }`}
+            style={{ fontSize: `${appNameSize}px` }}
           >
             {appName}
           </h1>

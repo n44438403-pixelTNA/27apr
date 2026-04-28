@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Volume2, Square, ListChecks } from 'lucide-react';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
 
@@ -18,9 +18,10 @@ interface Props {
   /** Optional unique id used to coordinate between multiple instances on the page. */
   scopeId?: string;
   /**
-   * If provided, tapping "Q+Ans" will chain-read every question's
-   * question + correct answer (no options) from `index` onwards.
-   * Falls back to single-question Q+A when omitted.
+   * If provided, both buttons chain-read every question from `index` onwards:
+   *   - "Q+Ans" : question + correct answer (no options)
+   *   - "All"   : question + every option + correct answer
+   * Falls back to single-question reading when omitted.
    */
   allQuestions?: AllQ[];
   index?: number;
@@ -39,6 +40,7 @@ export const McqSpeakButtons: React.FC<Props> = ({
   index = 0,
 }) => {
   const [active, setActive] = useState<null | 'qa' | 'all'>(null);
+  const cancelRef = useRef(false);
 
   const cleanQ = stripHtml(question);
   const cleanOpts = options.map(o => stripHtml(o));
@@ -50,60 +52,60 @@ export const McqSpeakButtons: React.FC<Props> = ({
     .join('. ')}. Sahi jawab: Option ${String.fromCharCode(65 + correctAnswer)}, ${correctText}.`;
 
   const stopAll = () => {
+    cancelRef.current = true;
     stopSpeech();
     setActive(null);
   };
 
-  // Sequential chain reader for the Q+Ans button (no options).
-  const playQaChain = async () => {
+  // Speak a single string and resolve when finished.
+  const speakOnce = (text: string) =>
+    new Promise<void>((resolve) => {
+      speakText(text, null, 1.0, language, () => {}, () => resolve())
+        .catch(() => resolve());
+    });
+
+  // Sequential chain reader. mode === 'qa' → no options, 'all' → with options.
+  const playChain = async (mode: 'qa' | 'all') => {
     if (!allQuestions || allQuestions.length === 0) return;
     const start = Math.max(0, Math.min(index, allQuestions.length - 1));
-    setActive('qa');
-    let cancelled = false;
-    const stopCheck = () => cancelled;
-    // Allow user to cancel by clicking again — we listen via active state in closure.
-    // The state-clear in stopAll() will set active=null which we check between items.
+    cancelRef.current = false;
+    setActive(mode);
     for (let i = start; i < allQuestions.length; i++) {
-      if (cancelled) break;
+      if (cancelRef.current) break;
       const q = allQuestions[i];
       const cq = stripHtml(q.question);
-      const ca = stripHtml(q.options[q.correctAnswer] ?? '');
-      const text = `Question ${i + 1}: ${cq}. Sahi jawab: ${ca}.`;
+      const cOpts = (q.options || []).map((o) => stripHtml(o));
+      const cAns = cOpts[q.correctAnswer] ?? '';
+      const text =
+        mode === 'qa'
+          ? `Question ${i + 1}: ${cq}. Sahi jawab: ${cAns}.`
+          : `Question ${i + 1}: ${cq}. Options ye hain: ${cOpts
+              .map((o, oi) => `Option ${String.fromCharCode(65 + oi)}: ${o}`)
+              .join('. ')}. Sahi jawab: Option ${String.fromCharCode(65 + q.correctAnswer)}, ${cAns}.`;
       try {
-        await new Promise<void>((resolve) => {
-          speakText(text, null, 1.0, language, () => {}, () => resolve())
-            .catch(() => resolve());
-        });
+        await speakOnce(text);
       } catch {
         break;
       }
-      // Re-check cancellation after each utterance — if user toggled off,
-      // setActive(null) was called and we should stop the chain.
-      // We approximate by reading from the closure-captured setter via a flag.
-      if (typeof window !== 'undefined' && (window as any).__mcqQaChainStop) {
-        cancelled = true;
-        (window as any).__mcqQaChainStop = false;
-        break;
-      }
+      if (cancelRef.current) break;
     }
-    setActive((cur) => (cur === 'qa' ? null : cur));
+    setActive((cur) => (cur === mode ? null : cur));
   };
 
   const play = (mode: 'qa' | 'all') => {
     if (active === mode) {
-      // Toggle off
-      if (mode === 'qa' && allQuestions && allQuestions.length > 0 && typeof window !== 'undefined') {
-        (window as any).__mcqQaChainStop = true;
-      }
+      // Toggle off — stop any in-flight chain or single utterance
       stopAll();
       return;
     }
+    cancelRef.current = false;
     stopSpeech();
-    if (mode === 'qa' && allQuestions && allQuestions.length > 0) {
-      // Chain through all questions (no options).
-      playQaChain();
+    if (allQuestions && allQuestions.length > 0) {
+      // Chain through all questions
+      playChain(mode);
       return;
     }
+    // Fallback: single question
     setActive(mode);
     const text = mode === 'qa' ? qaText : allText;
     speakText(
@@ -127,10 +129,12 @@ export const McqSpeakButtons: React.FC<Props> = ({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
   useEffect(() => {
     return () => {
+      cancelRef.current = true;
       if (active) stopSpeech();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -139,13 +143,15 @@ export const McqSpeakButtons: React.FC<Props> = ({
   const baseBtn =
     'inline-flex items-center gap-1 px-2 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wide transition-colors active:scale-95';
 
+  const isChainCapable = !!(allQuestions && allQuestions.length > 1);
+
   return (
     <div className={`flex items-center gap-1.5 shrink-0 ${className || ''}`}>
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); play('qa'); }}
-        title={allQuestions && allQuestions.length > 1 ? "Saare questions + sahi jawab sune (bina options ke)" : "Sirf question + sahi jawab sune"}
-        aria-label="Read all questions and answers"
+        title={isChainCapable ? 'Saare questions + sahi jawab sune (bina options ke)' : 'Question + sahi jawab sune'}
+        aria-label="Read question and answer"
         className={`${baseBtn} ${
           active === 'qa'
             ? 'bg-red-100 text-red-600 animate-pulse'
@@ -158,8 +164,8 @@ export const McqSpeakButtons: React.FC<Props> = ({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); play('all'); }}
-        title="Question + saare options + sahi jawab sune"
-        aria-label="Read question, all options and answer"
+        title={isChainCapable ? 'Saare questions + options + sahi jawab sune' : 'Question + saare options + sahi jawab sune'}
+        aria-label="Read question, options and answer"
         className={`${baseBtn} ${
           active === 'all'
             ? 'bg-red-100 text-red-600 animate-pulse'

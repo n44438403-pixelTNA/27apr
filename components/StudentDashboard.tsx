@@ -1117,7 +1117,7 @@ export const StudentDashboard: React.FC<Props> = ({
   // 'reveal' = direct-answer "show answer" flow; 'interactive' = build-answer quiz flow.
   const [lucentMcqMode, setLucentMcqMode] = useState<Record<string, 'reveal' | 'interactive'>>({});
   // Flashcard launcher (Lucent + Homework MCQs share this single overlay)
-  const [flashcardMcqs, setFlashcardMcqs] = useState<{ items: any[]; title: string; subtitle: string } | null>(null);
+  const [flashcardMcqs, setFlashcardMcqs] = useState<{ items: any[]; title: string; subtitle: string; subject?: string } | null>(null);
   const [hwMcqMode, setHwMcqMode] = useState<Record<string, 'interactive' | 'reveal'>>({});
   // Per-question selected option for Lucent interactive-mode MCQs (key = `${pageKey}_${qi}`)
   const [lucentMcqAnswers, setLucentMcqAnswers] = useState<Record<string, number>>({});
@@ -1152,6 +1152,7 @@ export const StudentDashboard: React.FC<Props> = ({
   const [globalNoteStars, setGlobalNoteStars] = useState<Record<string, NoteStarEntry>>({});
   const [showCommunityStarsPage, setShowCommunityStarsPage] = useState(false);
   const [starredPageTab, setStarredPageTab] = useState<'mine' | 'global'>('mine');
+  const [globalNotesRange, setGlobalNotesRange] = useState<'all' | 'monthly' | 'weekly'>('all');
   useEffect(() => {
     const unsub = subscribeToTopNoteStars(200, setGlobalNoteStars);
     return () => { try { unsub(); } catch {} };
@@ -1359,6 +1360,39 @@ export const StudentDashboard: React.FC<Props> = ({
     setHwAudioVisible(false);
     setHwVideoVisible(false);
   }, [hwActiveHwId]);
+
+  // Track time spent reading homework notes (for History → Flashcards/Notes Read tab)
+  React.useEffect(() => {
+    if (!hwActiveHwId || hwViewMode !== 'notes') return;
+    const startedAt = Date.now();
+    const allHw = (settings?.homework || []) as any[];
+    const hw = allHw.find(h => h.id === hwActiveHwId);
+    const lessonTitle = hw?.title || 'Homework note';
+    const subject = hw?.targetSubject || hw?.subject || hw?.subjectName || '—';
+    return () => {
+      const durationSec = Math.round((Date.now() - startedAt) / 1000);
+      // Lazy import so we don't churn module loads on every render.
+      import('../utils/flashcardHistory').then(({ recordNotesReadSession }) => {
+        recordNotesReadSession({ subject, lessonTitle, kind: 'homework', durationSec });
+      }).catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hwActiveHwId, hwViewMode]);
+
+  // Track time spent reading Lucent book pages
+  React.useEffect(() => {
+    if (!lucentNoteViewer) return;
+    const startedAt = Date.now();
+    const lessonTitle = lucentNoteViewer.lessonTitle || 'Lucent page';
+    const subject = (lucentNoteViewer as any).subject || 'Lucent';
+    return () => {
+      const durationSec = Math.round((Date.now() - startedAt) / 1000);
+      import('../utils/flashcardHistory').then(({ recordNotesReadSession }) => {
+        recordNotesReadSession({ subject, lessonTitle, kind: 'lucent', durationSec });
+      }).catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lucentNoteViewer?.id, lucentPageIndex]);
 
   // Show notification toast for first unseen notification
   React.useEffect(() => {
@@ -2934,7 +2968,7 @@ export const StudentDashboard: React.FC<Props> = ({
                               : 'bg-transparent text-slate-500 hover:bg-slate-50'
                           }`}
                         >
-                          ✋ Khud Banao
+                          📝 MCQ
                         </button>
                         <button
                           onClick={() => setHwMcqMode(prev => ({ ...prev, [hwModeKey]: 'reveal' }))}
@@ -2944,7 +2978,7 @@ export const StudentDashboard: React.FC<Props> = ({
                               : 'bg-transparent text-slate-500 hover:bg-slate-50'
                           }`}
                         >
-                          👁 Sidha
+                          💬 Q&amp;A
                         </button>
                         <button
                           onClick={() => {
@@ -2952,6 +2986,7 @@ export const StudentDashboard: React.FC<Props> = ({
                               items: (activeHw.parsedMcqs || []) as any,
                               title: activeHw.title || 'Homework MCQs',
                               subtitle: 'Flashcard Mode',
+                              subject: activeHw.targetSubject || activeHw.subject || activeHw.subjectName || '—',
                             });
                           }}
                           className="text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 active:scale-95"
@@ -2980,6 +3015,8 @@ export const StudentDashboard: React.FC<Props> = ({
                               options={mcq.options}
                               correctAnswer={mcq.correctAnswer}
                               className="shrink-0"
+                              allQuestions={(activeHw?.parsedMcqs || []) as any}
+                              index={qi}
                             />
                           </div>
                           <div className="space-y-2">
@@ -4877,7 +4914,7 @@ export const StudentDashboard: React.FC<Props> = ({
               )}
 
             <div
-              className={`w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-3 text-3xl font-black shadow-2xl relative z-10 ${
+              className={`w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-3 text-3xl font-black shadow-2xl relative z-10 overflow-hidden ${
                 user.subscriptionLevel === "ULTRA" && user.isPremium
                   ? "text-purple-700 ring-4 ring-purple-300 animate-bounce-slow"
                   : user.subscriptionLevel === "BASIC" && user.isPremium
@@ -4885,7 +4922,16 @@ export const StudentDashboard: React.FC<Props> = ({
                     : "text-slate-600 ring-4 ring-slate-200"
               }`}
             >
-              {(user.name || "S").charAt(0)}
+              {/* Show app logo if admin uploaded one, else fall back to first letter */}
+              {settings?.appLogo ? (
+                <img
+                  src={settings.appLogo}
+                  alt={settings.appName || 'App Logo'}
+                  className="w-full h-full object-contain p-2"
+                />
+              ) : (
+                (user.name || "S").charAt(0)
+              )}
               {user.subscriptionLevel === "ULTRA" && user.isPremium && (
                 <div className="absolute -top-2 -right-2 text-2xl">👑</div>
               )}
@@ -6484,21 +6530,67 @@ export const StudentDashboard: React.FC<Props> = ({
                     Today's Homework
                   </p>
                 </div>
-                {/* GK SHORTCUT — moved here since GK was removed from bottom-nav */}
-                <button
-                  onClick={() => setShowDailyGkHistory(true)}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-black bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm hover:from-emerald-600 hover:to-teal-700 active:scale-95 transition-all"
-                  title="Daily GK"
-                  aria-label="Open Daily GK"
-                >
-                  <Sparkles size={13} />
-                  GK
-                </button>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto">
               <div className="max-w-2xl mx-auto px-4 py-4 space-y-5">
+                {/* FIXED GK CARD — Daily GK + GK History both accessible from here.
+                    Replaces the tiny GK button that used to sit in the header. */}
+                {(() => {
+                  const allGksForCard = (settings?.dailyGk || []).filter((gk: any) => {
+                    if (!gk.targetClass || gk.targetClass === user.class) return true;
+                    return false;
+                  });
+                  const todayStr = new Date().toISOString().split('T')[0];
+                  const todaysGksForCard = allGksForCard.filter((gk: any) => {
+                    const gkDate = (gk.date || '').split('T')[0];
+                    return gkDate === todayStr;
+                  });
+                  return (
+                    <div className="rounded-2xl p-4 bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-600 text-white shadow-lg relative overflow-hidden">
+                      <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+                      <div className="absolute -bottom-8 -left-8 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+                      <div className="relative z-10">
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center shrink-0">
+                            <Sparkles size={18} className="text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-base font-black leading-tight">Daily GK Corner</h3>
+                            <p className="text-[11px] font-bold text-white/85">
+                              {todaysGksForCard.length > 0
+                                ? `Aaj ${todaysGksForCard.length} naye GK question hai`
+                                : `${allGksForCard.length} GK questions ka archive`}
+                            </p>
+                          </div>
+                          {todaysGksForCard.length > 0 && (
+                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-white text-emerald-700 text-[10px] font-black uppercase tracking-wider animate-pulse">
+                              New
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => setShowDailyGkHistory(true)}
+                            className="bg-white/95 hover:bg-white text-emerald-700 rounded-xl py-2.5 px-3 font-black text-xs active:scale-95 transition-all shadow-sm flex items-center justify-center gap-1.5"
+                            aria-label="Open Today's GK"
+                          >
+                            <Sparkles size={13} /> Aaj ka GK
+                          </button>
+                          <button
+                            onClick={() => setShowDailyGkHistory(true)}
+                            className="bg-white/15 hover:bg-white/25 text-white border border-white/30 rounded-xl py-2.5 px-3 font-black text-xs active:scale-95 transition-all flex items-center justify-center gap-1.5 backdrop-blur"
+                            aria-label="Open GK History"
+                          >
+                            <Clock size={13} /> GK History
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* TODAY'S HOMEWORK BANNER */}
                 {todaysHw.length > 0 && (
                   <div className="rounded-2xl p-4 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 border border-slate-200 shadow-sm relative overflow-hidden">
@@ -9208,7 +9300,7 @@ RULES:
                                 : 'bg-transparent text-slate-500 hover:bg-slate-50'
                             }`}
                           >
-                            👁 Sidha
+                            💬 Q&amp;A
                           </button>
                           <button
                             onClick={() => setLucentMcqMode(prev => ({ ...prev, [pageKey]: 'interactive' }))}
@@ -9218,7 +9310,7 @@ RULES:
                                 : 'bg-transparent text-slate-500 hover:bg-slate-50'
                             }`}
                           >
-                            ✋ Khud Banao
+                            📝 MCQ
                           </button>
                           <button
                             onClick={() => {
@@ -9226,6 +9318,7 @@ RULES:
                                 items: mcqs as any,
                                 title: entry.lessonTitle || 'Lucent MCQs',
                                 subtitle: `Page ${currentPage?.pageNo || ''} · Flashcards`,
+                                subject: entry.subject || 'Lucent',
                               });
                             }}
                             className="text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 active:scale-95"
@@ -9262,6 +9355,17 @@ RULES:
                       </div>
                     )}
 
+                    {/* Q&A: "Show All Answers" lifted to TOP of the MCQ list
+                        so users don't have to scroll down to find it. */}
+                    {mcqs.length > 0 && (lucentMcqMode[pageKey] || 'reveal') === 'reveal' && revealedCount < mcqs.length && (
+                      <button
+                        onClick={() => setLucentMcqRevealed(prev => ({ ...prev, [pageKey]: mcqs.length }))}
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black text-xs active:scale-95 transition shadow-md flex items-center justify-center gap-2"
+                      >
+                        <Sparkles size={14} /> Show All Answers
+                      </button>
+                    )}
+
                     {/* MCQ cards (Speedy-style inline) — supports both 'reveal' and 'interactive' modes */}
                     {(() => {
                       const mode = lucentMcqMode[pageKey] || 'reveal';
@@ -9293,6 +9397,8 @@ RULES:
                                 options={q.options || []}
                                 correctAnswer={q.correctAnswer}
                                 className="shrink-0"
+                                allQuestions={mcqs as any}
+                                index={qi}
                               />
                             </div>
                             <div className="space-y-1.5 mb-3">
@@ -9366,14 +9472,6 @@ RULES:
                       });
                     })()}
 
-                    {mcqs.length > 0 && (lucentMcqMode[pageKey] || 'reveal') === 'reveal' && revealedCount < mcqs.length && (
-                      <button
-                        onClick={() => setLucentMcqRevealed(prev => ({ ...prev, [pageKey]: mcqs.length }))}
-                        className="w-full py-2.5 rounded-xl bg-white border-2 border-purple-200 text-purple-700 font-black text-xs active:scale-95 transition"
-                      >
-                        Show All Answers
-                      </button>
-                    )}
                   </div>
                 </div>
               );
@@ -9811,6 +9909,7 @@ RULES:
           questions={flashcardMcqs.items}
           title={flashcardMcqs.title}
           subtitle={flashcardMcqs.subtitle}
+          subject={flashcardMcqs.subject}
           onBack={() => setFlashcardMcqs(null)}
         />
       )}
@@ -10149,10 +10248,22 @@ RULES:
 
       {/* ===================== COMMUNITY "MOST SAVED" / TRENDING NOTES PAGE ===================== */}
       {showCommunityStarsPage && (() => {
+        const now = Date.now();
+        const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+        const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+        const cutoff =
+          globalNotesRange === 'weekly' ? now - WEEK_MS :
+          globalNotesRange === 'monthly' ? now - MONTH_MS :
+          0;
         const ranked = Object.values(globalNoteStars)
           .filter(e => e.count > 0 && e.label)
+          .filter(e => cutoff === 0 ? true : (e.lastUpdated || 0) >= cutoff)
           .sort((a, b) => b.count - a.count);
         const topCount = ranked[0]?.count || 0;
+        const rangeLabel =
+          globalNotesRange === 'weekly' ? 'is hafte' :
+          globalNotesRange === 'monthly' ? 'is mahine' :
+          'all-time';
         return (
           <div className="fixed inset-0 z-[9100] bg-gradient-to-b from-amber-50 to-white flex flex-col animate-in slide-in-from-right-full duration-300">
             <div className="flex items-center gap-3 px-4 py-3 border-b border-amber-100 bg-white/95 backdrop-blur sticky top-0 z-10">
@@ -10168,19 +10279,52 @@ RULES:
                   Trending Important Notes
                 </h2>
                 <p className="text-[11px] text-slate-500 font-bold">
-                  Sare students kya save kar rahe hain — live count
+                  Sare students kya save kar rahe hain — {rangeLabel}
                 </p>
               </div>
               <span className="text-[10px] font-black uppercase text-amber-600 bg-amber-100 px-2 py-1 rounded-full border border-amber-200">
                 {ranked.length} notes
               </span>
             </div>
+            {/* Time-range filter chips */}
+            <div className="px-4 pt-3 pb-2 bg-white/70 backdrop-blur border-b border-amber-100">
+              <div className="grid grid-cols-3 gap-1 p-1 bg-amber-50 rounded-2xl border border-amber-100">
+                {([
+                  { key: 'all', label: 'All Time', icon: '🏆' },
+                  { key: 'monthly', label: 'Monthly', icon: '📅' },
+                  { key: 'weekly', label: 'Weekly', icon: '🔥' },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setGlobalNotesRange(opt.key)}
+                    className={`py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                      globalNotesRange === opt.key
+                        ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
+                        : 'text-amber-600 hover:text-amber-800'
+                    }`}
+                  >
+                    <span className="text-[12px]">{opt.icon}</span>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
               {ranked.length === 0 ? (
                 <div className="text-center py-16 bg-white rounded-2xl border border-amber-100 shadow-sm">
                   <Star size={40} className="text-amber-300 mx-auto mb-3" />
-                  <p className="font-bold text-slate-600 text-sm">Abhi koi trending note nahi.</p>
-                  <p className="text-xs text-slate-400 mt-1">Jaise hi students notes ko ⭐ karna shuru karenge,<br/>yahan top saved notes dikhne lagengi.</p>
+                  <p className="font-bold text-slate-600 text-sm">
+                    {globalNotesRange === 'all'
+                      ? 'Abhi koi trending note nahi.'
+                      : globalNotesRange === 'weekly'
+                        ? 'Is hafte koi trending note nahi.'
+                        : 'Is mahine koi trending note nahi.'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {globalNotesRange === 'all'
+                      ? <>Jaise hi students notes ko ⭐ karna shuru karenge,<br/>yahan top saved notes dikhne lagengi.</>
+                      : <>"All Time" tab pe try karein —<br/>shayad purane trending notes mil jaaye.</>}
+                  </p>
                 </div>
               ) : (
                 ranked.map((entry, idx) => {

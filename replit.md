@@ -175,3 +175,28 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
 ## Deployment
 - Static site deployment via Vite build
 - Public dir: `dist`
+
+## Recent Changes (Apr 28) — Flashcard redesign + History tracking
+- **Flashcard view rewritten** (`components/FlashcardMcqView.tsx`): now samples **10 random questions** per session (Fisher-Yates shuffle) from the available pool and re-shuffles fresh each time the view opens.
+  - Card UI shows **only the question by default**; tapping the card flips/reveals the answer block. Prev/Next arrows sit directly under the question card (compact mobile layout).
+  - "Shuffle" picks a fresh random 10. On the last card, "Naye 10" appears if pool > 10.
+  - Records a session to `localStorage` on unmount via the new `recordFlashcardSession()` helper.
+- **Mode-button rename** in both Homework MCQ and Lucent flows in `StudentDashboard.tsx`:
+  - "✋ Khud Banao" → **📝 MCQ**
+  - "👁 Sidha" (Sidha Answer) → **💬 Q&A**
+  - "🃏 Flashcard" label kept as-is.
+- **Notes-read time tracking** in `StudentDashboard.tsx`: two `useEffect`s record time spent inside (a) homework note view and (b) Lucent page viewer, calling `recordNotesReadSession()` on view exit.
+- **New util** `utils/flashcardHistory.ts`: localStorage-backed trackers (`recordFlashcardSession`, `recordNotesReadSession`, getters/clearers, `formatDur`, types `FlashcardSession` / `NotesReadSession`). Capped at 200 entries each.
+- **History page** (`components/HistoryPage.tsx`): new **"Flashcards"** tab between Reading and Saved.
+  - Summary tiles: total flashcards viewed, sessions, flashcard time, notes-read time.
+  - Subject-wise breakdown combining flashcard + notes-read activity.
+  - Per-session lists for both flashcards (subject • lesson • viewed/total • duration • date) and notes-read (kind badge: Lucent/HW/Chapter, subject, lesson, duration, date) with individual "Clear all" buttons that confirm before deletion.
+- `components/McqView.tsx` chapter-level Flashcard launcher now passes `subject={subject.name}` so chapter sessions are properly attributed in History.
+
+## Recent Changes (Apr 28 — part 2)
+- **Redeem code rules hardened** in both `database.rules.json` and `firestore.rules`:
+  - **RTDB `redeem_codes/{codeId}`**: per-child `.validate` rules now lock the immutable reward fields (`type`, `amount`, `maxUses`, `subTier`, `subLevel`, `code`) so a student can only update `usedCount` (monotonic increase) and append to `redeemedBy`. Admin / sub-admin bypass the per-child lock so they can edit codes from the admin panel.
+  - **Firestore `redeem_codes/{codeId}`**: existing `affectedKeys().hasOnly(['usedCount', 'isRedeemed', 'redeemedBy'])` rule kept (it already matches the `RedeemSection.tsx` write payload).
+  - The strict old `.validate` that demanded `newData.hasChildren(['type'])` was removed — it was tripping during partial transactions and causing redeems to fail silently.
+- **"Show All Answers" lifted to the TOP** of the Lucent Q&A list (`reveal` mode) so students don't have to scroll past the question stack to reveal everything. Old bottom button removed (no duplicate).
+- **Daily GK Corner card** added as a fixed card at the top of the Homework page (`StudentDashboard.tsx` ~line 6529). Replaces the tiny header-strip GK button. Card shows the count of today's new GK questions (with a pulsing "New" badge) and gives two prominent buttons: **"Aaj ka GK"** and **"GK History"**, both opening the Daily GK / History page.

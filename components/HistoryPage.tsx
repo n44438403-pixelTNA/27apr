@@ -15,12 +15,19 @@ import {
     getFullyReadMap, removeFullyRead,
     type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type FullyReadEntry,
 } from '../utils/recentReads';
+import {
+    getFlashcardSessions, getNotesReadSessions,
+    clearFlashcardSessions, clearNotesReadSessions,
+    formatDur,
+    type FlashcardSession, type NotesReadSession,
+} from '../utils/flashcardHistory';
+import { Layers, Clock } from 'lucide-react';
 
 interface Props {
     user: User;
     onUpdateUser: (u: User) => void;
     settings?: SystemSettings;
-    initialTab?: 'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY' | 'STARRED';
+    initialTab?: 'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY' | 'STARRED' | 'FLASHCARDS';
     /** Resume a chapter from a "Continue Reading" entry — closes History and opens the chapter. */
     onResumeRecentChapter?: (entry: RecentChapterEntry) => void;
     /** Resume a homework note (Sar Sangrah / Speedy / etc). */
@@ -30,7 +37,18 @@ interface Props {
 }
 
 export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, initialTab, onResumeRecentChapter, onResumeRecentHw, onResumeRecentLucent }) => {
-  const [activeTab, setActiveTab] = useState<'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY' | 'STARRED'>(initialTab || 'READING');
+  const [activeTab, setActiveTab] = useState<'READING' | 'ACTIVITY' | 'SAVED' | 'OFFLINE' | 'SUB_HISTORY' | 'STARRED' | 'FLASHCARDS'>(initialTab || 'READING');
+
+  // FLASHCARDS / NOTES READ tracking (localStorage-backed)
+  const [flashcardSessions, setFlashcardSessions] = useState<FlashcardSession[]>([]);
+  const [notesReadSessions, setNotesReadSessions] = useState<NotesReadSession[]>([]);
+  const refreshFlashcardData = React.useCallback(() => {
+    setFlashcardSessions(getFlashcardSessions());
+    setNotesReadSessions(getNotesReadSessions());
+  }, []);
+  useEffect(() => {
+    if (activeTab === 'FLASHCARDS') refreshFlashcardData();
+  }, [activeTab, refreshFlashcardData]);
 
   // Continue Reading state — combined chapter + homework + lucent + fully-read map.
   const [recentChapters, setRecentChapters] = useState<RecentChapterEntry[]>([]);
@@ -394,6 +412,12 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 Reading
             </button>
             <button
+                onClick={() => setActiveTab('FLASHCARDS')}
+                className={`flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'FLASHCARDS' ? 'bg-white shadow text-slate-800' : 'text-slate-600 hover:text-slate-700'}`}
+            >
+                Flashcards
+            </button>
+            <button
                 onClick={() => setActiveTab('SAVED')}
                 className={`flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'SAVED' ? 'bg-white shadow text-slate-800' : 'text-slate-600 hover:text-slate-700'}`}
             >
@@ -433,6 +457,27 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 onRemoveHw={(id) => { removeRecentHomework(id); refreshReading(); }}
                 onRemoveLucent={(id) => { removeRecentLucent(id); refreshReading(); }}
                 onClearDoneBadge={(id) => { removeFullyRead(id); refreshReading(); }}
+            />
+        )}
+
+        {activeTab === 'FLASHCARDS' && (
+            <FlashcardsActivitySection
+                flashcardSessions={flashcardSessions}
+                notesReadSessions={notesReadSessions}
+                onClearFlashcards={() => {
+                    setConfirmConfig({
+                        isOpen: true,
+                        message: 'Saare flashcard sessions delete kar dein?',
+                        onConfirm: () => { clearFlashcardSessions(); refreshFlashcardData(); },
+                    });
+                }}
+                onClearNotes={() => {
+                    setConfirmConfig({
+                        isOpen: true,
+                        message: 'Saare notes-read records delete kar dein?',
+                        onConfirm: () => { clearNotesReadSessions(); refreshFlashcardData(); },
+                    });
+                }}
             />
         )}
 
@@ -959,6 +1004,215 @@ const ReadingProgressSection: React.FC<ReadingSectionProps> = ({
                         </section>
                     )}
                 </>
+            )}
+        </div>
+    );
+};
+// =====================================================================
+// FLASHCARDS + NOTES READ activity panel.
+// Powered by localStorage (utils/flashcardHistory) — works offline.
+// =====================================================================
+interface FlashcardsActivitySectionProps {
+    flashcardSessions: FlashcardSession[];
+    notesReadSessions: NotesReadSession[];
+    onClearFlashcards: () => void;
+    onClearNotes: () => void;
+}
+
+const FlashcardsActivitySection: React.FC<FlashcardsActivitySectionProps> = ({
+    flashcardSessions, notesReadSessions, onClearFlashcards, onClearNotes,
+}) => {
+    // Aggregate stats
+    const totalFlashcards = flashcardSessions.reduce((s, f) => s + (f.viewed || 0), 0);
+    const totalFlashcardSessions = flashcardSessions.length;
+    const totalFlashcardSec = flashcardSessions.reduce((s, f) => s + (f.durationSec || 0), 0);
+    const totalNotesSec = notesReadSessions.reduce((s, n) => s + (n.durationSec || 0), 0);
+
+    const fcSubjects = new Set(flashcardSessions.map(f => f.subject).filter(Boolean));
+    const fcLessons = new Set(flashcardSessions.map(f => f.lessonTitle).filter(Boolean));
+    const noteLessons = new Set(notesReadSessions.map(n => n.lessonTitle).filter(Boolean));
+
+    // Per-subject totals (combined)
+    const perSubject = React.useMemo(() => {
+        const map: Record<string, { flashcards: number; sessions: number; readSec: number; flashSec: number }> = {};
+        flashcardSessions.forEach(f => {
+            const k = f.subject || '—';
+            if (!map[k]) map[k] = { flashcards: 0, sessions: 0, readSec: 0, flashSec: 0 };
+            map[k].flashcards += (f.viewed || 0);
+            map[k].sessions += 1;
+            map[k].flashSec += (f.durationSec || 0);
+        });
+        notesReadSessions.forEach(n => {
+            const k = n.subject || '—';
+            if (!map[k]) map[k] = { flashcards: 0, sessions: 0, readSec: 0, flashSec: 0 };
+            map[k].readSec += (n.durationSec || 0);
+        });
+        return Object.entries(map).sort((a, b) =>
+            (b[1].flashcards + b[1].sessions + b[1].readSec) - (a[1].flashcards + a[1].sessions + a[1].readSec)
+        );
+    }, [flashcardSessions, notesReadSessions]);
+
+    const fmtDate = (ts: number) => {
+        try {
+            const d = new Date(ts);
+            return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) + ' · ' +
+                d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        } catch { return ''; }
+    };
+
+    const isEmpty = flashcardSessions.length === 0 && notesReadSessions.length === 0;
+
+    return (
+        <div className="space-y-5 animate-in fade-in duration-300">
+            {/* SUMMARY GRID */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-3">
+                    <div className="flex items-center gap-1.5 text-amber-700 mb-1">
+                        <Layers size={14} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Flashcards</span>
+                    </div>
+                    <p className="text-2xl font-black text-amber-900 leading-none">{totalFlashcards}</p>
+                    <p className="text-[10px] font-bold text-amber-700 mt-1">{totalFlashcardSessions} sessions</p>
+                </div>
+                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-2xl p-3">
+                    <div className="flex items-center gap-1.5 text-indigo-700 mb-1">
+                        <Clock size={14} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Flashcard Time</span>
+                    </div>
+                    <p className="text-2xl font-black text-indigo-900 leading-none">{formatDur(totalFlashcardSec)}</p>
+                    <p className="text-[10px] font-bold text-indigo-700 mt-1">{fcSubjects.size} subjects</p>
+                </div>
+                <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-3">
+                    <div className="flex items-center gap-1.5 text-emerald-700 mb-1">
+                        <BookOpen size={14} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Notes Padhe</span>
+                    </div>
+                    <p className="text-2xl font-black text-emerald-900 leading-none">{noteLessons.size}</p>
+                    <p className="text-[10px] font-bold text-emerald-700 mt-1">{notesReadSessions.length} sessions</p>
+                </div>
+                <div className="bg-gradient-to-br from-blue-50 to-sky-50 border border-blue-200 rounded-2xl p-3">
+                    <div className="flex items-center gap-1.5 text-blue-700 mb-1">
+                        <Clock size={14} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Reading Time</span>
+                    </div>
+                    <p className="text-2xl font-black text-blue-900 leading-none">{formatDur(totalNotesSec)}</p>
+                    <p className="text-[10px] font-bold text-blue-700 mt-1">total padha</p>
+                </div>
+            </div>
+
+            {isEmpty && (
+                <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
+                    <Layers size={36} className="mx-auto text-slate-300 mb-2" />
+                    <p className="font-black text-slate-700">Abhi tak koi activity nahi</p>
+                    <p className="text-xs mt-1">Flashcards open karein ya koi note padhein — yahan record dikhega.</p>
+                </div>
+            )}
+
+            {/* PER-SUBJECT BREAKDOWN */}
+            {perSubject.length > 0 && (
+                <section className="bg-white rounded-2xl border border-slate-200 p-4">
+                    <h4 className="text-sm font-black text-slate-700 mb-3 flex items-center gap-2">
+                        📚 Subject-wise breakdown
+                    </h4>
+                    <div className="space-y-2">
+                        {perSubject.map(([subject, s]) => (
+                            <div key={subject} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100">
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-black text-slate-800 truncate">{subject}</p>
+                                    <p className="text-[10px] font-bold text-slate-500 mt-0.5">
+                                        {s.flashcards > 0 && <>🃏 {s.flashcards} cards · {s.sessions} sessions</>}
+                                        {s.flashcards > 0 && s.readSec > 0 && <> · </>}
+                                        {s.readSec > 0 && <>📖 {formatDur(s.readSec)} padha</>}
+                                    </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                    <p className="text-xs font-black text-indigo-600">{formatDur(s.flashSec + s.readSec)}</p>
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase">total</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* FLASHCARD SESSIONS LIST */}
+            {flashcardSessions.length > 0 && (
+                <section className="bg-white rounded-2xl border border-slate-200 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-black text-slate-700 flex items-center gap-2">
+                            <Layers size={14} className="text-amber-600" />
+                            Flashcard Sessions
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                {flashcardSessions.length}
+                            </span>
+                        </h4>
+                        <button
+                            onClick={onClearFlashcards}
+                            className="text-[10px] font-bold text-rose-500 hover:text-rose-700 px-2 py-1 rounded-md hover:bg-rose-50"
+                        >
+                            Clear all
+                        </button>
+                    </div>
+                    <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                        {flashcardSessions.map(f => (
+                            <div key={f.id} className="px-3 py-2 rounded-xl border border-amber-100 bg-amber-50/40">
+                                <div className="flex items-start justify-between gap-2 mb-1">
+                                    <p className="text-sm font-black text-slate-800 leading-snug line-clamp-2 flex-1">{f.lessonTitle}</p>
+                                    <span className="shrink-0 text-[10px] font-black uppercase tracking-wider bg-white text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
+                                        {f.viewed}/{f.total}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+                                    <span className="truncate">{f.subject}</span>
+                                    <span className="shrink-0 ml-2 flex items-center gap-2">
+                                        <span className="text-indigo-600">⏱ {formatDur(f.durationSec)}</span>
+                                        <span className="text-slate-400">{fmtDate(f.ts)}</span>
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* NOTES READ SESSIONS LIST */}
+            {notesReadSessions.length > 0 && (
+                <section className="bg-white rounded-2xl border border-slate-200 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-black text-slate-700 flex items-center gap-2">
+                            <BookOpen size={14} className="text-emerald-600" />
+                            Notes Padhne ka History
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                {notesReadSessions.length}
+                            </span>
+                        </h4>
+                        <button
+                            onClick={onClearNotes}
+                            className="text-[10px] font-bold text-rose-500 hover:text-rose-700 px-2 py-1 rounded-md hover:bg-rose-50"
+                        >
+                            Clear all
+                        </button>
+                    </div>
+                    <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                        {notesReadSessions.map(n => (
+                            <div key={n.id} className="px-3 py-2 rounded-xl border border-emerald-100 bg-emerald-50/40">
+                                <div className="flex items-start justify-between gap-2 mb-1">
+                                    <p className="text-sm font-black text-slate-800 leading-snug line-clamp-2 flex-1">{n.lessonTitle}</p>
+                                    <span className="shrink-0 text-[10px] font-black uppercase tracking-wider bg-white text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                        {n.kind === 'lucent' ? 'Lucent' : n.kind === 'homework' ? 'HW' : 'Chapter'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+                                    <span className="truncate">{n.subject}</span>
+                                    <span className="shrink-0 ml-2 flex items-center gap-2">
+                                        <span className="text-emerald-700">⏱ {formatDur(n.durationSec)}</span>
+                                        <span className="text-slate-400">{fmtDate(n.ts)}</span>
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
             )}
         </div>
     );

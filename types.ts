@@ -475,6 +475,7 @@ export interface SystemSettings {
   mcqTestCost?: number;
   mcqAnalysisCost?: number;
   appShortName?: string; // e.g. "IIC"
+  appShortNameSize?: number; // Font size in pixels for loading-screen short name (admin slider, 24-120). Default 30.
   officialAppUrl?: string; // NEW: Play Store Link
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page

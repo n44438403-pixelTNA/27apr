@@ -786,6 +786,7 @@ export const McqView: React.FC<Props> = ({
               questions={flashcardData as any}
               title={chapter.title}
               subtitle={`${subject.name} • Flashcard Mode`}
+              subject={subject.name}
               onBack={() => { setViewMode('SELECTION'); setFlashcardData(null); }}
           />
        ) : viewMode !== 'SELECTION' && lessonContent ? (

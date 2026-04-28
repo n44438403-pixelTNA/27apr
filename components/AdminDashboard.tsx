@@ -6752,6 +6752,39 @@ Statement 2"
                               <div><label className="text-xs font-bold uppercase text-slate-600">AI Assistant Name</label><input type="text" value={localSettings.aiName || 'IIC AI'} onChange={e => setLocalSettings({...localSettings, aiName: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="IIC AI" /></div>
                           </div>
 
+                          {/* NEW: Loading-screen short-name font-size slider (24-120px) */}
+                          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                  <label className="text-xs font-bold uppercase text-indigo-700">Loading Screen Logo Text Size</label>
+                                  <span className="text-sm font-black text-indigo-900 bg-white px-2 py-0.5 rounded-md border border-indigo-200">
+                                      {localSettings.appShortNameSize || 30}px
+                                  </span>
+                              </div>
+                              <input
+                                  type="range"
+                                  min={24}
+                                  max={120}
+                                  step={2}
+                                  value={localSettings.appShortNameSize || 30}
+                                  onChange={e => setLocalSettings({...localSettings, appShortNameSize: parseInt(e.target.value, 10)})}
+                                  className="w-full accent-indigo-600"
+                              />
+                              <div className="flex items-center justify-between text-[10px] font-bold text-indigo-600 mt-1">
+                                  <span>Chhota (24)</span>
+                                  <span>Default (30)</span>
+                                  <span>Bara (120)</span>
+                              </div>
+                              <div
+                                  className="mt-3 text-center bg-white rounded-lg py-3 px-2 border-2 border-dashed border-indigo-200"
+                                  style={{ fontSize: `${localSettings.appShortNameSize || 30}px` }}
+                              >
+                                  <span className="font-black tracking-tight uppercase bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                                      {localSettings.appShortName || 'IIC'}
+                                  </span>
+                              </div>
+                              <p className="text-[10px] font-bold text-indigo-500 mt-2 text-center">Live preview — yahi loading screen pe dikhega</p>
+                          </div>
+
                       {/* AI Model Control */}
                       <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800 mb-4">
                         <div className="flex items-center gap-2 mb-4 text-blue-700 dark:text-blue-400 font-bold">
