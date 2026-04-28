@@ -420,6 +420,12 @@ export interface LucentPageNote {
   id: string;
   pageNo: string;
   content: string;
+  /** Optional date associated with this page (ISO YYYY-MM-DD). Shown in the
+   *  reader so the student knows when the page was added / which day's notes. */
+  date?: string;
+  /** Optional admin-curated MCQs for this specific page. When present, the
+   *  reader shows them under the MCQ tab instead of AI-generating from text. */
+  mcqs?: MCQItem[];
 }
 
 export interface LucentNoteEntry {

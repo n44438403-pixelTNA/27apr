@@ -319,20 +319,30 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   <Square size={12} fill="currentColor" />
                 </span>
               )}
-              {/* Star button — only show when onStarToggle is provided */}
-              {onStarToggle && (
+              {/* Star button — only visible on the line currently being read by
+                  TTS. When TTS stops, the star disappears. The amber background
+                  on already-starred lines still indicates "saved to Important
+                  Notes". To un-star later, tap the line to start TTS again,
+                  then tap the star. ~28px hit area for easy tapping. */}
+              {onStarToggle && isActive && (
                 <button
                   type="button"
-                  onClick={() => onStarToggle(topic.text)}
-                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-colors ${
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
+                    onStarToggle(topic.text);
+                  }}
+                  onPointerDown={(e) => { e.stopPropagation(); }}
+                  style={{ width: '28px', height: '28px', padding: 0 }}
+                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full inline-flex items-center justify-center transition-all shadow-sm border-2 z-10 ${
                     starred
-                      ? 'text-amber-400 bg-amber-100 hover:bg-amber-200'
-                      : 'text-slate-300 hover:text-amber-400 hover:bg-amber-50'
+                      ? 'text-amber-600 bg-amber-100 border-amber-400 hover:bg-amber-200'
+                      : 'text-amber-500 bg-white border-amber-300 hover:bg-amber-50'
                   }`}
                   aria-label={starred ? 'Remove star' : 'Star this note'}
-                  title={starred ? 'Starred' : 'Star this note'}
+                  title={starred ? 'Tap to un-star' : 'Tap to add to Important Notes'}
                 >
-                  <Star size={13} className={starred ? 'fill-amber-400' : ''} />
+                  <Star size={15} className={starred ? 'fill-amber-500' : ''} />
                 </button>
               )}
             </div>

@@ -427,6 +427,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [homeworkTab, setHomeworkTab] = useState<'ADD' | 'HISTORY' | 'COMP_MCQ'>('ADD');
   const [newCompMcqText, setNewCompMcqText] = useState('');
   const [newHomework, setNewHomework] = useState({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'none', pageNo: '' });
+  // Structured (Lucent-style) MCQs for the homework being created. Each item: { id, question, options[4], correctAnswer (index) }
+  const [newHomeworkMcqs, setNewHomeworkMcqs] = useState<Array<{ id: string; question: string; options: string[]; correctAnswer: number }>>([]);
+  // Bulk paste textarea visibility/content for the new homework structured MCQ editor.
+  const [newHomeworkBulk, setNewHomeworkBulk] = useState<string | undefined>(undefined);
 
   // --- LUCENT NOTES STATE (special form when targetSubject === 'lucent') ---
   const LUCENT_SUBJECT_OPTIONS: { id: string; name: string }[] = [
@@ -437,12 +441,53 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
     { id: 'geography', name: 'भूगोल (Geography)' },
     { id: 'polity', name: 'राजनीति विज्ञान (Polity)' },
     { id: 'history', name: 'इतिहास (History)' },
+    { id: 'speedyScience', name: 'Speedy Science (Page-wise)' },
+    { id: 'speedySocialScience', name: 'Speedy Social Science (Page-wise)' },
+    { id: 'sarSangrah', name: 'Sar Sangrah (Page-wise)' },
   ];
   const [newLucent, setNewLucent] = useState<{ subject: string; lessonTitle: string; pages: LucentPageNote[] }>({
     subject: 'biology',
     lessonTitle: '',
     pages: [{ id: Date.now().toString(), pageNo: '1', content: '' }],
   });
+  // Per-page bulk MCQ paste: keyed by page id -> textarea content. When non-undefined the paste UI is open.
+  const [lucentPageBulk, setLucentPageBulk] = useState<Record<string, string>>({});
+
+  // Normalize common Hindi / shorthand MCQ paste formats so they parse with parseMCQText().
+  // Handles: **प्रश्न:**, **सही उत्तर:** B) ..., **Ans: B) ...**, **Q 1: ...**, ### topic headers, --- separators.
+  const normalizeMcqPaste = (raw: string): string => {
+    let txt = raw;
+    txt = txt.replace(/\r\n/g, '\n');
+    txt = txt.replace(/^---+\s*$/gm, '');
+    txt = txt.replace(/^###\s+.+$/gm, '');
+    txt = txt.replace(/\*\*Q\s*(\d+)\s*[:.]\s*([\s\S]*?)\*\*/gi, (_m, n, q) => `**Question ${n}**\n❓ Question: ${q.trim()}`);
+    txt = txt.replace(/\*\*प्रश्न\s*[:：]?\*\*/gi, '__PRASHNA__');
+    txt = txt.replace(/\*\*Question\s*[:：]?\*\*/gi, '__PRASHNA__');
+    txt = txt.replace(/\*\*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]?\*\*\s*/gi, '✅ Correct Answer: ');
+    txt = txt.replace(/(?:^|\n)\s*(?:Ans(?:wer)?|सही\s*उत्तर)\s*[:：]\s*/gi, '\n✅ Correct Answer: ');
+    let qNum = 0;
+    txt = txt.replace(/__PRASHNA__\s*/g, () => { qNum += 1; return `\n**Question ${qNum}**\n❓ Question: `; });
+    if (qNum === 0) {
+      const lines = txt.split('\n');
+      const out: string[] = [];
+      let counter = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        const next = (lines[i + 1] || '').trim();
+        const looksLikeOptStart = /^\s*A[\)\.]/i.test(next);
+        const isQLine = looksLikeOptStart && l.trim().length > 0 && !/✅|Correct Answer/i.test(l) && !/^\s*[A-D][\)\.]/i.test(l);
+        if (isQLine) {
+          counter += 1;
+          out.push(`**Question ${counter}**`);
+          out.push(`❓ Question: ${l.trim()}`);
+        } else {
+          out.push(l);
+        }
+      }
+      txt = out.join('\n');
+    }
+    return txt.trim();
+  };
 
   const [gkTab, setGkTab] = useState<'ADD' | 'HISTORY'>('ADD');
   const [newGk, setNewGk] = useState({ date: new Date().toISOString().split('T')[0], question: '', answer: '' });
@@ -8653,7 +8698,7 @@ Statement 2"
                                                       <Trash2 size={14} />
                                                   </button>
                                               )}
-                                              <div className="grid grid-cols-[100px_1fr] gap-2 items-start">
+                                              <div className="grid grid-cols-[80px_120px_1fr] gap-2 items-start">
                                                   <div>
                                                       <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Page No.</label>
                                                       <input type="text" value={pg.pageNo} onChange={e => {
@@ -8663,6 +8708,14 @@ Statement 2"
                                                       }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="1" />
                                                   </div>
                                                   <div>
+                                                      <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Date</label>
+                                                      <input type="date" value={pg.date || ''} onChange={e => {
+                                                          const updated = [...newLucent.pages];
+                                                          updated[pgIdx] = { ...updated[pgIdx], date: e.target.value };
+                                                          setNewLucent({...newLucent, pages: updated});
+                                                      }} className="w-full p-2 border border-slate-200 rounded text-xs outline-none focus:border-indigo-500" />
+                                                  </div>
+                                                  <div>
                                                       <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Note Content</label>
                                                       <textarea value={pg.content} onChange={e => {
                                                           const updated = [...newLucent.pages];
@@ -8670,6 +8723,119 @@ Statement 2"
                                                           setNewLucent({...newLucent, pages: updated});
                                                       }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-24 focus:border-indigo-500" placeholder="Page ke notes likhein..." />
                                                   </div>
+                                              </div>
+                                              {/* Per-page MCQs (admin-curated). Each MCQ gets a question + 4 options +
+                                                  correct answer index. Stored on the LucentPageNote so the student
+                                                  reader uses these instead of AI-generating. */}
+                                              <div className="border-t border-slate-200 pt-2 mt-1">
+                                                  <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                                                      <label className="text-[9px] font-bold text-emerald-700 uppercase">📝 Page MCQs ({(pg.mcqs || []).length})</label>
+                                                      <div className="flex gap-1">
+                                                          <button type="button" onClick={() => {
+                                                              setLucentPageBulk(prev => {
+                                                                  const cp = { ...prev };
+                                                                  if (cp[pg.id] === undefined) cp[pg.id] = '';
+                                                                  else delete cp[pg.id];
+                                                                  return cp;
+                                                              });
+                                                          }} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600 flex items-center gap-1">
+                                                              📋 Bulk Paste
+                                                          </button>
+                                                          <button type="button" onClick={() => {
+                                                              const updated = [...newLucent.pages];
+                                                              const existing = updated[pgIdx].mcqs || [];
+                                                              updated[pgIdx] = {
+                                                                  ...updated[pgIdx],
+                                                                  mcqs: [...existing, { id: `mcq_${Date.now()}_${Math.random()}`, question: '', options: ['', '', '', ''], correctAnswer: 0 } as any]
+                                                              };
+                                                              setNewLucent({...newLucent, pages: updated});
+                                                          }} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1">
+                                                              <Plus size={10} /> Add MCQ
+                                                          </button>
+                                                      </div>
+                                                  </div>
+                                                  {lucentPageBulk[pg.id] !== undefined && (
+                                                      <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2 space-y-1.5">
+                                                          <p className="text-[9px] text-amber-800 font-bold">Yahan poora MCQ block paste karein. Hindi/English dono format support karta hai (**प्रश्न:**, **सही उत्तर:**, **Q 1:**, **Ans:** etc.)</p>
+                                                          <textarea
+                                                              value={lucentPageBulk[pg.id]}
+                                                              onChange={e => setLucentPageBulk(prev => ({ ...prev, [pg.id]: e.target.value }))}
+                                                              placeholder={"**प्रश्न:** ... ?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."}
+                                                              className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500"
+                                                          />
+                                                          <div className="flex gap-1">
+                                                              <button type="button" onClick={() => {
+                                                                  const raw = (lucentPageBulk[pg.id] || '').trim();
+                                                                  if (!raw) return alert('Text khaali hai.');
+                                                                  const norm = normalizeMcqPaste(raw);
+                                                                  const parsed = parseMCQText(norm);
+                                                                  if (!parsed.questions || parsed.questions.length === 0) {
+                                                                      return alert('Parse fail. Format check karein. (**प्रश्न:** ya **Question:** marker zaroori hai)');
+                                                                  }
+                                                                  const updated = [...newLucent.pages];
+                                                                  const existing = updated[pgIdx].mcqs || [];
+                                                                  const added = parsed.questions.map(q => ({
+                                                                      id: `mcq_${Date.now()}_${Math.random()}`,
+                                                                      question: (q.question || '').replace(/<br\/?>/g, '\n').trim(),
+                                                                      options: (q.options || ['', '', '', '']).slice(0, 4),
+                                                                      correctAnswer: q.correctAnswer ?? 0,
+                                                                  })) as any[];
+                                                                  updated[pgIdx] = { ...updated[pgIdx], mcqs: [...existing, ...added] };
+                                                                  setNewLucent({...newLucent, pages: updated});
+                                                                  setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
+                                                                  setAlertConfig({ isOpen: true, message: `✅ ${added.length} MCQ add ho gaye!` });
+                                                              }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">
+                                                                  Parse & Add All
+                                                              </button>
+                                                              <button type="button" onClick={() => {
+                                                                  setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
+                                                              }} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">
+                                                                  Cancel
+                                                              </button>
+                                                          </div>
+                                                      </div>
+                                                  )}
+                                                  {(pg.mcqs || []).map((mcq, mIdx) => (
+                                                      <div key={(mcq as any).id || mIdx} className="bg-white border border-emerald-100 rounded p-2 mb-2 space-y-1.5 relative">
+                                                          <button type="button" onClick={() => {
+                                                              const updated = [...newLucent.pages];
+                                                              updated[pgIdx] = { ...updated[pgIdx], mcqs: (updated[pgIdx].mcqs || []).filter((_, i) => i !== mIdx) };
+                                                              setNewLucent({...newLucent, pages: updated});
+                                                          }} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
+                                                              <Trash2 size={11} />
+                                                          </button>
+                                                          <input type="text" value={mcq.question} onChange={e => {
+                                                              const updated = [...newLucent.pages];
+                                                              const mcqs = [...(updated[pgIdx].mcqs || [])];
+                                                              mcqs[mIdx] = { ...mcqs[mIdx], question: e.target.value };
+                                                              updated[pgIdx] = { ...updated[pgIdx], mcqs };
+                                                              setNewLucent({...newLucent, pages: updated});
+                                                          }} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx + 1}: Question?`} />
+                                                          <div className="grid grid-cols-2 gap-1">
+                                                              {(mcq.options || ['', '', '', '']).map((opt, oi) => (
+                                                                  <div key={oi} className="flex items-center gap-1">
+                                                                      <input type="radio" name={`correct-${pg.id}-${mIdx}`} checked={(mcq.correctAnswer ?? 0) === oi} onChange={() => {
+                                                                          const updated = [...newLucent.pages];
+                                                                          const mcqs = [...(updated[pgIdx].mcqs || [])];
+                                                                          mcqs[mIdx] = { ...mcqs[mIdx], correctAnswer: oi };
+                                                                          updated[pgIdx] = { ...updated[pgIdx], mcqs };
+                                                                          setNewLucent({...newLucent, pages: updated});
+                                                                      }} className="shrink-0" />
+                                                                      <input type="text" value={opt} onChange={e => {
+                                                                          const updated = [...newLucent.pages];
+                                                                          const mcqs = [...(updated[pgIdx].mcqs || [])];
+                                                                          const opts = [...(mcqs[mIdx].options || ['', '', '', ''])];
+                                                                          opts[oi] = e.target.value;
+                                                                          mcqs[mIdx] = { ...mcqs[mIdx], options: opts };
+                                                                          updated[pgIdx] = { ...updated[pgIdx], mcqs };
+                                                                          setNewLucent({...newLucent, pages: updated});
+                                                                      }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65 + oi)}`} />
+                                                                  </div>
+                                                              ))}
+                                                          </div>
+                                                          <p className="text-[9px] text-slate-500">✓ Sahi answer ke saamne radio click karein</p>
+                                                      </div>
+                                                  ))}
                                               </div>
                                           </div>
                                       ))}
@@ -8729,9 +8895,70 @@ Statement 2"
                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Notes (Optional)</label>
                                       <textarea value={newHomework.notes} onChange={e => setNewHomework({...newHomework, notes: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-20 focus:border-indigo-500" placeholder="Enter notes..." />
                                   </div>
-                                  <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">MCQ Text (Optional)</label>
-                                      <textarea value={newHomework.mcqText} onChange={e => setNewHomework({...newHomework, mcqText: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-20 focus:border-indigo-500" placeholder="Enter MCQ text..." />
+                                  {/* MCQ Section — Lucent-style: structured Add MCQ + Bulk Paste, OR fallback raw mcqText.
+                                      Both flows write into parsedMcqs at save time. Student attempt UI shows instant
+                                      sahi/galat feedback (green/red) via the existing parsedMcqs renderer. */}
+                                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
+                                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                                          <label className="text-[10px] font-bold text-emerald-700 uppercase flex items-center gap-1">
+                                              📝 Page-wise MCQs ({newHomeworkMcqs.length})
+                                          </label>
+                                          <div className="flex gap-1">
+                                              <button type="button" onClick={() => setNewHomeworkBulk(prev => prev === undefined ? '' : undefined)} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600">📋 Bulk Paste</button>
+                                              <button type="button" onClick={() => setNewHomeworkMcqs(prev => [...prev, { id: `mcq_${Date.now()}_${Math.random()}`, question: '', options: ['', '', '', ''], correctAnswer: 0 }])} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1"><Plus size={10} /> Add MCQ</button>
+                                          </div>
+                                      </div>
+                                      {newHomeworkBulk !== undefined && (
+                                          <div className="bg-amber-50 border border-amber-200 rounded p-2 space-y-1.5">
+                                              <p className="text-[9px] text-amber-800 font-bold">Poora MCQ block paste karein. Hindi/English dono format support: **प्रश्न:**, **सही उत्तर:**, **Q 1:**, **Ans:** etc.</p>
+                                              <textarea
+                                                  value={newHomeworkBulk}
+                                                  onChange={e => setNewHomeworkBulk(e.target.value)}
+                                                  placeholder={"**प्रश्न:** ... ?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."}
+                                                  className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500"
+                                              />
+                                              <div className="flex gap-1">
+                                                  <button type="button" onClick={() => {
+                                                      const raw = (newHomeworkBulk || '').trim();
+                                                      if (!raw) return alert('Text khaali hai.');
+                                                      const norm = normalizeMcqPaste(raw);
+                                                      const parsed = parseMCQText(norm);
+                                                      if (!parsed.questions || parsed.questions.length === 0) {
+                                                          return alert('Parse fail. Format check karein.');
+                                                      }
+                                                      const added = parsed.questions.map(q => ({
+                                                          id: `mcq_${Date.now()}_${Math.random()}`,
+                                                          question: (q.question || '').replace(/<br\/?>/g, '\n').trim(),
+                                                          options: (q.options || ['', '', '', '']).slice(0, 4),
+                                                          correctAnswer: q.correctAnswer ?? 0,
+                                                      }));
+                                                      setNewHomeworkMcqs(prev => [...prev, ...added]);
+                                                      setNewHomeworkBulk(undefined);
+                                                      setAlertConfig({ isOpen: true, message: `✅ ${added.length} MCQ add ho gaye!` });
+                                                  }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">Parse & Add All</button>
+                                                  <button type="button" onClick={() => setNewHomeworkBulk(undefined)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">Cancel</button>
+                                              </div>
+                                          </div>
+                                      )}
+                                      {newHomeworkMcqs.map((mcq, mIdx) => (
+                                          <div key={mcq.id} className="bg-white border border-emerald-100 rounded p-2 relative space-y-1.5">
+                                              <button type="button" onClick={() => setNewHomeworkMcqs(prev => prev.filter((_, i) => i !== mIdx))} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={11} /></button>
+                                              <input type="text" value={mcq.question} onChange={e => setNewHomeworkMcqs(prev => prev.map((m, i) => i === mIdx ? { ...m, question: e.target.value } : m))} placeholder={`Q${mIdx + 1}: Question?`} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" />
+                                              <div className="grid grid-cols-2 gap-1">
+                                                  {mcq.options.map((opt, oi) => (
+                                                      <div key={oi} className="flex items-center gap-1">
+                                                          <input type="radio" name={`hwmcq-${mcq.id}`} checked={mcq.correctAnswer === oi} onChange={() => setNewHomeworkMcqs(prev => prev.map((m, i) => i === mIdx ? { ...m, correctAnswer: oi } : m))} className="shrink-0" />
+                                                          <input type="text" value={opt} onChange={e => setNewHomeworkMcqs(prev => prev.map((m, i) => i === mIdx ? { ...m, options: m.options.map((o, j) => j === oi ? e.target.value : o) } : m))} placeholder={`Option ${String.fromCharCode(65 + oi)}`} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" />
+                                                      </div>
+                                                  ))}
+                                              </div>
+                                              <p className="text-[9px] text-slate-500">✓ Sahi answer ke saamne radio click karein</p>
+                                          </div>
+                                      ))}
+                                      <details className="text-[10px]">
+                                          <summary className="text-slate-500 cursor-pointer hover:text-slate-700">Ya raw MCQ text paste karein (purana tarika)</summary>
+                                          <textarea value={newHomework.mcqText} onChange={e => setNewHomework({...newHomework, mcqText: e.target.value})} className="w-full mt-1 p-2 border border-slate-200 rounded text-sm outline-none h-20 focus:border-indigo-500" placeholder="Enter MCQ text..." />
+                                      </details>
                                   </div>
                                   <div>
                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Audio URL (Optional)</label>
@@ -8755,9 +8982,15 @@ Statement 2"
                                               if (parsed.questions.length > 0) {
                                                   parsedMcqs = parsed.questions;
                                               } else {
-                                                  alert("Failed to parse MCQs. Saving without MCQs.");
+                                                  alert("Failed to parse MCQs from raw text. Saving without raw MCQs.");
                                               }
                                           }
+                                          // Merge structured (Lucent-style) MCQs created via Add MCQ / Bulk Paste UI.
+                                          // These are kept ahead of any raw-text-parsed ones so admin's hand-curated order wins.
+                                          const structuredMcqs = newHomeworkMcqs
+                                              .filter(m => m.question.trim() && m.options.some(o => o.trim()))
+                                              .map(m => ({ question: m.question.trim(), options: m.options, correctAnswer: m.correctAnswer, topic: 'General' }));
+                                          parsedMcqs = [...structuredMcqs, ...parsedMcqs];
                                           const isPageWiseSubject = ['sarSangrah', 'speedyScience', 'speedySocialScience'].includes(newHomework.targetSubject);
                                           const hwItem: any = {
                                               id: Date.now().toString(),
@@ -8779,6 +9012,8 @@ Statement 2"
                                           setLocalSettings(newSettings);
                                           handleSaveSettings(newSettings);
                                           setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'none', pageNo: '' });
+                                          setNewHomeworkMcqs([]);
+                                          setNewHomeworkBulk(undefined);
                                           setAlertConfig({isOpen: true, message: '✅ Homework Added Successfully!'});
                                       }} className="w-full bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-700 flex items-center justify-center gap-2 transition-colors">
                                           <Save size={18} /> Save Homework
