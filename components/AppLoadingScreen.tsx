@@ -7,34 +7,80 @@ interface AppLoadingScreenProps {
   isPremium?: boolean;
 }
 
+type ThemeVariant = 'black' | 'blue' | 'light';
+
+function detectTheme(): ThemeVariant {
+  try {
+    const isDark = localStorage.getItem('nst_dark_mode') === 'true';
+    if (!isDark) return 'light';
+    const type = localStorage.getItem('nst_dark_theme_type') || 'black';
+    return type === 'blue' ? 'blue' : 'black';
+  } catch {
+    return 'black';
+  }
+}
+
+const THEME_STYLES: Record<ThemeVariant, {
+  bg: string; text: string; subtext: string; boxBg: string; boxBorder: string;
+  trackBg: string; bar: string; badge: string;
+}> = {
+  black: {
+    bg: 'bg-black',
+    text: 'text-white',
+    subtext: 'text-gray-500',
+    boxBg: 'bg-gray-900',
+    boxBorder: 'border-gray-800',
+    trackBg: 'bg-gray-900',
+    bar: 'from-indigo-500 via-violet-500 to-purple-600',
+    badge: 'text-gray-500',
+  },
+  blue: {
+    bg: 'bg-[#050d1f]',
+    text: 'text-white',
+    subtext: 'text-blue-400/70',
+    boxBg: 'bg-blue-950/60',
+    boxBorder: 'border-blue-900/60',
+    trackBg: 'bg-blue-950',
+    bar: 'from-blue-500 via-indigo-500 to-purple-500',
+    badge: 'text-blue-400/60',
+  },
+  light: {
+    bg: 'bg-white',
+    text: 'text-slate-900',
+    subtext: 'text-slate-500',
+    boxBg: 'bg-slate-50',
+    boxBorder: 'border-slate-200',
+    trackBg: 'bg-slate-200',
+    bar: 'from-blue-500 via-indigo-500 to-purple-500',
+    badge: 'text-slate-400',
+  },
+};
+
 export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, isPremium = false }) => {
   const [progress, setProgress] = useState(0);
-  const [stepPhase1, setStepPhase1] = useState(-1); // -1: none, 0: notes, 1: mcq, 2: video, 3: audio
-  const [stepPhase2, setStepPhase2] = useState(-1); // -1: none, 0: smart revision, 1: ai hub, 2: offline mode, 3: teacher mode
+  const [stepPhase1, setStepPhase1] = useState(-1);
+  const [stepPhase2, setStepPhase2] = useState(-1);
+  const [logoTapped, setLogoTapped] = useState(false);
 
-  const [appName, setAppName] = useState(() => {
+  const [themeVariant] = useState<ThemeVariant>(detectTheme);
+
+  const [appName] = useState(() => {
     try {
-        const settingsRaw = localStorage.getItem('nst_system_settings');
-        const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
-        return settingsObj?.appName || 'IIC';
-    } catch(e) {
-        return 'IIC';
+      const settingsRaw = localStorage.getItem('nst_system_settings');
+      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
+      return settingsObj?.appName || 'IIC';
+    } catch {
+      return 'IIC';
     }
   });
 
   const onCompleteRef = useRef(onComplete);
   const appNameRef = useRef(appName);
 
-  useEffect(() => {
-    onCompleteRef.current = onComplete;
-  }, [onComplete]);
+  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
+  useEffect(() => { appNameRef.current = appName; }, [appName]);
 
   useEffect(() => {
-    appNameRef.current = appName;
-  }, [appName]);
-
-  useEffect(() => {
-    // Premium users get 1 second, free users get 3 seconds
     const duration = isPremium ? 1000 : 3000;
     const intervalTime = isPremium ? 33 : 100;
     const steps = duration / intervalTime;
@@ -45,137 +91,158 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
       const currentProgress = Math.min(Math.floor((currentStep / steps) * 100), 100);
       setProgress(currentProgress);
 
-      // Phase 1: 0 - 50%
       if (currentProgress < 50) {
-        if (currentProgress >= 10) setStepPhase1(0); // Notes
-        if (currentProgress >= 20) setStepPhase1(1); // MCQ
-        if (currentProgress >= 30) setStepPhase1(2); // Video
-        if (currentProgress >= 40) setStepPhase1(3); // Audio
+        if (currentProgress >= 10) setStepPhase1(0);
+        if (currentProgress >= 20) setStepPhase1(1);
+        if (currentProgress >= 30) setStepPhase1(2);
+        if (currentProgress >= 40) setStepPhase1(3);
       }
 
-      // Phase 2: 50 - 100%
       if (currentProgress >= 50) {
-        setStepPhase1(-1); // Hide phase 1 boxes
-
-        if (currentProgress >= 50) setStepPhase2(0); // Smart Revision
-        if (currentProgress >= 60) setStepPhase2(1); // AI Hub
-        if (currentProgress >= 70) setStepPhase2(2); // Offline Mode
-        if (currentProgress >= 80) setStepPhase2(3); // Teacher Mode
+        setStepPhase1(-1);
+        if (currentProgress >= 50) setStepPhase2(0);
+        if (currentProgress >= 60) setStepPhase2(1);
+        if (currentProgress >= 70) setStepPhase2(2);
+        if (currentProgress >= 80) setStepPhase2(3);
       }
 
       if (currentStep >= steps) {
         clearInterval(timer);
         try {
-           const utterance = new SpeechSynthesisUtterance("Welcome to " + appNameRef.current);
-           utterance.lang = "en-US";
-           utterance.rate = 1;
-           utterance.pitch = 1;
-           window.speechSynthesis.cancel();
-           window.speechSynthesis.speak(utterance);
-        } catch(e) { console.error("Speech Synthesis Error:", e); }
+          const utterance = new SpeechSynthesisUtterance('Welcome to ' + appNameRef.current);
+          utterance.lang = 'en-US';
+          utterance.rate = 1;
+          utterance.pitch = 1;
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(utterance);
+        } catch {}
         onCompleteRef.current();
       }
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, []); // Empty dependency array prevents reset on App re-renders
+  }, []);
+
+  const handleLogoTap = () => {
+    if (logoTapped) return;
+    try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
+    setLogoTapped(true);
+    setTimeout(() => setLogoTapped(false), 600);
+  };
+
+  const t = THEME_STYLES[themeVariant];
+
+  const iconColor1 = themeVariant === 'light' ? 'text-blue-500' : 'text-blue-400';
+  const iconColor2 = themeVariant === 'light' ? 'text-violet-600' : 'text-purple-400';
+  const iconColor3 = themeVariant === 'light' ? 'text-rose-500' : 'text-rose-400';
+  const iconColor4 = themeVariant === 'light' ? 'text-emerald-600' : 'text-emerald-400';
+  const iconColor5 = themeVariant === 'light' ? 'text-amber-500' : 'text-amber-400';
+  const iconColor6 = themeVariant === 'light' ? 'text-indigo-600' : 'text-indigo-400';
+  const iconColor7 = themeVariant === 'light' ? 'text-teal-600' : 'text-teal-400';
+  const iconColor8 = themeVariant === 'light' ? 'text-orange-500' : 'text-orange-400';
 
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-slate-900 text-white overflow-hidden w-full mx-auto">
-      {/* Background animated elements */}
+    <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center ${t.bg} ${t.text} overflow-hidden w-full mx-auto`}>
+      {/* Animated background gradient */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
-        <div className="absolute top-[-10%] left-[-10%] w-[120%] h-[120%] bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.3)_0%,transparent_50%)] animate-[spin_15s_linear_infinite]"></div>
+        <div className={`absolute top-[-10%] left-[-10%] w-[120%] h-[120%] ${
+          themeVariant === 'blue'
+            ? 'bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.4)_0%,transparent_55%)]'
+            : themeVariant === 'black'
+            ? 'bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.25)_0%,transparent_55%)]'
+            : 'bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.15)_0%,transparent_55%)]'
+        } animate-[spin_15s_linear_infinite]`} />
       </div>
 
       <div className="relative z-10 flex flex-col items-center w-full px-8">
-        {/* Main Title */}
-        <div className="mb-12 text-center animate-in slide-in-from-bottom-4 duration-700 fade-in">
-          <h1 className="text-3xl font-black tracking-tight mb-2 bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent uppercase text-center leading-tight">
+        {/* Logo / App Name — tappable for scale-up animation */}
+        <button
+          type="button"
+          onClick={handleLogoTap}
+          className="mb-12 text-center animate-in slide-in-from-bottom-4 duration-700 fade-in focus:outline-none select-none"
+          style={{ WebkitTapHighlightColor: 'transparent' }}
+        >
+          <h1
+            className={`text-3xl font-black tracking-tight mb-2 uppercase text-center leading-tight transition-transform duration-300 ease-out ${
+              logoTapped ? 'scale-[2.2]' : 'scale-100'
+            } ${
+              themeVariant === 'light'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent'
+                : 'bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent'
+            }`}
+          >
             {appName}
           </h1>
-          <p className="text-xs font-bold tracking-widest text-slate-400 uppercase mt-2">
+          <p className={`text-xs font-bold tracking-widest ${t.subtext} uppercase mt-2 transition-opacity duration-300 ${logoTapped ? 'opacity-0' : 'opacity-100'}`}>
             Loading your experience...
           </p>
-        </div>
+        </button>
 
+        {/* Feature boxes */}
         <div className="relative w-full h-64 perspective-1000 mb-4">
-          {/* Phase 1: The 4 Feature Boxes (0 - 50%) */}
+          {/* Phase 1 */}
           <div className={`absolute inset-0 grid grid-cols-2 gap-4 w-full transition-all duration-500 ${progress < 50 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            {/* Box 1: Notes */}
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-lg transition-all duration-500 transform ${stepPhase1 >= 0 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <BookOpen size={32} className="text-blue-400 mb-3" />
-              <span className="font-bold tracking-wide text-white">Notes</span>
+            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 0 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
+              <BookOpen size={32} className={`${iconColor1} mb-3`} />
+              <span className={`font-bold tracking-wide ${t.text}`}>Notes</span>
             </div>
-
-            {/* Box 2: MCQ */}
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-lg transition-all duration-500 transform ${stepPhase1 >= 1 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <HelpCircle size={32} className="text-purple-400 mb-3" />
-              <span className="font-bold tracking-wide text-white">MCQ</span>
+            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 1 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
+              <HelpCircle size={32} className={`${iconColor2} mb-3`} />
+              <span className={`font-bold tracking-wide ${t.text}`}>MCQ</span>
             </div>
-
-            {/* Box 3: Video */}
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-lg transition-all duration-500 transform ${stepPhase1 >= 2 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <Video size={32} className="text-rose-400 mb-3" />
-              <span className="font-bold tracking-wide text-white">Video</span>
+            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 2 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
+              <Video size={32} className={`${iconColor3} mb-3`} />
+              <span className={`font-bold tracking-wide ${t.text}`}>Video</span>
             </div>
-
-            {/* Box 4: Audio */}
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-lg transition-all duration-500 transform ${stepPhase1 >= 3 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <Headphones size={32} className="text-emerald-400 mb-3" />
-              <span className="font-bold tracking-wide text-white">Audio</span>
+            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 3 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
+              <Headphones size={32} className={`${iconColor4} mb-3`} />
+              <span className={`font-bold tracking-wide ${t.text}`}>Audio</span>
             </div>
           </div>
 
-          {/* Phase 2: The 4 Feature Boxes (50 - 100%) */}
+          {/* Phase 2 */}
           <div className={`absolute inset-0 grid grid-cols-2 gap-4 w-full transition-all duration-500 ${progress >= 50 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            {/* Box 1: Smart Revision */}
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-lg transition-all duration-500 transform ${stepPhase2 >= 0 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <BrainCircuit size={32} className="text-amber-400 mb-3" />
-              <span className="font-bold tracking-wide text-center leading-tight text-white">Smart<br/>Revision</span>
+            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 0 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
+              <BrainCircuit size={32} className={`${iconColor5} mb-3`} />
+              <span className={`font-bold tracking-wide text-center leading-tight ${t.text}`}>Smart<br />Revision</span>
             </div>
-
-            {/* Box 2: AI Hub */}
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-lg transition-all duration-500 transform ${stepPhase2 >= 1 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <Bot size={32} className="text-indigo-400 mb-3" />
-              <span className="font-bold tracking-wide text-white">AI Hub</span>
+            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 1 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
+              <Bot size={32} className={`${iconColor6} mb-3`} />
+              <span className={`font-bold tracking-wide ${t.text}`}>AI Hub</span>
             </div>
-
-            {/* Box 3: Offline Mode */}
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-lg transition-all duration-500 transform ${stepPhase2 >= 2 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <WifiOff size={32} className="text-teal-400 mb-3" />
-              <span className="font-bold tracking-wide text-center leading-tight text-white">Offline<br/>Mode</span>
+            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 2 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
+              <WifiOff size={32} className={`${iconColor7} mb-3`} />
+              <span className={`font-bold tracking-wide text-center leading-tight ${t.text}`}>Offline<br />Mode</span>
             </div>
-
-            {/* Box 4: Teacher Mode */}
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl bg-slate-800 border border-slate-700 shadow-lg transition-all duration-500 transform ${stepPhase2 >= 3 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <Users size={32} className="text-orange-400 mb-3" />
-              <span className="font-bold tracking-wide text-center leading-tight text-white">Teacher<br/>Mode</span>
+            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 3 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
+              <Users size={32} className={`${iconColor8} mb-3`} />
+              <span className={`font-bold tracking-wide text-center leading-tight ${t.text}`}>Teacher<br />Mode</span>
             </div>
           </div>
         </div>
 
-        {/* Progress Section */}
+        {/* Progress section */}
         <div className="w-full flex flex-col items-center mt-4">
-           <div className="flex flex-col items-center justify-center mb-2">
-              <div className="text-4xl font-black text-white font-mono tracking-tighter drop-shadow-md">
-                {progress}%
-              </div>
-           </div>
-           <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-2 shadow-inner border border-slate-700">
-             <div
-               className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full transition-all duration-100 ease-linear shadow-sm"
-               style={{ width: `${progress}%` }}
-             ></div>
-           </div>
-           <div className="flex items-center justify-center gap-2 mt-1">
-             <p className="text-[11px] font-bold text-slate-400 tracking-wide">
-               Developed by Nadim Anwar
-             </p>
-             <span className="text-slate-600">|</span>
-             <p className="text-[11px] text-slate-400 font-mono font-bold tracking-widest">
-               v{APP_VERSION}
-             </p>
-           </div>
+          <div className="flex flex-col items-center justify-center mb-2">
+            <div className={`text-4xl font-black font-mono tracking-tighter drop-shadow-md ${t.text}`}>
+              {progress}%
+            </div>
+          </div>
+          <div className={`w-full h-2 ${t.trackBg} rounded-full overflow-hidden mb-2 shadow-inner`}>
+            <div
+              className={`h-full bg-gradient-to-r ${t.bar} rounded-full transition-all duration-100 ease-linear shadow-sm`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-center gap-2 mt-1">
+            <p className={`text-[11px] font-bold ${t.badge} tracking-wide`}>
+              Developed by Nadim Anwar
+            </p>
+            <span className={t.badge}>|</span>
+            <p className={`text-[11px] ${t.badge} font-mono font-bold tracking-widest`}>
+              v{APP_VERSION}
+            </p>
+          </div>
         </div>
       </div>
     </div>

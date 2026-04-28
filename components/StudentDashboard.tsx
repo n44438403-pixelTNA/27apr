@@ -11,6 +11,7 @@ import {
   Challenge20,
   MCQResult,
   LucentNoteEntry,
+  AppNotification,
 } from "../types";
 import {
   updateUserStatus,
@@ -346,6 +347,21 @@ const DashboardSectionWrapper = ({
     </div>
   );
 };
+
+function formatDriveLink(url: string): string {
+  if (!url) return url;
+  const match = url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/);
+  if (match) return `https://drive.google.com/file/d/${match[1]}/preview?rm=minimal`;
+  return url;
+}
+
+function formatVideoEmbed(url: string): string {
+  const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s?#]+)/);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}?autoplay=1`;
+  const drive = url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/);
+  if (drive) return `https://drive.google.com/file/d/${drive[1]}/preview`;
+  return url;
+}
 
 export const StudentDashboard: React.FC<Props> = ({
   user,
@@ -1024,6 +1040,25 @@ export const StudentDashboard: React.FC<Props> = ({
   // Notes/MCQ split view: 'choose' shows a chooser overlay, 'notes' shows notes (with optional MCQ switch button),
   // 'mcq' shows MCQ-only view. Defaults to 'notes' when only notes exist, 'mcq' when only MCQ.
   const [hwViewMode, setHwViewMode] = useState<'notes' | 'mcq' | 'choose'>('notes');
+  const [hwActivePdf, setHwActivePdf] = useState<string | null>(null);
+  const [hwAudioVisible, setHwAudioVisible] = useState(false);
+  const [hwVideoVisible, setHwVideoVisible] = useState(false);
+
+  // --- NOTIFICATION STATE ---
+  const [seenNotifIds, setSeenNotifIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('nst_seen_notifs_v1') || '[]'); } catch { return []; }
+  });
+  const [claimedNotifIds, setClaimedNotifIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('nst_claimed_notifs_v1') || '[]'); } catch { return []; }
+  });
+  const [notifToast, setNotifToast] = useState<AppNotification | null>(null);
+  const [showNotifPage, setShowNotifPage] = useState(false);
+
+  // --- SAVED/STARRED NOTES STATE ---
+  const [starredNotes, setStarredNotes] = useState<Array<{id:string;noteKey:string;topicText:string;savedAt:string}>>(() => {
+    try { return JSON.parse(localStorage.getItem('nst_starred_notes_v1') || '[]'); } catch { return []; }
+  });
+  const [showStarredPage, setShowStarredPage] = useState(false);
   const [hwScrollProgress, setHwScrollProgress] = useState(0);
   const hwScrollContainerRef = useRef<HTMLDivElement>(null);
   const hwScrollSaveTimerRef = useRef<number | null>(null);
@@ -1031,7 +1066,8 @@ export const StudentDashboard: React.FC<Props> = ({
   // Resume reading lists
   const [recentChapters, setRecentChapters] = useState<RecentChapterEntry[]>([]);
   const [recentHw, setRecentHw] = useState<RecentHwEntry[]>([]);
-  const [homeResumeFilter, setHomeResumeFilter] = useState<'all' | 'chapter' | 'sarSangrah' | 'speedy' | 'mcq'>('all');
+  const [recentLucent, setRecentLucent] = useState<RecentLucentEntry[]>([]);
+  const [homeResumeFilter, setHomeResumeFilter] = useState<'all' | 'chapter' | 'sarSangrah' | 'speedy' | 'mcq' | 'lucent'>('all');
   const [readingStreak, setReadingStreak] = useState<StreakInfo>({ current: 0, longest: 0, readToday: false });
   const [showStreakPopup, setShowStreakPopup] = useState(false);
   // When the user taps a "Today" subject banner card with multiple items, this picker shows the list.
@@ -1067,6 +1103,7 @@ export const StudentDashboard: React.FC<Props> = ({
   React.useEffect(() => {
     setRecentChapters(getRecentChapters());
     setRecentHw(getRecentHomeworks());
+    setRecentLucent(getRecentLucent());
     setReadingStreak(getReadingStreak());
   }, [activeTab, showHomeworkHistory, hwActiveHwId, contentViewStep]);
 
@@ -1165,6 +1202,11 @@ export const StudentDashboard: React.FC<Props> = ({
     else if (hasMcq) setHwViewMode('mcq');
     else setHwViewMode('notes');
 
+    // Restore the last-read topic index so ChunkedNotesReader scrolls to & resumes from there
+    if (entry.id && typeof entry.topicIndex === 'number') {
+      setHwNotePositions(prev => ({ ...prev, [entry.id]: entry.topicIndex as number }));
+    }
+
     setShowHomeworkHistory(false);
     setHwTodayPickerSub(null);
     setHomeworkSubjectView(subId);
@@ -1217,6 +1259,51 @@ export const StudentDashboard: React.FC<Props> = ({
       if (hwScrollSaveTimerRef.current) window.clearTimeout(hwScrollSaveTimerRef.current);
     };
   }, [hwActiveHwId, hwViewMode]);
+
+  // Clear media state when switching homework
+  React.useEffect(() => {
+    setHwActivePdf(null);
+    setHwAudioVisible(false);
+    setHwVideoVisible(false);
+  }, [hwActiveHwId]);
+
+  // Show notification toast for first unseen notification
+  React.useEffect(() => {
+    if (!settings?.notifications?.length) return;
+    const unseen = settings.notifications.filter(n => !seenNotifIds.includes(n.id));
+    if (unseen.length === 0) return;
+    const first = unseen[0];
+    setNotifToast(first);
+    const ids = [...seenNotifIds, ...unseen.map(n => n.id)];
+    setSeenNotifIds(ids);
+    try { localStorage.setItem('nst_seen_notifs_v1', JSON.stringify(ids)); } catch {}
+    const t = setTimeout(() => setNotifToast(null), 5000);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.notifications]);
+
+  // Notifications: total count + unread count
+  const allNotifications: AppNotification[] = settings?.notifications || [];
+  const unreadNotifCount = allNotifications.filter(n => !seenNotifIds.includes(n.id)).length;
+
+  // Star/unstar a note topic
+  const toggleStarNote = (noteKey: string, topicText: string) => {
+    setStarredNotes(prev => {
+      const existing = prev.find(n => n.noteKey === noteKey && n.topicText === topicText);
+      let updated: typeof prev;
+      if (existing) {
+        updated = prev.filter(n => !(n.noteKey === noteKey && n.topicText === topicText));
+      } else {
+        updated = [...prev, { id: Date.now().toString(), noteKey, topicText, savedAt: new Date().toISOString() }];
+      }
+      try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+    try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
+  };
+
+  const isNoteTopicStarred = (noteKey: string, topicText: string) =>
+    starredNotes.some(n => n.noteKey === noteKey && n.topicText === topicText);
 
   // Active homework being played
   const activePlayerHw = React.useMemo(() => {
@@ -2524,6 +2611,19 @@ export const StudentDashboard: React.FC<Props> = ({
                           setHwNotePositions(prev =>
                             prev[activeHw.id!] === idx ? prev : { ...prev, [activeHw.id!]: idx }
                           );
+                          // Persist topicIndex so Continue Reading can resume from here
+                          try {
+                            saveRecentHomework({
+                              id: activeHw.id,
+                              scrollY: 0,
+                              scrollPct: Math.max(2, Math.round(hwScrollProgress)),
+                              title: activeHw.title || 'Homework',
+                              date: activeHw.date,
+                              targetSubject: activeHw.targetSubject,
+                              hw: activeHw,
+                              topicIndex: idx,
+                            });
+                          } catch {}
                         }}
                         // The moment Read All / tap-to-read starts, save this note to
                         // Continue Reading so it survives a tab switch (see nav handler).
@@ -2538,6 +2638,7 @@ export const StudentDashboard: React.FC<Props> = ({
                               date: activeHw.date,
                               targetSubject: activeHw.targetSubject,
                               hw: activeHw,
+                              topicIndex: hwNotePositions[activeHw.id] ?? 0,
                             });
                             markReadToday(activeHw.id);
                           } catch {}
@@ -2555,28 +2656,66 @@ export const StudentDashboard: React.FC<Props> = ({
                             });
                           } catch {}
                         }}
+                        noteKey={activeHw.id ? `hw_${activeHw.id}` : undefined}
+                        isStarred={activeHw.id ? (text) => isNoteTopicStarred(`hw_${activeHw.id}`, text) : undefined}
+                        onStarToggle={activeHw.id ? (text) => toggleStarNote(`hw_${activeHw.id}`, text) : undefined}
                       />
                     </div>
                   )}
 
-                  {/* Audio */}
-                  {activeHw.audioUrl && (
-                    <div className="mx-4 mb-3 bg-purple-50 border border-purple-100 rounded-2xl p-3">
-                      <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-2 flex items-center gap-1">
-                        <Volume2 size={11} /> Audio
-                      </p>
-                      <audio controls src={activeHw.audioUrl} className="w-full h-8" />
+                  {/* Media Tiles: Audio / Video / PDF */}
+                  {(activeHw.audioUrl || activeHw.videoUrl || activeHw.pdfUrl) && (
+                    <div className="mx-4 mb-3">
+                      <div className={`grid gap-2 ${[activeHw.audioUrl, activeHw.videoUrl, activeHw.pdfUrl].filter(Boolean).length === 1 ? 'grid-cols-1' : [activeHw.audioUrl, activeHw.videoUrl, activeHw.pdfUrl].filter(Boolean).length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                        {activeHw.audioUrl && (
+                          <button onClick={() => setHwAudioVisible(v => !v)}
+                            className={`aspect-square flex flex-col items-center justify-center gap-1.5 rounded-2xl active:scale-95 transition-all border-2 ${hwAudioVisible ? 'bg-purple-100 border-purple-400' : 'bg-purple-50 border-purple-200'}`}>
+                            <Headphones size={22} className="text-purple-600" />
+                            <span className="text-[10px] font-black text-purple-700 uppercase tracking-wide">Audio</span>
+                          </button>
+                        )}
+                        {activeHw.videoUrl && (
+                          <button onClick={() => setHwVideoVisible(v => !v)}
+                            className={`aspect-square flex flex-col items-center justify-center gap-1.5 rounded-2xl active:scale-95 transition-all border-2 ${hwVideoVisible ? 'bg-rose-100 border-rose-400' : 'bg-rose-50 border-rose-200'}`}>
+                            <Play size={22} className="text-rose-600" />
+                            <span className="text-[10px] font-black text-rose-700 uppercase tracking-wide">Video</span>
+                          </button>
+                        )}
+                        {activeHw.pdfUrl && (
+                          <button onClick={() => setHwActivePdf(activeHw.pdfUrl!)}
+                            className="aspect-square flex flex-col items-center justify-center gap-1.5 bg-amber-50 border-2 border-amber-200 rounded-2xl active:scale-95 transition-all">
+                            <FileText size={22} className="text-amber-600" />
+                            <span className="text-[10px] font-black text-amber-700 uppercase tracking-wide">PDF</span>
+                          </button>
+                        )}
+                      </div>
+                      {hwAudioVisible && activeHw.audioUrl && (
+                        <div className="mt-2 bg-purple-50 border border-purple-100 rounded-2xl p-3">
+                          <audio controls src={activeHw.audioUrl} className="w-full h-8" controlsList="nodownload noremoteplayback" />
+                        </div>
+                      )}
+                      {hwVideoVisible && activeHw.videoUrl && (
+                        <div className="mt-2 bg-black rounded-2xl overflow-hidden">
+                          <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                            <iframe src={formatVideoEmbed(activeHw.videoUrl)} className="absolute inset-0 w-full h-full border-none" allow="autoplay; encrypted-media; fullscreen" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" title="Video" />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* Video */}
-                  {activeHw.videoUrl && (
-                    <div className="mx-4 mb-3 bg-rose-50 border border-rose-100 rounded-2xl p-3 flex items-center justify-between gap-3">
-                      <p className="text-sm font-bold text-rose-700">Video lesson available</p>
-                      <a href={activeHw.videoUrl} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-700 active:scale-95 transition-all">
-                        <Play size={12} /> Watch
-                      </a>
+                  {/* Full-screen in-app PDF viewer */}
+                  {hwActivePdf && (
+                    <div className="fixed inset-0 z-[300] bg-black flex flex-col" style={{ top: 0, left: 0 }}>
+                      <div className="flex items-center justify-between px-4 py-3 bg-gray-900 shrink-0">
+                        <span className="text-white font-bold text-sm truncate pr-4">PDF</span>
+                        <button onClick={() => setHwActivePdf(null)} className="text-white p-1.5 rounded-full hover:bg-white/10 active:scale-95 transition-all shrink-0">
+                          <X size={20} />
+                        </button>
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <iframe src={formatDriveLink(hwActivePdf)} className="w-full h-full border-none" title="PDF" sandbox="allow-scripts allow-same-origin allow-forms" allow="autoplay" />
+                      </div>
                     </div>
                   )}
                 </>
@@ -2712,6 +2851,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           {hw.parsedMcqs && hw.parsedMcqs.length > 0 && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>{hw.parsedMcqs.length} MCQ</span>}
                           {hw.audioUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>AUDIO</span>}
                           {hw.videoUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>VIDEO</span>}
+                          {hw.pdfUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>PDF</span>}
                         </div>
                       </div>
                       <ChevronRight size={18} className={`${theme.text} shrink-0`} />
@@ -2782,6 +2922,7 @@ export const StudentDashboard: React.FC<Props> = ({
                             {hw.parsedMcqs && hw.parsedMcqs.length > 0 && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>{hw.parsedMcqs.length} MCQ</span>}
                             {hw.audioUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>AUDIO</span>}
                             {hw.videoUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>VIDEO</span>}
+                            {hw.pdfUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>PDF</span>}
                           </div>
                         </div>
                         <ChevronRight size={18} className={`${theme.text} shrink-0`} />
@@ -3258,10 +3399,12 @@ export const StudentDashboard: React.FC<Props> = ({
             };
             type Merged =
               | { kind: 'chapter'; ts: number; entry: RecentChapterEntry }
-              | { kind: 'hw';      ts: number; entry: RecentHwEntry };
+              | { kind: 'hw';      ts: number; entry: RecentHwEntry }
+              | { kind: 'lucent';  ts: number; entry: RecentLucentEntry };
             const allMerged: Merged[] = [
               ...recentChapters.map(e => ({ kind: 'chapter' as const, ts: e.ts, entry: e })),
               ...recentHw.map(e => ({ kind: 'hw' as const, ts: e.ts, entry: e })),
+              ...recentLucent.map(e => ({ kind: 'lucent' as const, ts: e.ts, entry: e })),
             ];
             // Compute available filter counts (used to hide empty chips)
             const counts = {
@@ -3270,12 +3413,14 @@ export const StudentDashboard: React.FC<Props> = ({
               sarSangrah: allMerged.filter(m => m.kind === 'hw' && m.entry.targetSubject === 'sarSangrah').length,
               speedy: allMerged.filter(m => m.kind === 'hw' && (m.entry.targetSubject === 'speedyScience' || m.entry.targetSubject === 'speedySocialScience')).length,
               mcq: allMerged.filter(m => m.kind === 'hw' && m.entry.targetSubject === 'mcq').length,
+              lucent: allMerged.filter(m => m.kind === 'lucent').length,
             };
             const showFilterChips = settings?.showHomeResumeFilter !== false && allMerged.length >= 3;
             const activeFilter = showFilterChips ? homeResumeFilter : 'all';
             const filtered: Merged[] = allMerged.filter(m => {
               if (activeFilter === 'all') return true;
               if (activeFilter === 'chapter') return m.kind === 'chapter';
+              if (activeFilter === 'lucent') return m.kind === 'lucent';
               if (m.kind !== 'hw') return false;
               if (activeFilter === 'sarSangrah') return m.entry.targetSubject === 'sarSangrah';
               if (activeFilter === 'speedy') return m.entry.targetSubject === 'speedyScience' || m.entry.targetSubject === 'speedySocialScience';
@@ -3301,6 +3446,7 @@ export const StudentDashboard: React.FC<Props> = ({
             const FILTER_CHIPS: { key: typeof homeResumeFilter; label: string; emoji: string; count: number; activeBg: string; activeText: string }[] = [
               { key: 'all',         label: 'All',          emoji: '📚', count: counts.all,        activeBg: 'bg-indigo-600',   activeText: 'text-white' },
               { key: 'chapter',     label: 'Class Notes',  emoji: '📖', count: counts.chapter,    activeBg: 'bg-blue-600',     activeText: 'text-white' },
+              { key: 'lucent',      label: 'Lucent',       emoji: '📗', count: counts.lucent,     activeBg: 'bg-teal-600',     activeText: 'text-white' },
               { key: 'sarSangrah',  label: 'Sar Sangrah',  emoji: '📕', count: counts.sarSangrah, activeBg: 'bg-rose-600',     activeText: 'text-white' },
               { key: 'speedy',      label: 'Speedy',       emoji: '⚡', count: counts.speedy,     activeBg: 'bg-emerald-600',  activeText: 'text-white' },
               { key: 'mcq',         label: 'MCQ',          emoji: '❓', count: counts.mcq,        activeBg: 'bg-violet-600',   activeText: 'text-white' },
@@ -3405,6 +3551,61 @@ export const StudentDashboard: React.FC<Props> = ({
                         </div>
                       );
                     }
+                    // Lucent book page card
+                    if (item.kind === 'lucent') {
+                      const entry = item.entry;
+                      return (
+                        <div
+                          key={`luc_${entry.id}`}
+                          className="relative shrink-0 w-56 snap-start bg-white rounded-2xl border border-teal-200 shadow-sm p-3 flex flex-col gap-2 active:scale-[0.98] transition-transform"
+                        >
+                          <button
+                            onClick={(e) => { e.stopPropagation(); removeRecentLucent(entry.id); setRecentLucent(getRecentLucent()); }}
+                            className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
+                            aria-label="Remove"
+                            title="Remove"
+                          >
+                            <X size={12} />
+                          </button>
+                          <button
+                            onClick={() => openRecentLucent(entry)}
+                            className="text-left"
+                          >
+                            <div className="flex items-center gap-1 flex-wrap pr-6">
+                              <span className="inline-block text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest bg-teal-100 text-teal-700">
+                                📗 Lucent
+                              </span>
+                              {entry.pageNo && (
+                                <span className="inline-flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest bg-slate-800 text-white">
+                                  P.{entry.pageNo}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm font-black text-slate-800 leading-snug line-clamp-2 mt-1 pr-6">
+                              {entry.lessonTitle}
+                            </p>
+                            <p className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate">{entry.subject}</p>
+                          </button>
+                          <div className="mt-1">
+                            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-teal-500 to-emerald-500"
+                                style={{ width: `${Math.max(2, entry.scrollPct)}%` }}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[10px] text-slate-500 font-semibold">{entry.scrollPct}% read</span>
+                              <button
+                                onClick={() => openRecentLucent(entry)}
+                                className="text-[10px] font-black text-white bg-teal-600 hover:bg-teal-700 px-2.5 py-1 rounded-full flex items-center gap-1 active:scale-95 transition-all"
+                              >
+                                Resume <ChevronRight size={10} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
                     // homework note (Sar Sangrah / Speedy) — page-wise card
                     const entry = item.entry;
                     const meta = HW_SUBJECT_META[entry.targetSubject || ''] || HW_SUBJECT_META.sarSangrah;
@@ -3464,6 +3665,96 @@ export const StudentDashboard: React.FC<Props> = ({
               </div>
             );
           })()}
+
+          {/* SUBJECT-WISE PROGRESS */}
+          {(() => {
+            // Group recentChapters by subject
+            type SubjectStat = {
+              subjectId: string;
+              subjectName: string;
+              chapters: RecentChapterEntry[];
+            };
+            const subjectMap: Record<string, SubjectStat> = {};
+            recentChapters.forEach(entry => {
+              const sid = entry.subject?.id || 'unknown';
+              if (!subjectMap[sid]) {
+                subjectMap[sid] = { subjectId: sid, subjectName: entry.subject?.name || sid, chapters: [] };
+              }
+              subjectMap[sid].chapters.push(entry);
+            });
+            const subjects = Object.values(subjectMap);
+            if (subjects.length === 0) return null;
+            const fullyReadMap = getFullyReadMap();
+            const PALETTE = [
+              'from-blue-500 to-indigo-500',
+              'from-emerald-500 to-teal-500',
+              'from-rose-500 to-pink-500',
+              'from-amber-500 to-yellow-500',
+              'from-violet-500 to-purple-500',
+              'from-cyan-500 to-sky-500',
+              'from-orange-500 to-red-500',
+              'from-fuchsia-500 to-pink-500',
+            ];
+            return (
+              <div className="bg-gradient-to-br from-blue-50 via-white to-indigo-50 border border-blue-100 rounded-3xl p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                      <BarChart3 size={16} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest">Subject Progress</p>
+                      <p className="text-xs text-slate-500 font-medium">Kitna padha gaya hai</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold text-blue-600 bg-white px-2 py-0.5 rounded-full border border-blue-200">
+                    {subjects.length} subject{subjects.length > 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {subjects.map((sub, idx) => {
+                    const chaptersRead = sub.chapters.length;
+                    const avgPct = Math.round(
+                      sub.chapters.reduce((sum, c) => sum + (c.scrollPct || 0), 0) / chaptersRead
+                    );
+                    const fullyReadCount = sub.chapters.filter(c => fullyReadMap[c.id]).length;
+                    const mcqProgress = (user.progress || {})[sub.subjectId];
+                    const barColor = PALETTE[idx % PALETTE.length];
+                    return (
+                      <div key={sub.subjectId} className="bg-white rounded-2xl px-3 py-2.5 border border-slate-100 shadow-sm">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-sm font-black text-slate-800 truncate max-w-[55%]">{sub.subjectName}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {fullyReadCount > 0 && (
+                              <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200">
+                                ✓ {fullyReadCount} done
+                              </span>
+                            )}
+                            <span className="text-[10px] font-bold text-slate-500">{chaptersRead} notes</span>
+                          </div>
+                        </div>
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-1">
+                          <div
+                            className={`h-full bg-gradient-to-r ${barColor} rounded-full transition-all duration-700`}
+                            style={{ width: `${Math.max(4, avgPct)}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400 font-semibold">{avgPct}% avg padha gaya</span>
+                          {mcqProgress && (
+                            <span className="text-[10px] font-black text-indigo-600">
+                              MCQ: Ch. {mcqProgress.currentChapterIndex + 1}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           <DashboardSectionWrapper
             id="section_main_actions"
             label="Main Actions"
@@ -4190,6 +4481,28 @@ export const StudentDashboard: React.FC<Props> = ({
                 );
               })()}
 
+              {/* STARRED NOTES */}
+              <button
+                onClick={() => setShowStarredPage(true)}
+                className="w-full p-4 flex items-center gap-3 hover:bg-slate-50 transition-colors active:bg-slate-100"
+              >
+                <div className="bg-amber-100 w-10 h-10 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
+                  <Star size={18} className={starredNotes.length > 0 ? 'fill-amber-500' : ''} />
+                </div>
+                <div className="flex-1 text-left min-w-0">
+                  <p className="text-sm font-bold text-slate-800">Starred Notes</p>
+                  <p className="text-[11px] text-slate-500">
+                    {starredNotes.length > 0 ? `${starredNotes.length} note${starredNotes.length !== 1 ? 's' : ''} saved` : 'Star important notes while reading'}
+                  </p>
+                </div>
+                {starredNotes.length > 0 && (
+                  <span className="text-[10px] font-black text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                    {starredNotes.length}
+                  </span>
+                )}
+                <ChevronRight size={16} className="text-slate-400 shrink-0" />
+              </button>
+
               {/* SETTINGS */}
               <button
                 onClick={() => setShowSettingsSheet(true)}
@@ -4428,13 +4741,21 @@ export const StudentDashboard: React.FC<Props> = ({
                   onClick={() => {
                     if (!isDarkMode) {
                       localStorage.setItem("nst_dark_theme_type", "black");
+                      // Apply classes immediately (no refresh needed)
+                      document.documentElement.classList.remove('dark-mode-blue', 'dark-mode-black');
+                      document.documentElement.classList.add('dark-mode', 'dark-mode-black');
                       onToggleDarkMode && onToggleDarkMode(true);
                     } else {
                       const currentType = localStorage.getItem("nst_dark_theme_type");
                       if (currentType === "black") {
                         localStorage.setItem("nst_dark_theme_type", "blue");
+                        // Apply blue theme immediately without waiting for React state cycle
+                        document.documentElement.classList.remove('dark-mode-black');
+                        document.documentElement.classList.add('dark-mode', 'dark-mode-blue');
                         onToggleDarkMode && onToggleDarkMode(true);
                       } else {
+                        // Switching back to light
+                        document.documentElement.classList.remove('dark-mode', 'dark-mode-blue', 'dark-mode-black');
                         onToggleDarkMode && onToggleDarkMode(false);
                       }
                     }
@@ -4747,6 +5068,22 @@ export const StudentDashboard: React.FC<Props> = ({
                 <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
               )}
             </button>
+
+            {/* Notification Bell */}
+            {allNotifications.length > 0 && (
+              <button
+                onClick={() => setShowNotifPage(true)}
+                className="p-1.5 rounded-full transition-colors relative bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100 shrink-0"
+                title="Notifications"
+              >
+                <Bell size={16} />
+                {unreadNotifCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 bg-red-500 rounded-full text-[9px] text-white font-black flex items-center justify-center animate-bounce">
+                    {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* Sale Discount Mini Button */}
             {settings?.specialDiscountEvent?.enabled && (
@@ -5663,6 +6000,9 @@ export const StudentDashboard: React.FC<Props> = ({
                                 {hws.some(h => h.videoUrl) && (
                                   <span className="text-[9px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded">VIDEO</span>
                                 )}
+                                {hws.some(h => h.pdfUrl) && (
+                                  <span className="text-[9px] font-bold bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded">PDF</span>
+                                )}
                               </div>
                             </button>
                           ));
@@ -5764,6 +6104,79 @@ export const StudentDashboard: React.FC<Props> = ({
                       </p>
                     </div>
                   </div>
+                  );
+                })()}
+
+                {/* LUCENT CONTINUE READING — on homework page */}
+                {(() => {
+                  if (recentLucent.length === 0) return null;
+                  return (
+                    <div className="bg-gradient-to-br from-teal-50 via-white to-emerald-50 border border-teal-100 rounded-2xl p-4 shadow-sm">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center shrink-0">
+                            <BookOpen size={16} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black text-teal-700 uppercase tracking-widest">Lucent — Continue Reading</p>
+                            <p className="text-xs text-slate-500 font-medium truncate">Wahan se shuru karo jahan choda tha</p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-teal-600 bg-white px-2 py-0.5 rounded-full border border-teal-200">
+                          {recentLucent.length}
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {recentLucent.slice(0, 4).map(entry => (
+                          <SwipeToDismiss
+                            key={entry.id}
+                            onDismiss={() => { removeRecentLucent(entry.id); setRecentLucent(getRecentLucent()); }}
+                            className="relative bg-white rounded-xl border border-slate-200 shadow-sm p-3"
+                          >
+                            <button
+                              onClick={(e) => { e.stopPropagation(); removeRecentLucent(entry.id); setRecentLucent(getRecentLucent()); }}
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
+                              aria-label="Remove"
+                              title="Remove"
+                            >
+                              <X size={12} />
+                            </button>
+                            <button onClick={() => openRecentLucent(entry)} className="w-full text-left">
+                              <div className="flex items-center gap-2 mb-1.5 pr-6 flex-wrap">
+                                <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest bg-teal-100 text-teal-700">
+                                  Lucent
+                                </span>
+                                {entry.chapter && (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-widest bg-slate-800 text-white">
+                                    {entry.chapter}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-sm font-black text-slate-800 leading-snug line-clamp-2 pr-6">
+                                {entry.title}
+                              </p>
+                              <div className="mt-2">
+                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-gradient-to-r from-teal-500 to-emerald-500"
+                                    style={{ width: `${Math.max(2, entry.scrollPct || 0)}%` }}
+                                  />
+                                </div>
+                                <div className="flex items-center justify-between mt-1.5">
+                                  <span className="text-[10px] text-slate-500 font-semibold">{entry.scrollPct || 0}% read</span>
+                                  <span className="text-[10px] font-black text-white bg-teal-600 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                    Resume <ChevronRight size={10} />
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          </SwipeToDismiss>
+                        ))}
+                        <p className="text-[10px] text-slate-400 font-semibold text-center pt-1 italic">
+                          Tip: Card ko bayein swipe karo to hatane ke liye
+                        </p>
+                      </div>
+                    </div>
                   );
                 })()}
 
@@ -5872,6 +6285,7 @@ export const StudentDashboard: React.FC<Props> = ({
                                 {hasMcq && <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">{hw.parsedMcqs!.length} MCQ</span>}
                                 {hw.audioUrl && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">AUDIO</span>}
                                 {hw.videoUrl && <span className="text-[9px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded">VIDEO</span>}
+                                {hw.pdfUrl && <span className="text-[9px] font-bold bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded">PDF</span>}
                               </div>
                             </div>
                             <ChevronRight size={18} className="text-slate-400 shrink-0" />
@@ -6291,36 +6705,27 @@ export const StudentDashboard: React.FC<Props> = ({
                                 </div>
                               )}
                               {hw.videoUrl && (
-                                <a
-                                  href={hw.videoUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="bg-rose-50 border border-rose-200 p-3 rounded-xl flex items-center gap-3 hover:bg-rose-100 transition-colors"
-                                >
-                                  <Youtube
-                                    className="text-rose-600 shrink-0"
-                                    size={16}
-                                  />
-                                  <span className="text-sm font-bold text-rose-800">
-                                    Watch Video
-                                  </span>
-                                </a>
+                                <div className="bg-rose-50 border border-rose-200 rounded-xl overflow-hidden">
+                                  <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                                    <iframe src={formatVideoEmbed(hw.videoUrl)} className="absolute inset-0 w-full h-full border-none" allow="autoplay; encrypted-media; fullscreen" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" title="Video" />
+                                  </div>
+                                </div>
                               )}
                               {hw.audioUrl && (
-                                <a
-                                  href={hw.audioUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="bg-purple-50 border border-purple-200 p-3 rounded-xl flex items-center gap-3 hover:bg-purple-100 transition-colors"
-                                >
-                                  <Headphones
-                                    className="text-purple-600 shrink-0"
-                                    size={16}
-                                  />
-                                  <span className="text-sm font-bold text-purple-800">
-                                    Play Audio
-                                  </span>
-                                </a>
+                                <div className="bg-purple-50 border border-purple-200 p-3 rounded-xl">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Headphones className="text-purple-600 shrink-0" size={14} />
+                                    <span className="text-xs font-bold text-purple-800">Audio</span>
+                                  </div>
+                                  <audio controls src={hw.audioUrl} className="w-full h-8" controlsList="nodownload noremoteplayback" />
+                                </div>
+                              )}
+                              {hw.pdfUrl && (
+                                <button onClick={() => setHwActivePdf(hw.pdfUrl!)}
+                                  className="w-full bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-center gap-3 hover:bg-amber-100 active:scale-[0.98] transition-all">
+                                  <FileText className="text-amber-600 shrink-0" size={16} />
+                                  <span className="text-sm font-bold text-amber-800">Open PDF</span>
+                                </button>
                               )}
                             </div>
 
@@ -7350,16 +7755,45 @@ export const StudentDashboard: React.FC<Props> = ({
               }
             };
 
+            // activeTab values that "belong" to a logical tab's own sub-navigation.
+            // If the current activeTab is NOT in this set, it means the user
+            // navigated to a "foreign" top-level page (e.g., STORE, PROFILE) via a
+            // direct button tap — we should NOT save that as the logical tab's state.
+            // Only chapter-reading sub-states that the user would want restored
+            // when returning to a logical tab. "Side mode" pages like CUSTOM_PAGE,
+            // STORE, PROFILE, GAME, AI_HUB etc. are treated as foreign so they
+            // are NOT persisted into the snapshot, preventing them from showing
+            // on the wrong tab after navigation.
+            const LOGICAL_TAB_NATIVE_ACTIVE_TABS: Record<LogicalTab, string[]> = {
+              HOME:      ['HOME', 'COURSES', 'PDF', 'VIDEO', 'AUDIO', 'MCQ', 'MCQ_REVIEW'],
+              HOMEWORK:  ['HOME', 'COURSES', 'PDF', 'VIDEO', 'AUDIO', 'MCQ', 'MCQ_REVIEW'],
+              GK:        ['HOME'],
+              VIDEO:     ['UNIVERSAL_VIDEO'],
+              PROFILE:   ['PROFILE'],
+              APP_STORE: ['APP_STORE'],
+            };
+
             const switchToLogicalTab = (target: LogicalTab) => {
-              if (target === currentLogicalTab) {
-                // Re-tap of the active tab → just stop any audio, leave state alone.
-                try { stopSpeech(); } catch (_) {}
-                setSpeakingId(null);
-                return;
-              }
               try { stopSpeech(); } catch (_) {}
               setSpeakingId(null);
-              const snap = captureSnapshot();
+              if (target === currentLogicalTab) {
+                // Re-tap of the same logical tab — always go to the default root state
+                // for that tab (not the saved snapshot). This ensures that foreign
+                // sub-pages like CUSTOM_PAGE, STORE, GAME, etc. are always dismissed
+                // when the user taps the active nav icon, even if the snapshot was
+                // previously contaminated.
+                applySnapshot(defaultSnapshotForTab(target));
+                return;
+              }
+              // Before saving the current snapshot, sanitize activeTab so a "foreign"
+              // destination (e.g. user tapped Store from HOME) is not persisted as
+              // HOME's state — it would corrupt the snapshot and show wrong content
+              // on the next HOME visit.
+              const nativeForCurrent = LOGICAL_TAB_NATIVE_ACTIVE_TABS[currentLogicalTab] || [];
+              const sanitizedActiveTab = nativeForCurrent.includes(activeTab)
+                ? activeTab
+                : (defaultSnapshotForTab(currentLogicalTab) as any).activeTab;
+              const snap = { ...captureSnapshot(), activeTab: sanitizedActiveTab };
               setTabSnapshots(prev => ({ ...prev, [currentLogicalTab]: snap }));
               const restore = tabSnapshots[target];
               applySnapshot(restore ?? defaultSnapshotForTab(target));
@@ -8028,6 +8462,9 @@ export const StudentDashboard: React.FC<Props> = ({
                         setTimeout(() => setLucentPageIndex(safeIndex + 1), 400);
                       }
                     }}
+                    noteKey={`lucent_${entry.id}_p${safeIndex}`}
+                    isStarred={(text) => isNoteTopicStarred(`lucent_${entry.id}_p${safeIndex}`, text)}
+                    onStarToggle={(text) => toggleStarNote(`lucent_${entry.id}_p${safeIndex}`, text)}
                   />
                 </div>
               ) : (
@@ -8311,6 +8748,173 @@ export const StudentDashboard: React.FC<Props> = ({
                 );
               })}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== NOTIFICATION TOAST ===================== */}
+      {notifToast && (
+        <div
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9998] w-[92vw] max-w-sm pointer-events-auto"
+          role="alert"
+          aria-live="polite"
+        >
+          <div className={`rounded-2xl shadow-2xl border p-4 flex items-start gap-3 animate-in slide-in-from-bottom-4 duration-300 ${
+            notifToast.type === 'reward'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+          }`}>
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+              notifToast.type === 'reward' ? 'bg-amber-200 text-amber-700' : 'bg-indigo-200 text-indigo-700'
+            }`}>
+              {notifToast.type === 'reward' ? <Gift size={18} /> : <Bell size={18} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-black text-sm leading-snug">{notifToast.title}</p>
+              <p className="text-xs mt-0.5 opacity-80 leading-snug line-clamp-2">{notifToast.body}</p>
+              {notifToast.type === 'reward' && notifToast.rewardCredits && !claimedNotifIds.includes(notifToast.id) && (
+                <button
+                  onClick={() => {
+                    const ids = [...claimedNotifIds, notifToast.id];
+                    setClaimedNotifIds(ids);
+                    try { localStorage.setItem('nst_claimed_notifs_v1', JSON.stringify(ids)); } catch {}
+                    setNotifToast(null);
+                  }}
+                  className="mt-1.5 text-[10px] font-black bg-amber-500 text-white px-3 py-1 rounded-full"
+                >
+                  Claim {notifToast.rewardCredits} CR
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => setNotifToast(null)}
+              className="p-1 rounded-full hover:bg-black/10 shrink-0"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== NOTIFICATION PAGE ===================== */}
+      {showNotifPage && (
+        <div className="fixed inset-0 z-[9000] bg-white flex flex-col animate-in slide-in-from-right-full duration-300">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-white sticky top-0 z-10">
+            <button onClick={() => setShowNotifPage(false)} className="p-2 rounded-full hover:bg-slate-100 text-slate-700">
+              <ArrowLeft size={20} />
+            </button>
+            <div className="flex-1 min-w-0">
+              <h2 className="font-black text-base text-slate-800">Notifications</h2>
+              <p className="text-[11px] text-slate-500">{allNotifications.length} message{allNotifications.length !== 1 ? 's' : ''}</p>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {allNotifications.length === 0 && (
+              <div className="text-center py-16 text-slate-400">
+                <Bell size={40} className="mx-auto mb-3 opacity-30" />
+                <p className="font-bold text-sm">Koi notification nahi hai abhi</p>
+              </div>
+            )}
+            {allNotifications.map(n => {
+              const isClaimed = claimedNotifIds.includes(n.id);
+              return (
+                <div key={n.id} className={`rounded-2xl border p-4 flex items-start gap-3 ${
+                  n.type === 'reward'
+                    ? 'bg-amber-50 border-amber-200'
+                    : 'bg-indigo-50 border-indigo-200'
+                }`}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    n.type === 'reward' ? 'bg-amber-200 text-amber-700' : 'bg-indigo-200 text-indigo-700'
+                  }`}>
+                    {n.type === 'reward' ? <Gift size={20} /> : <Bell size={20} />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-sm text-slate-800">{n.title}</p>
+                    <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">{n.body}</p>
+                    {n.type === 'reward' && n.rewardCredits && (
+                      <div className="mt-2">
+                        {isClaimed ? (
+                          <span className="text-[10px] font-black text-emerald-600 bg-emerald-100 px-2.5 py-1 rounded-full">
+                            ✓ Claimed {n.rewardCredits} CR
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              const ids = [...claimedNotifIds, n.id];
+                              setClaimedNotifIds(ids);
+                              try { localStorage.setItem('nst_claimed_notifs_v1', JSON.stringify(ids)); } catch {}
+                            }}
+                            className="text-[10px] font-black bg-amber-500 text-white px-3 py-1 rounded-full active:scale-95 transition-transform"
+                          >
+                            Claim {notifToast?.rewardCredits || n.rewardCredits} CR
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-[9px] text-slate-400 mt-1.5 font-semibold">
+                      {(() => { try { return new Date(n.createdAt).toLocaleString('default', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } })()}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== STARRED NOTES PAGE ===================== */}
+      {showStarredPage && (
+        <div className="fixed inset-0 z-[9000] bg-white flex flex-col animate-in slide-in-from-right-full duration-300">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-white sticky top-0 z-10">
+            <button onClick={() => setShowStarredPage(false)} className="p-2 rounded-full hover:bg-slate-100 text-slate-700">
+              <ArrowLeft size={20} />
+            </button>
+            <div className="flex-1 min-w-0">
+              <h2 className="font-black text-base text-slate-800">Starred Notes</h2>
+              <p className="text-[11px] text-slate-500">{starredNotes.length} note{starredNotes.length !== 1 ? 's' : ''} saved</p>
+            </div>
+            {starredNotes.length > 0 && (
+              <button
+                onClick={() => {
+                  if (!confirm('Saare starred notes delete karne hain?')) return;
+                  setStarredNotes([]);
+                  try { localStorage.removeItem('nst_starred_notes_v1'); } catch {}
+                }}
+                className="text-[11px] font-bold text-red-500 px-2 py-1 rounded-lg hover:bg-red-50"
+              >
+                Clear All
+              </button>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {starredNotes.length === 0 && (
+              <div className="text-center py-16 text-slate-400">
+                <Star size={40} className="mx-auto mb-3 opacity-30" />
+                <p className="font-bold text-sm">Koi starred note nahi hai</p>
+                <p className="text-xs mt-1">Notes padhte waqt star button dabao</p>
+              </div>
+            )}
+            {[...starredNotes].reverse().map(note => (
+              <div key={note.id} className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-3">
+                <Star size={16} className="text-amber-500 fill-amber-400 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-slate-800 leading-relaxed font-medium">{note.topicText}</p>
+                  <p className="text-[9px] text-slate-400 mt-1 font-semibold">{note.noteKey}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setStarredNotes(prev => {
+                      const updated = prev.filter(n => n.id !== note.id);
+                      try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
+                      return updated;
+                    });
+                  }}
+                  className="p-1 rounded-full hover:bg-amber-200 text-slate-400 shrink-0"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}

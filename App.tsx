@@ -197,7 +197,19 @@ const App: React.FC = () => {
           }));
       }
   }, []);
-  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('nst_dark_mode') === 'true');
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('nst_dark_mode');
+    if (saved !== null) return saved === 'true';
+    // No user preference saved — follow OS setting
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (prefersDark) {
+      // Default to blue theme when auto-detecting dark mode from OS
+      if (!localStorage.getItem('nst_dark_theme_type')) {
+        localStorage.setItem('nst_dark_theme_type', 'blue');
+      }
+    }
+    return prefersDark;
+  });
 
   // ABANDONMENT DISCOUNT STATE
   const [isFlashSaleActive, setIsFlashSaleActive] = useState(false);
@@ -246,6 +258,23 @@ const App: React.FC = () => {
       }
       localStorage.setItem('nst_dark_mode', darkMode.toString());
   }, [darkMode]);
+
+  // Listen for OS-level dark mode changes and sync automatically
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => {
+      // Only auto-follow OS if user hasn't explicitly set a preference
+      if (localStorage.getItem('nst_dark_mode') === null) {
+        if (e.matches && !localStorage.getItem('nst_dark_theme_type')) {
+          localStorage.setItem('nst_dark_theme_type', 'blue');
+        }
+        setDarkMode(e.matches);
+      }
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   const [state, setState] = useState<AppState>({
     user: null,

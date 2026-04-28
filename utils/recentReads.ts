@@ -33,6 +33,7 @@ export interface RecentHwEntry {
   date: string;
   targetSubject?: string;
   hw: any;
+  topicIndex?: number;
 }
 
 const safeParse = <T>(raw: string | null, fallback: T): T => {

@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, SpinReward, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote } from '../types';
+import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, SpinReward, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification } from '../types';
 import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award } from 'lucide-react';
 import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES } from '../constants';
 import { fetchChapters, fetchLessonContent } from '../services/groq';
@@ -426,7 +426,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // --- HOMEWORK STATE ---
   const [homeworkTab, setHomeworkTab] = useState<'ADD' | 'HISTORY' | 'COMP_MCQ'>('ADD');
   const [newCompMcqText, setNewCompMcqText] = useState('');
-  const [newHomework, setNewHomework] = useState({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', targetSubject: 'none', pageNo: '' });
+  const [newHomework, setNewHomework] = useState({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'none', pageNo: '' });
 
   // --- LUCENT NOTES STATE (special form when targetSubject === 'lucent') ---
   const LUCENT_SUBJECT_OPTIONS: { id: string; name: string }[] = [
@@ -1178,6 +1178,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [newSubName, setNewSubName] = useState('');
   const [newSubIcon, setNewSubIcon] = useState('book');
   const [newSubColor, setNewSubColor] = useState('bg-slate-50 text-slate-600');
+  const [newNotifTitle, setNewNotifTitle] = useState('');
+  const [newNotifBody, setNewNotifBody] = useState('');
+  const [newNotifType, setNewNotifType] = useState<'info' | 'reward'>('info');
+  const [newNotifCredits, setNewNotifCredits] = useState('');
 
   // --- WEEKLY TEST CREATION STATE ---
   const [testName, setTestName] = useState('');
@@ -8737,6 +8741,11 @@ Statement 2"
                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Video URL (Optional)</label>
                                       <input type="text" value={newHomework.videoUrl} onChange={e => setNewHomework({...newHomework, videoUrl: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="Enter Video Link" />
                                   </div>
+                                  <div>
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">PDF URL — Google Drive Link (Optional)</label>
+                                      <input type="text" value={newHomework.pdfUrl} onChange={e => setNewHomework({...newHomework, pdfUrl: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="https://drive.google.com/file/d/..." />
+                                      <p className="text-[10px] text-slate-400 mt-1">Google Drive ka PDF link daalein — app ke andar khulega, download blocked rahega.</p>
+                                  </div>
                                   <div className="pt-2">
                                       <button onClick={() => {
                                           if(!newHomework.title.trim()) return alert("Lesson Name / Title cannot be empty.");
@@ -8759,6 +8768,7 @@ Statement 2"
                                               parsedMcqs: parsedMcqs,
                                               audioUrl: newHomework.audioUrl,
                                               videoUrl: newHomework.videoUrl,
+                                              pdfUrl: newHomework.pdfUrl || undefined,
                                               targetSubject: newHomework.targetSubject === 'none' ? undefined : newHomework.targetSubject
                                           };
                                           if (isPageWiseSubject && newHomework.pageNo.trim()) {
@@ -8768,7 +8778,7 @@ Statement 2"
                                           const newSettings = {...localSettings, homework: updated};
                                           setLocalSettings(newSettings);
                                           handleSaveSettings(newSettings);
-                                          setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', targetSubject: 'none', pageNo: '' });
+                                          setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'none', pageNo: '' });
                                           setAlertConfig({isOpen: true, message: '✅ Homework Added Successfully!'});
                                       }} className="w-full bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-700 flex items-center justify-center gap-2 transition-colors">
                                           <Save size={18} /> Save Homework
@@ -8859,6 +8869,14 @@ Statement 2"
                                                         setLocalSettings({...localSettings, homework: updated});
                                                     }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50" />
                                                 </div>
+                                              </div>
+                                              <div>
+                                                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">PDF URL (Google Drive)</label>
+                                                  <input type="text" value={hw.pdfUrl || ''} onChange={e => {
+                                                      const updated = [...(localSettings.homework || [])];
+                                                      updated[i] = { ...updated[i], pdfUrl: e.target.value || undefined };
+                                                      setLocalSettings({...localSettings, homework: updated});
+                                                  }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50" placeholder="https://drive.google.com/file/d/..." />
                                               </div>
                                           </div>
                                       </div>
@@ -9776,6 +9794,112 @@ Statement 2"
                       </button>
                   </div>
               </div>
+
+              {/* IN-APP NOTIFICATIONS (SystemSettings-based, auto-show toast to students) */}
+              {(() => {
+                const notifs: AppNotification[] = localSettings.notifications || [];
+                const addNotif = () => {
+                  if (!newNotifTitle.trim() || !newNotifBody.trim()) { alert('Title and body required'); return; }
+                  const n: AppNotification = {
+                    id: `notif_${Date.now()}`,
+                    title: newNotifTitle.trim(),
+                    body: newNotifBody.trim(),
+                    type: newNotifType,
+                    rewardCredits: newNotifType === 'reward' && newNotifCredits ? parseInt(newNotifCredits, 10) : undefined,
+                    createdAt: new Date().toISOString(),
+                  };
+                  const updated = { ...localSettings, notifications: [...notifs, n] };
+                  setLocalSettings(updated);
+                  localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                  saveSystemSettings(updated);
+                  setNewNotifTitle('');
+                  setNewNotifBody('');
+                  setNewNotifCredits('');
+                };
+                const removeNotif = (id: string) => {
+                  const updated = { ...localSettings, notifications: notifs.filter(n => n.id !== id) };
+                  setLocalSettings(updated);
+                  localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                  saveSystemSettings(updated);
+                };
+                return (
+                  <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 mt-6">
+                    <h4 className="font-black text-indigo-900 mb-4 flex items-center gap-2 text-base">
+                      <Bell size={20} className="text-indigo-600" /> In-App Notifications
+                      <span className="text-xs font-bold text-indigo-500 bg-indigo-100 px-2 py-0.5 rounded-full">{notifs.length} total</span>
+                    </h4>
+                    <p className="text-xs text-indigo-700 mb-4">Ye notifications students ko app open karne par toast (popup) ke roop mein dikhti hain. Reward type mein students credits claim kar sakte hain.</p>
+                    {/* Add form */}
+                    <div className="bg-white rounded-xl p-4 border border-indigo-200 mb-4 space-y-3">
+                      <input
+                        type="text"
+                        placeholder="Title (e.g. Congratulations!)"
+                        value={newNotifTitle}
+                        onChange={e => setNewNotifTitle(e.target.value)}
+                        className="w-full p-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-400 outline-none"
+                      />
+                      <textarea
+                        placeholder="Message / Body"
+                        value={newNotifBody}
+                        onChange={e => setNewNotifBody(e.target.value)}
+                        className="w-full h-20 p-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-400 outline-none resize-none"
+                      />
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="radio" checked={newNotifType === 'info'} onChange={() => setNewNotifType('info')} className="accent-indigo-600" />
+                          <span className="text-sm font-bold text-slate-700">Info</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="radio" checked={newNotifType === 'reward'} onChange={() => setNewNotifType('reward')} className="accent-amber-600" />
+                          <span className="text-sm font-bold text-slate-700">Reward (Credits)</span>
+                        </label>
+                        {newNotifType === 'reward' && (
+                          <input
+                            type="number"
+                            placeholder="Credits"
+                            value={newNotifCredits}
+                            onChange={e => setNewNotifCredits(e.target.value)}
+                            className="w-24 p-2 rounded-xl border border-amber-300 text-sm focus:ring-2 focus:ring-amber-400 outline-none"
+                          />
+                        )}
+                      </div>
+                      <button
+                        onClick={addNotif}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 text-sm"
+                      >
+                        <Plus size={16} /> Add Notification
+                      </button>
+                    </div>
+                    {/* List */}
+                    {notifs.length === 0 ? (
+                      <p className="text-sm text-slate-400 text-center py-4">Koi notification nahi. Upar se add karein.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {[...notifs].reverse().map(n => (
+                          <div key={n.id} className={`flex items-start gap-3 rounded-xl p-3 border ${n.type === 'reward' ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${n.type === 'reward' ? 'bg-amber-200 text-amber-700' : 'bg-indigo-100 text-indigo-600'}`}>
+                              {n.type === 'reward' ? <Gift size={16} /> : <Bell size={16} />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-black text-sm text-slate-800">{n.title}</p>
+                              <p className="text-xs text-slate-600 mt-0.5">{n.body}</p>
+                              {n.type === 'reward' && n.rewardCredits && (
+                                <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full mt-1 inline-block">{n.rewardCredits} Credits</span>
+                              )}
+                              <p className="text-[9px] text-slate-400 mt-1">
+                                {(() => { try { return new Date(n.createdAt).toLocaleString(); } catch { return n.createdAt; } })()}
+                              </p>
+                            </div>
+                            <button onClick={() => removeNotif(n.id)} className="p-1.5 rounded-full hover:bg-red-100 text-slate-400 hover:text-red-500 shrink-0">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
           </div>
       )}
 

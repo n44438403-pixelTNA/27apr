@@ -411,6 +411,7 @@ export interface HomeworkItem {
   parsedMcqs?: MCQItem[];
   audioUrl?: string;
   videoUrl?: string;
+  pdfUrl?: string;
   targetSubject?: string;
   pageNo?: string; // Optional page number for page-wise notes (Sar Sangrah / Speedy etc.)
 }
@@ -429,7 +430,17 @@ export interface LucentNoteEntry {
   createdAt?: string;
 }
 
+export interface AppNotification {
+  id: string;
+  title: string;
+  body: string;
+  type: 'info' | 'reward';
+  rewardCredits?: number;
+  createdAt: string;
+}
+
 export interface SystemSettings {
+  notifications?: AppNotification[];
   loadingScreenVideoUrl?: string; // NEW: Video to show before loading screen
   dailyGk?: DailyGkItem[]; // NEW: Daily GK
   homework?: HomeworkItem[];

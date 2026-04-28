@@ -58,7 +58,7 @@ export const UniversalVideoView: React.FC<Props> = ({ user, onBack, settings }) 
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 text-slate-800 p-4 animate-in slide-in-from-bottom-8">
+        <div className="min-h-screen bg-slate-50 text-slate-800 p-4 pb-24 animate-in slide-in-from-bottom-8">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
                 <button onClick={onBack} className="p-2 bg-white border border-slate-200 rounded-full hover:bg-slate-100 text-slate-700 shadow-sm transition-colors">
