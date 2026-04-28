@@ -35,7 +35,11 @@ export const recordNoteStar = async (
   if (!userId || !topicText) return;
   const hash = hashTopic(topicText);
   try {
-    await set(ref(rtdb, `note_stars/${hash}/users/${userId}`), true);
+    // IMPORTANT: write the full $hash node atomically via transaction FIRST.
+    // RTDB rules on `note_stars/$hash` require `newData.hasChildren(['count'])`,
+    // so a bare `set('users/$uid', true)` on a brand-new hash gets rejected
+    // (since the merged node would only contain `users` and no `count`).
+    // Doing the transaction first guarantees `count` exists alongside `users`.
     await runTransaction(ref(rtdb, `note_stars/${hash}`), (cur) => {
       if (!cur) {
         return {
@@ -55,6 +59,8 @@ export const recordNoteStar = async (
       cur.lastUpdated = Date.now();
       return cur;
     });
+    // Best-effort confirm — no-op if transaction already wrote it.
+    await set(ref(rtdb, `note_stars/${hash}/users/${userId}`), true);
   } catch (e) {
     console.warn('recordNoteStar failed', e);
   }

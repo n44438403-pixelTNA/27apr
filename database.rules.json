@@ -132,6 +132,7 @@
     // `users` map so it cannot be inflated arbitrarily.
     "note_stars": {
       ".read": "auth != null",
+      ".indexOn": ["count", "lastUpdated"],
       "$hash": {
         ".write": "auth != null",
         ".validate": "newData.hasChildren(['count']) || !newData.exists()",

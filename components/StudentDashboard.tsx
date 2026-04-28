@@ -1157,6 +1157,25 @@ export const StudentDashboard: React.FC<Props> = ({
     const unsub = subscribeToTopNoteStars(200, setGlobalNoteStars);
     return () => { try { unsub(); } catch {} };
   }, []);
+  // One-time backfill: pehle ek bug ki wajah se kuch starred notes RTDB me
+  // register nahi ho paaye the (pehla `set('users/$uid', true)` rule fail kar
+  // raha tha aur Global tab khaali dikhta tha). Ab login ke baad ek baar
+  // saare local starred notes ko Firebase me re-record kar dete hain taaki
+  // user ka existing data Global tab me show ho jaaye.
+  const didBackfillStarsRef = useRef(false);
+  useEffect(() => {
+    if (!user?.id || didBackfillStarsRef.current) return;
+    if (!Array.isArray(starredNotes) || starredNotes.length === 0) return;
+    didBackfillStarsRef.current = true;
+    (async () => {
+      for (const n of starredNotes) {
+        if (!n?.topicText) continue;
+        try {
+          await recordNoteStar(user.id, n.noteKey || `local_${n.id}`, n.topicText);
+        } catch {}
+      }
+    })();
+  }, [user?.id, starredNotes]);
   // Admin-controlled "social proof" inflation. When admin sets these in
   // System Settings, displayed ⭐ counts show actual+boost (and at least
   // `min`). Real DB values are unchanged — this is purely a display layer.
@@ -10250,7 +10269,13 @@ RULES:
                             });
                             try {
                               if (user?.id) {
-                                import('../services/noteStars').then(m => m.recordNoteUnstar(entry.label, user.id)).catch(()=>{});
+                                // Argument order MUST match service signature:
+                                //   recordNoteUnstar(userId, topicText)
+                                // Pehle yahaan args ulte ja rahe the (entry.label as userId,
+                                // user.id as topicText) — isi wajah se RTDB note_stars me
+                                // proper unstar register nahi ho raha tha aur Global tab khaali
+                                // dikhta tha.
+                                import('../services/noteStars').then(m => m.recordNoteUnstar(user.id, entry.label)).catch(()=>{});
                               }
                             } catch {}
                           } else {
@@ -10269,7 +10294,9 @@ RULES:
                             });
                             try {
                               if (user?.id) {
-                                import('../services/noteStars').then(m => m.recordNoteStar(entry.label, user.id)).catch(()=>{});
+                                // Argument order MUST match service signature:
+                                //   recordNoteStar(userId, noteKey, topicText)
+                                import('../services/noteStars').then(m => m.recordNoteStar(user.id, newEntry.noteKey, entry.label)).catch(()=>{});
                               }
                             } catch {}
                           }

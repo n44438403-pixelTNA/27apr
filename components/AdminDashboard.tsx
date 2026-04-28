@@ -450,15 +450,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // Competition mode (default). Class 6-12 entries appear in that class's
   // chapter list using the same page-wise viewer (notes + MCQ only — video/
   // audio rendering for the class is untouched).
+  // Lucent (Page-wise) flow ab sirf Competition mode ke liye hai. Class 6-12 ke
+  // students ko apna alag homework path milta hai (jisme Notes + MCQ + chunked
+  // TTS reader pehle se hi same Competition jaise format me kaam karta hai).
+  // Type me purane class IDs ('6'-'12') retained hain taa ki agar koi purane
+  // saved Lucent entry me classLevel='6' jaisa value ho to data load break naa ho.
   const LUCENT_CLASS_TARGETS: { id: 'COMPETITION' | '6' | '7' | '8' | '9' | '10' | '11' | '12'; label: string }[] = [
     { id: 'COMPETITION', label: '🏆 Competition Mode' },
-    { id: '6', label: '📘 Class 6' },
-    { id: '7', label: '📘 Class 7' },
-    { id: '8', label: '📘 Class 8' },
-    { id: '9', label: '📘 Class 9' },
-    { id: '10', label: '📘 Class 10' },
-    { id: '11', label: '📘 Class 11' },
-    { id: '12', label: '📘 Class 12' },
   ];
   const [newLucent, setNewLucent] = useState<{ subject: string; bookName: string; classLevel: 'COMPETITION' | '6' | '7' | '8' | '9' | '10' | '11' | '12'; lessonTitle: string; pages: LucentPageNote[] }>({
     subject: 'biology',
@@ -473,20 +471,36 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // Homework History UI: subject filter + per-entry expanded state. Collapsed entries
   // render only a small header so the page stays snappy when there are many entries.
   const [homeworkHistoryFilter, setHomeworkHistoryFilter] = useState<string>('all');
+  // Free-text search across homework history (matches title / notes / pageNo / date).
+  const [homeworkHistorySearch, setHomeworkHistorySearch] = useState<string>('');
   const [expandedHomework, setExpandedHomework] = useState<Record<string, boolean>>({});
   const [expandedLucent, setExpandedLucent] = useState<Record<string, boolean>>({});
   const [expandedLucentPage, setExpandedLucentPage] = useState<Record<string, boolean>>({});
 
   // Normalize common Hindi / shorthand MCQ paste formats so they parse with parseMCQText().
-  // Handles: **प्रश्न:**, **सही उत्तर:** B) ..., **Ans: B) ...**, **Q 1: ...**, ### topic headers, --- separators.
+  // Handles: **प्रश्न:**, **प्रश्न 1: text?**, **सही उत्तर:** B) ..., **सही उत्तर: B) ...**,
+  // **Ans: B) ...**, **Q 1: ...**, (Easy)/(Medium)/(Hard) difficulty markers, ### topic headers,
+  // --- separators, and parenthetical "(नोट: ...)" notes after the answer line.
   const normalizeMcqPaste = (raw: string): string => {
     let txt = raw;
     txt = txt.replace(/\r\n/g, '\n');
     txt = txt.replace(/^---+\s*$/gm, '');
+    // Drop ### topic headers entirely (they are noise for the parser; topic is auto-derived).
     txt = txt.replace(/^###\s+.+$/gm, '');
+    // **Q 1: ...** → standard Question marker.
     txt = txt.replace(/\*\*Q\s*(\d+)\s*[:.]\s*([\s\S]*?)\*\*/gi, (_m, n, q) => `**Question ${n}**\n❓ Question: ${q.trim()}`);
+    // NEW format: **प्रश्न 1: text?** or **प्रश्न 1. text** → standard Question marker.
+    // Also strips trailing difficulty markers like (Easy) / (Medium) / (Hard) / (Easy/Bihar Special).
+    txt = txt.replace(/\*\*\s*(?:प्रश्न|Question)\s*(\d+)\s*[:.\-]\s*([\s\S]*?)\*\*/gi, (_m, n, q) => {
+      const qClean = String(q).trim().replace(/\s*\((?:Easy|Medium|Hard|आसान|मध्यम|कठिन)[^)]*\)\s*$/i, '').trim();
+      return `\n**Question ${n}**\n❓ Question: ${qClean}`;
+    });
+    // **प्रश्न:** / **Question:** (empty bold, value comes after) → marker.
     txt = txt.replace(/\*\*प्रश्न\s*[:：]?\*\*/gi, '__PRASHNA__');
     txt = txt.replace(/\*\*Question\s*[:：]?\*\*/gi, '__PRASHNA__');
+    // **सही उत्तर: B) text** (answer INSIDE bold) → ✅ Correct Answer: B) text.
+    txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*([^*]+?)\s*\*\*/gi, (_m, val) => `\n✅ Correct Answer: ${String(val).trim()}`);
+    // **सही उत्तर:** (empty bold, value follows on same line) → ✅ Correct Answer:
     txt = txt.replace(/\*\*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]?\*\*\s*/gi, '✅ Correct Answer: ');
     txt = txt.replace(/(?:^|\n)\s*(?:Ans(?:wer)?|सही\s*उत्तर)\s*[:：]\s*/gi, '\n✅ Correct Answer: ');
     let qNum = 0;
@@ -8724,7 +8738,7 @@ Statement 2"
                           {newHomework.targetSubject === 'lucent' ? (
                               <div className="space-y-4 border-t border-indigo-100 pt-4">
                                   <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-800">
-                                      <strong>Lucent Mode:</strong> Choose target class → subject category → custom book name → page-wise notes/MCQ. Class 6-12 ke liye book Competition jaisa page-wise format me dikhega (sirf notes/MCQ — video/audio same purana). Competition mode select karne par Competition page pe dikhega.
+                                      <strong>Lucent Mode (Competition only):</strong> Subject category → custom book name → page-wise notes + MCQ. Yeh Competition page pe dikhega. Class 6-12 ke liye alag se Homework path use karein (Target Subject → None ya MCQ / Speedy / Sar Sangrah) — wahaan bhi same chunked Notes + MCQ + TTS reader milta hai.
                                   </div>
                                   <div className="grid grid-cols-2 gap-2">
                                       <div>
@@ -8774,7 +8788,10 @@ Statement 2"
                                                       <Trash2 size={14} />
                                                   </button>
                                               )}
-                                              <div className="grid grid-cols-[80px_120px_1fr] gap-2 items-start">
+                                              {/* Page No + Date ek row me, Note Content apne pooray width par
+                                                  alag row me — pehle 3-col grid me Note Content squeeze ho jata tha
+                                                  (mobile par "P a ge ke" jaisa vertical dikhta tha). */}
+                                              <div className="grid grid-cols-[100px_1fr] gap-2 items-start">
                                                   <div>
                                                       <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Page No.</label>
                                                       <input type="text" value={pg.pageNo} onChange={e => {
@@ -8791,14 +8808,15 @@ Statement 2"
                                                           setNewLucent({...newLucent, pages: updated});
                                                       }} className="w-full p-2 border border-slate-200 rounded text-xs outline-none focus:border-indigo-500" />
                                                   </div>
-                                                  <div>
-                                                      <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Note Content</label>
-                                                      <textarea value={pg.content} onChange={e => {
-                                                          const updated = [...newLucent.pages];
-                                                          updated[pgIdx] = { ...updated[pgIdx], content: e.target.value };
-                                                          setNewLucent({...newLucent, pages: updated});
-                                                      }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-24 focus:border-indigo-500" placeholder="Page ke notes likhein..." />
-                                                  </div>
+                                              </div>
+                                              <div>
+                                                  <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">📝 Note Content</label>
+                                                  <textarea value={pg.content} onChange={e => {
+                                                      const updated = [...newLucent.pages];
+                                                      updated[pgIdx] = { ...updated[pgIdx], content: e.target.value };
+                                                      setNewLucent({...newLucent, pages: updated});
+                                                  }} className="w-full p-3 border border-slate-200 rounded-lg text-sm outline-none min-h-[200px] resize-y focus:border-indigo-500 bg-white leading-relaxed" placeholder="Page ke notes yahan likhein... Har bullet `•` ya nayi line par alag topic ban jata hai aur student ko chunked TTS me topic-by-topic padha jata hai." />
+                                                  <p className="text-[9px] text-slate-500 mt-1">💡 Tip: Har naya bullet (`•`) ya naya paragraph alag chunk banta hai — student ko topic-by-topic chunked TTS milta hai.</p>
                                               </div>
                                               {/* Per-page MCQs (admin-curated). Each MCQ gets a question + 4 options +
                                                   correct answer index. Stored on the LucentPageNote so the student
@@ -9117,8 +9135,16 @@ Statement 2"
                           if (homeworkHistoryFilter === 'none') return !hw.targetSubject || hw.targetSubject === 'none';
                           return hw.targetSubject === homeworkHistoryFilter;
                       };
+                      // Free-text search: matches title / notes / pageNo / date (case-insensitive).
+                      const searchTerm = homeworkHistorySearch.trim().toLowerCase();
+                      const searchFn = (hw: HomeworkItem) => {
+                          if (!searchTerm) return true;
+                          return [hw.title, hw.notes, (hw as any).pageNo, hw.date]
+                              .filter(Boolean)
+                              .some(v => String(v).toLowerCase().includes(searchTerm));
+                      };
                       const allHw = localSettings.homework || [];
-                      const filteredHw = allHw.filter(filterFn);
+                      const filteredHw = allHw.filter(filterFn).filter(searchFn);
                       // Counts per subject for badge display.
                       const subjectCounts: Record<string, number> = { all: allHw.length };
                       SUBJECT_FILTERS.forEach(f => {
@@ -9140,6 +9166,27 @@ Statement 2"
                                       <Save size={14} /> Save Edits
                                   </button>
                               </div>
+                          </div>
+                          {/* --- Search bar (title / notes / page / date) --- */}
+                          <div className="relative mb-3">
+                              <input
+                                  type="text"
+                                  value={homeworkHistorySearch}
+                                  onChange={e => setHomeworkHistorySearch(e.target.value)}
+                                  placeholder="🔍 Title, notes, page no. ya date se search karein…"
+                                  className="w-full pl-9 pr-9 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 bg-white shadow-sm"
+                              />
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔎</span>
+                              {homeworkHistorySearch && (
+                                  <button
+                                      type="button"
+                                      onClick={() => setHomeworkHistorySearch('')}
+                                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full"
+                                      aria-label="Clear search"
+                                  >
+                                      <X size={14} />
+                                  </button>
+                              )}
                           </div>
                           {/* --- Subject filter chips --- */}
                           <div className="flex flex-wrap gap-2 mb-4 p-2 bg-slate-50 rounded-xl border border-slate-200">

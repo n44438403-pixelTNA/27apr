@@ -205,3 +205,60 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
   - The strict old `.validate` that demanded `newData.hasChildren(['type'])` was removed — it was tripping during partial transactions and causing redeems to fail silently.
 - **"Show All Answers" lifted to the TOP** of the Lucent Q&A list (`reveal` mode) so students don't have to scroll past the question stack to reveal everything. Old bottom button removed (no duplicate).
 - **Daily GK Corner card** added as a fixed card at the top of the Homework page (`StudentDashboard.tsx` ~line 6529). Replaces the tiny header-strip GK button. Card shows the count of today's new GK questions (with a pulsing "New" badge) and gives two prominent buttons: **"Aaj ka GK"** and **"GK History"**, both opening the Daily GK / History page.
+
+## Recent Changes (Apr 28 — part 3) — Homework Manager refactor
+- **Standard (Class 6-12) homework simplified** in `components/AdminDashboard.tsx`:
+  - When `targetSubject === 'none'`, the Add tab now shows ONLY Date, Title, Audio URL, Video URL, PDF URL. Notes textarea + entire MCQ (structured + raw paste) section are hidden behind `{newHomework.targetSubject !== 'none' && ...}`.
+  - A small info card explains that Notes/MCQs ke liye admin ko Competition mode chunna hoga (Lucent / Speedy / Sar Sangrah / MCQ — wahaan page-wise structured chunked TTS milta hai).
+  - Save handler also gates `notes`, `mcqText`, `parsedMcqs` to empty when `targetSubject === 'none'` so old form state can't leak into the saved record.
+  - Same gating in the History tab inline editor: notes/MCQ-text/parsed-MCQ editor only renders when `hw.targetSubject` is a Competition subject.
+- **History tab search** added in Admin → Homework Manager → History: free-text input above subject filter chips searches title / notes / pageNo / date case-insensitive (state: `homeworkHistorySearch`, filter: `searchFn`).
+- **MCQ paste parser** (`normalizeMcqPaste` in `AdminDashboard.tsx`) extended to handle the new format:
+  - `**प्रश्न N: text?**` → unwraps the bold question line.
+  - `**सही उत्तर: A) text**` (answer INSIDE the bold) → split into `सही उत्तर: A)` + the option text on the next line.
+  - `(Easy/Medium/Hard)` difficulty markers stripped from option lines.
+  - `---` separators between blocks honored, `(नोट:...)` parentheticals preserved.
+- **Save-count badge moved**: `components/ChunkedNotesReader.tsx` no longer shows the "X students ne save kiya" badge inline next to each line — the reading view stays clean. The count is now shown only on the existing "Important / Starred Notes" Global tab page in `StudentDashboard.tsx` (~line 9965 / 10155 area).
+- **Chunked-notes** (topic-wise + page-wise) was already wired via `ChunkedNotesReader` for homework notes (~line 2867 in `StudentDashboard.tsx`); this session keeps that intact.
+
+## Recent Changes (Apr 28 — part 4) — Reverted: Standard homework gets full Competition format
+- User clarified: Standard (Class 6-12) homework should ALSO get the full Competition-style structured Notes + MCQ + chunked TTS reader (Chapter Deep Dive / Save Offline / Auto Play layout). Earlier session (part 3) had hidden Notes/MCQ for Standard — that gating is now reverted.
+- Reverted in `components/AdminDashboard.tsx`:
+  - Removed the `{newHomework.targetSubject !== 'none' && (...)}` wrappers around the Notes textarea and MCQ section in the Add tab.
+  - Removed the info card explaining Standard limitation.
+  - Removed the `isStandard` early-empty gating in the Save handler so notes/mcqText/parsedMcqs persist for Standard entries too.
+  - Removed the `{hw.targetSubject && hw.targetSubject !== 'none'}` wrapper in the History tab inline editor — Notes + MCQ-text + Parsed-MCQ editors now show for ALL homework entries again.
+- Student side already used `ChunkedNotesReader` unconditionally for any homework with notes (StudentDashboard.tsx ~line 2867), so no changes needed — Class 6-12 entries automatically render with the same Competition-style topic-wise / page-wise chunked reader, TTS, Save Offline, Auto Play.
+- Kept from part 3 (still valid): MCQ paste parser handles new format (`**प्रश्न N: text?**` / `**सही उत्तर: A) text**`), History tab free-text search, save-count badge moved off `ChunkedNotesReader` (only shows on the Important / Starred Notes Global tab).
+
+## Recent Changes (Apr 28 — part 5) — Lucent form polish
+- **Lucent (Page-wise) Target Class shrunk to Competition only**: `LUCENT_CLASS_TARGETS` in `components/AdminDashboard.tsx` (~line 461) now only exposes `'COMPETITION'` in the dropdown. Class 6-12 options removed because Class 6-12 students get the full Competition-style chunked Notes + MCQ + TTS reader directly through their own Homework path (admin uses Target Subject = None / MCQ / Speedy* / Sar Sangrah). The TS union type still includes `'6'..'12'` so any pre-existing saved Lucent entries with classLevel='6'..'12' load without breaking.
+- **Lucent help text** updated to reflect Competition-only positioning and point admins to the Homework path for Class 6-12.
+- **Note Content textarea enlarged**: each Lucent page row was a 3-column `[80px_120px_1fr]` grid where the Note Content textarea got squeezed to a vertical sliver on mobile (looked like "P / a / ge" stacked). Restructured into:
+  - Row 1: 2-col grid `[100px_1fr]` for Page No. + Date.
+  - Row 2: full-width textarea (`min-h-[200px]`, `resize-y`, `p-3`, `leading-relaxed`) on its own row with a tip line about chunked TTS.
+
+## Recent Changes (Apr 28 — part 6) — PdfView (Class 6-12 chapters) chunked notes
+- **Class 6-12 chapter notes (PdfView "Concept" / Deep Dive tab) now use the same Competition-style chunked reader.**
+- Earlier the deep-dive topic content was rendered as one wall of HTML via `dangerouslySetInnerHTML` inside a `prose` block — every bullet / Hindi-danda sentence collapsed into a single paragraph, and there was no per-line tap-to-read TTS.
+- `components/PdfView.tsx`:
+  - Imported `ChunkedNotesReader`.
+  - Replaced the single HTML block (~line 1503-1508) with `<ChunkedNotesReader content={topic.content} hideTopBar noteKey={"pdfview_${chapter.id}_topic_${idx}"} />`.
+  - `splitIntoTopics` already handles HTML (strips tags + splits on Hindi danda `।`), so each bullet/sentence becomes its own tappable chunk with TTS — same as Lucent / Homework / Speedy notes.
+  - Wrapped in `-mx-4 sm:-mx-6` so the chunked reader spans the card edge-to-edge (matches the screenshots aapne dikhaaye).
+
+## Recent Changes (Apr 28 — part 7) — Global tab on Important Notes page fixed
+- **Symptom**: Important Notes page → "Global" tab badge always showed `0`, even when the user had locally-saved notes (My Saved tab populated, "11,882 students saved" badge visible due to admin-set fake-boost). Tapping the Global tab worked (UI switched), but the community list was empty.
+- **Root cause #1 — RTDB writes were silently rejected.** `services/noteStars.ts` `recordNoteStar` did `set(note_stars/$hash/users/$uid, true)` BEFORE the `runTransaction` that creates the `count` field. RTDB rules on `note_stars/$hash` require `newData.hasChildren(['count'])`, so the very first star for a brand-new topic-hash failed validation and the entire write was discarded. Result: `note_stars` stayed empty, subscription returned `{}`, Global tab showed 0.
+  - Fix: in `services/noteStars.ts`, swap order — run the transaction first (which writes `count`+`label`+`users` atomically), then a best-effort `set` on the user flag.
+- **Root cause #2 — wrong arg order on the Global tab Save/Unsave buttons.** In `components/StudentDashboard.tsx` (~line 10253 / 10272), the inline Save/Unsave buttons on community cards passed `(entry.label, user.id)` — but the service signatures are `recordNoteStar(userId, noteKey, topicText)` / `recordNoteUnstar(userId, topicText)`. So even when writes did go through, they were hashed under the user's UUID instead of the note text → no aggregation.
+  - Fix: pass `(user.id, newEntry.noteKey, entry.label)` and `(user.id, entry.label)` respectively.
+- **Backfill for existing users**: added a one-shot `useEffect` in `StudentDashboard.tsx` (~line 1163, gated by `didBackfillStarsRef`) that, after login, re-records each `starredNotes[i]` via the now-correct `recordNoteStar`. So users who had already saved notes during the bug period automatically get those notes registered in `note_stars` on next app open — making them appear on the Global tab.
+- **`.indexOn` added** for `note_stars` in `database.rules.json` (`["count", "lastUpdated"]`) so the `orderByChild('count').limitToLast(200)` query in `subscribeToTopNoteStars` runs server-side instead of triggering Firebase's client-side fallback warning.
+- **Note on rules deployment**: The local `database.rules.json` change must be pushed to Firebase via the Firebase console / CLI for the index hint to take effect in production. The query still works without it, just less efficiently.
+
+## Recent Changes (Apr 28 — part 8) — Additional Notes + Teaching Strategy chunked reader
+- Same treatment as part 7 (Deep Dive), now applied to the other two PdfView tabs in `components/PdfView.tsx`:
+  - **Teaching Strategy** (TEACHER tab, ~line 1789): removed the broken `<SpeakButton text={currentNote.content}>` from the purple header and replaced the `dangerouslySetInnerHTML` HTML wall with `<ChunkedNotesReader content={currentNote.content} topBarLabel={currentNote.title} noteKey="pdfview_${chapter.id}_strategy_${currentStrategyIndex}">`. Each strategy bullet / Hindi-danda line is now its own tappable chunk with the reader's built-in "Read All" / "Stop" button, exactly like Deep Dive.
+  - **Additional Notes / Resource overlay** (RESOURCES tab → tap a note, ~line 1287): the dark-mode `prose-invert` HTML block was replaced with a white-bg `<ChunkedNotesReader>` (white because the reader is styled for a light theme). The floating "Headphones / Pause" auto-play TTS button at the top is now hidden in text-only mode (`hasPdf && (...)` guard) — ChunkedNotesReader provides its own Read All. The button is preserved when a PDF is open alongside text content (PDF mode), since the reader can't render inside an iframe.
+- Premium Audio buttons on both surfaces remain untouched.

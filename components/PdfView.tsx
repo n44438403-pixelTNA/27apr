@@ -11,6 +11,7 @@ import { CreditConfirmationModal } from './CreditConfirmationModal';
 import { AiInterstitial } from './AiInterstitial';
 import { InfoPopup } from './InfoPopup';
 import { SpeakButton } from './SpeakButton';
+import { ChunkedNotesReader } from './ChunkedNotesReader';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_CONTENT_INFO_CONFIG } from '../constants';
 import { saveRecentChapter, markReadToday } from '../utils/recentReads';
@@ -1224,21 +1225,26 @@ export const PdfView: React.FC<Props> = ({
                       </button>
                   )}
 
-                  {/* TTS Toggle */}
-                  <button
-                      onClick={() => {
-                          if (isAutoPlaying) {
-                              stopAllSpeech();
-                          } else {
-                              setIsAutoPlaying(true);
-                              const plainText = activeNoteContent.content.replace(/<[^>]*>?/gm, ' ');
-                              speakText(plainText, null, speechRate, 'hi-IN', undefined, () => setIsAutoPlaying(false));
-                          }
-                      }}
-                      className={`bg-black/50 backdrop-blur-md text-white p-3 rounded-full hover:bg-black/70 border border-white/20 shadow-lg ${isAutoPlaying ? 'text-red-400 border-red-400 animate-pulse' : ''}`}
-                  >
-                      {isAutoPlaying ? <Pause size={24} /> : <Headphones size={24} />}
-                  </button>
+                  {/* TTS Toggle — sirf PDF mode me dikhao. Text-only mode me niche
+                      ChunkedNotesReader apna "Read All" button khud render karta hai
+                      (Deep Dive / Teaching Strategy ke jaise), to yahaan duplicate /
+                      broken normal-TTS button ki zaroorat nahi hai. */}
+                  {hasPdf && (
+                      <button
+                          onClick={() => {
+                              if (isAutoPlaying) {
+                                  stopAllSpeech();
+                              } else {
+                                  setIsAutoPlaying(true);
+                                  const plainText = activeNoteContent.content.replace(/<[^>]*>?/gm, ' ');
+                                  speakText(plainText, null, speechRate, 'hi-IN', undefined, () => setIsAutoPlaying(false));
+                              }
+                          }}
+                          className={`bg-black/50 backdrop-blur-md text-white p-3 rounded-full hover:bg-black/70 border border-white/20 shadow-lg ${isAutoPlaying ? 'text-red-400 border-red-400 animate-pulse' : ''}`}
+                      >
+                          {isAutoPlaying ? <Pause size={24} /> : <Headphones size={24} />}
+                      </button>
+                  )}
 
                   <button
                       onClick={() => {
@@ -1276,11 +1282,19 @@ export const PdfView: React.FC<Props> = ({
                           </div>
                       </>
                   ) : (
-                      // TEXT ONLY VIEW (Dark Mode Reader)
-                      <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 bg-slate-900 text-slate-300">
-                          <div className="w-full max-w-none mx-auto pt-16">
-                              <h2 className="text-2xl font-black text-white mb-6">{activeNoteContent.title}</h2>
-                              <div className="prose prose-invert prose-lg max-w-none px-2 student-extended-notes" dangerouslySetInnerHTML={{ __html: activeNoteContent.content }} />
+                      // TEXT ONLY VIEW — Competition-style chunked reader (Deep Dive / Lucent
+                      // jaisa). Pehle dark-mode prose HTML wall thi + ek alag broken normal-TTS
+                      // button. Ab ChunkedNotesReader har bullet/Hindi-danda line ko apna
+                      // tappable + Read-All TTS deta hai. Background white kar diya kyunki
+                      // reader white-bg ke liye styled hai.
+                      <div className="flex-1 overflow-y-auto px-2 sm:px-6 py-6 bg-white text-slate-800">
+                          <div className="w-full max-w-3xl mx-auto pt-16">
+                              <h2 className="text-2xl font-black text-slate-900 mb-4 px-2">{activeNoteContent.title}</h2>
+                              <ChunkedNotesReader
+                                  content={activeNoteContent.content}
+                                  topBarLabel={activeNoteContent.title}
+                                  noteKey={`pdfview_${chapter.id}_addnote_${activeNoteContent.title || 'untitled'}`}
+                              />
                           </div>
                       </div>
                   )}
@@ -1491,20 +1505,28 @@ export const PdfView: React.FC<Props> = ({
                                                           <Music size={14} /> Premium Audio
                                                       </button>
                                                   )}
-                                                  <button
-                                                      onClick={() => handleTopicPlay(idx)}
-                                                      className={`p-2 rounded-full transition-colors ${isActive ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600 hover:bg-teal-50 hover:text-teal-600'}`}
-                                                      title="Play AI Text-to-Speech"
-                                                  >
-                                                      {isActive ? <Pause size={20} /> : <Volume2 size={20} />}
-                                                  </button>
+                                                  {/* Pehle yahaan ek normal Volume2 / Pause TTS button tha
+                                                      jo `handleTopicPlay(idx)` call karta tha — wo Class 6-12
+                                                      ke chapters me kaam nahi kar raha tha. Ab ChunkedNotesReader
+                                                      apna "Read All" / "Stop" button khud render karta hai
+                                                      (hideTopBar hata diya), jo har bullet / Hindi-danda line
+                                                      ko sequentially padhta hai aur reliably kaam karta hai. */}
                                               </div>
                                           </div>
                                           {topic.content && topic.content.trim() !== '<p></p>' && (
-                                              <div
-                                                  className="prose prose-sm max-w-none text-slate-600 leading-relaxed"
-                                                  dangerouslySetInnerHTML={{ __html: topic.content }}
-                                              />
+                                              // Competition-style chunked reader: each bullet / Hindi-danda
+                                              // sentence becomes its own tappable line with TTS, instead of
+                                              // one wall of HTML. Same component used in Lucent / Homework
+                                              // notes so the experience is consistent across the app.
+                                              // Top bar ab visible hai → built-in "Read All" button milega
+                                              // jo iss topic ke saare chunks ko sequentially padhta hai.
+                                              <div className="-mx-4 sm:-mx-6">
+                                                  <ChunkedNotesReader
+                                                      content={topic.content}
+                                                      topBarLabel={topic.title}
+                                                      noteKey={`pdfview_${chapter.id}_topic_${idx}`}
+                                                  />
+                                              </div>
                                           )}
                                       </div>
                                   );
@@ -1790,13 +1812,23 @@ export const PdfView: React.FC<Props> = ({
                                                    <Music size={14} /> Premium Audio
                                                </button>
                                            )}
-                                           <SpeakButton text={currentNote.content} className="bg-white/20 text-white hover:bg-white/30" />
+                                           {/* Pehle yahaan ek <SpeakButton> tha jo poore HTML ko ek
+                                               saath padhne ki koshish karta tha — wo Class 6-12 ke
+                                               teaching strategy notes me reliably kaam nahi kar raha
+                                               tha. Ab niche ChunkedNotesReader apna "Read All" button
+                                               render karta hai jo har bullet / Hindi-danda line ko
+                                               sequentially padhta hai (Deep Dive jaise hi). */}
                                        </div>
                                    </div>
-                                   <div
-                                       className="p-4 sm:p-6 prose prose-slate max-w-none teacher-guide-container overflow-y-auto"
-                                       dangerouslySetInnerHTML={{ __html: currentNote.content }}
-                                   />
+                                   {/* Competition-style chunked reader — Deep Dive ke jaise hi
+                                       teaching strategy bhi ab line-by-line tappable + TTS milti hai. */}
+                                   <div className="p-2 sm:p-4 overflow-y-auto teacher-guide-container">
+                                       <ChunkedNotesReader
+                                           content={currentNote.content}
+                                           topBarLabel={currentNote.title || 'Teaching Strategy'}
+                                           noteKey={`pdfview_${chapter.id}_strategy_${currentStrategyIndex}`}
+                                       />
+                                   </div>
                                </div>
 
                                {/* Pagination Controls */}

@@ -342,15 +342,9 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   <span className={`font-bold mr-1.5 ${starred ? 'text-amber-400' : 'text-indigo-400'}`}>•</span>
                   {topic.text}
                 </p>
-                {starCount > 0 && (
-                  <span
-                    className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-black"
-                    title={`${starCount} student${starCount === 1 ? '' : 's'} ne is line ko Important mark kiya hai`}
-                  >
-                    <Star size={9} className="fill-amber-500 text-amber-500" />
-                    {starCount.toLocaleString('en-IN')} {starCount === 1 ? 'student' : 'students'} ne save kiya
-                  </span>
-                )}
+                {/* Save count badge intentionally hidden here — yeh ab sirf
+                    "Important / Starred Notes" ke Global tab page par dikhega taa ki
+                    reading view clean rahe. */}
               </button>
               {/* TTS active indicator */}
               {isActive && (
