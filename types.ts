@@ -648,6 +648,7 @@ export interface SystemSettings {
   externalApps?: ExternalApp[]; // NEW
   downloadApps?: DownloadApp[]; // NEW: In-app App Store entries (download links)
   appStorePageHidden?: boolean; // NEW: Hide the App Store tab/page for students
+  starredPageHidden?: boolean;  // Hide the Important/GK starred notes tab from nav
   chatRooms?: ChatRoom[]; // NEW
   engagementRewards?: EngagementReward[];
   prizeRules?: PrizeRule[]; // NEW: Prize Configuration

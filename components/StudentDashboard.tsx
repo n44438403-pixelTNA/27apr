@@ -4928,7 +4928,7 @@ export const StudentDashboard: React.FC<Props> = ({
       );
     }
 
-    // 5b. REVISION HUB V2 (auto-finds notes for weak topics tracked from MCQ attempts)
+    // 5b. REVISION HUB V2 (spaced-repetition: notes → MCQ cycle for weak topics)
     if (activeTab === "REVISION_V2") {
       return (
         <RevisionHubV2
@@ -4936,10 +4936,39 @@ export const StudentDashboard: React.FC<Props> = ({
           settings={settings}
           onBack={() => { onTabChange("HOME"); setCurrentLogicalTab("HOME"); }}
           onOpenChapter={(subjectId, chapterId, chapterTitle) => {
-            // Open chapter via the existing chapter-select flow. We pass a
-            // lightweight stub — the chapter view will load its own content.
             try {
               handleChapterSelect({ id: chapterId, title: chapterTitle || 'Chapter' } as any);
+            } catch {/* noop */}
+          }}
+          onOpenMcq={(subjectId, chapterId, chapterTitle, topic) => {
+            try {
+              // Navigate to MCQ view for this chapter
+              const lang = (activeSessionBoard || user.board) === "BSEB" ? "Hindi" : "English";
+              const subjects = getSubjectsList(
+                (activeSessionClass as any) || user.classLevel || "10",
+                user.stream || "Science",
+                activeSessionBoard || user.board,
+              ).filter(s => !(settings?.hiddenSubjects || []).includes(s.id));
+              const targetSubject = subjects.find(s => s.id === subjectId) || subjects[0];
+              if (targetSubject) {
+                fetchChapters(
+                  activeSessionBoard || user.board || "CBSE",
+                  (activeSessionClass as any) || user.classLevel || "10",
+                  user.stream || "Science",
+                  targetSubject,
+                  lang,
+                ).then(allChapters => {
+                  const ch = allChapters.find(c => c.id === chapterId) || { id: chapterId, title: chapterTitle || 'Chapter' };
+                  onTabChange("MCQ");
+                  setSelectedSubject(targetSubject);
+                  setSelectedChapter(ch as any);
+                  setCurrentLogicalTab("HOME");
+                }).catch(() => {
+                  handleChapterSelect({ id: chapterId, title: chapterTitle || 'Chapter' } as any);
+                });
+              } else {
+                handleChapterSelect({ id: chapterId, title: chapterTitle || 'Chapter' } as any);
+              }
             } catch {/* noop */}
           }}
         />
@@ -5349,6 +5378,22 @@ export const StudentDashboard: React.FC<Props> = ({
 
             {/* ACTION LIST */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
+              {/* ADMIN PANEL — visible only to admin / sub-admin */}
+              {(user.role === "ADMIN" || user.role === "SUB_ADMIN" || isImpersonating) && (
+                <button
+                  onClick={handleSwitchToAdmin}
+                  className="w-full p-4 flex items-center gap-3 hover:bg-yellow-50 transition-colors active:bg-yellow-100"
+                >
+                  <div className="bg-yellow-100 w-10 h-10 rounded-xl flex items-center justify-center text-yellow-700 shrink-0">
+                    <Layout size={18} />
+                  </div>
+                  <div className="flex-1 text-left min-w-0">
+                    <p className="text-sm font-bold text-yellow-800">Admin Panel</p>
+                    <p className="text-[11px] text-yellow-600">Manage content, users & settings</p>
+                  </div>
+                  <ChevronRight size={16} className="text-yellow-400 shrink-0" />
+                </button>
+              )}
               {/* HISTORY */}
               {(() => {
                 const access = getFeatureAccess("HISTORY_PAGE");
@@ -8923,78 +8968,70 @@ export const StudentDashboard: React.FC<Props> = ({
                 isActive: currentLogicalTab === "HOME",
                 onClick: () => switchToLogicalTab("HOME"),
               },
+              // ── HOMEWORK: always visible when there is active homework ──────
+              // (Not conditional on RevHub being enabled — user wants it always shown)
               ...(() => {
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
-                const hasActiveHomework = (settings?.homework || []).some(
-                  (hw) => {
-                    const d = new Date(hw.date);
-                    if (isNaN(d.getTime())) return false;
-                    d.setHours(0, 0, 0, 0);
-                    return d.getTime() >= today.getTime();
-                  },
-                );
+                const hasActiveHomework = (settings?.homework || []).some((hw) => {
+                  const d = new Date(hw.date);
+                  if (isNaN(d.getTime())) return false;
+                  d.setHours(0, 0, 0, 0);
+                  return d.getTime() >= today.getTime();
+                });
                 return hasActiveHomework
-                  ? [
-                      {
-                        id: "HOMEWORK" as const,
-                        label: "Homework",
-                        Icon: GraduationCap,
-                        isActive: currentLogicalTab === "HOMEWORK",
-                        onClick: () => switchToLogicalTab("HOMEWORK"),
-                      },
-                    ]
+                  ? [{ id: "HOMEWORK" as const, label: "Homework", Icon: GraduationCap,
+                       isActive: currentLogicalTab === "HOMEWORK",
+                       onClick: () => switchToLogicalTab("HOMEWORK") }]
                   : [];
               })(),
-              // Revision Hub V2 — admin-toggled. Sits right after Homework.
+
+              // ── CASCADING SLOT SYSTEM ──────────────────────────────────────
+              // Each item occupies its slot only if enabled.
+              // When an item is disabled, the next item slides into that position.
+              //
+              //  Slot order:  RevHub → GK → Video/Profile
+              //
+              //  RevHub disabled  → GK fills Slot 1 (slides left)
+              //  GK hidden        → Video/Profile fills Slot 2 (slides left)
+              //  Video in top bar → Profile fills the Video slot
+              //
+              // Result examples:
+              //  All on:            RevHub | GK | Video
+              //  RevHub off:        GK | Video
+              //  GK hidden:         RevHub | Video
+              //  Video in top bar:  RevHub | GK | Profile
+              //  RevHub off + GK hidden: Video
+              //  RevHub off + GK hidden + Video in top bar: Profile
+
+              // Slot A — Revision Hub (if enabled)
               ...(settings?.revisionHubV2Enabled !== false
-                ? [
-                    {
-                      id: "REVISION_V2" as const,
-                      label: "Revision",
-                      Icon: BrainCircuit,
-                      filledOnActive: true,
-                      isActive: currentLogicalTab === "REVISION_V2",
-                      onClick: () => switchToLogicalTab("REVISION_V2"),
-                    },
-                  ]
+                ? [{ id: "REVISION_V2" as const, label: "Revision", Icon: BrainCircuit,
+                     filledOnActive: true,
+                     isActive: currentLogicalTab === "REVISION_V2",
+                     onClick: () => switchToLogicalTab("REVISION_V2") }]
                 : []),
-              {
-                id: "GK",
-                label: "Important",
-                Icon: Star,
-                filledOnActive: true,
-                isActive: showStarredPage,
-                onClick: () => setShowStarredPage(true),
-              },
-              // Universal Video bottom tab — hidden when admin moved it to the top bar.
+
+              // Slot B — GK / Important Notes (if not hidden by admin)
+              ...(!settings?.starredPageHidden
+                ? [{ id: "GK" as const, label: "Important", Icon: Star,
+                     filledOnActive: true,
+                     isActive: showStarredPage,
+                     onClick: () => setShowStarredPage(true) }]
+                : []),
+
+              // Slot C — Video OR Profile (mutual exclusive)
+              //   • Video in bottom nav → Video tab
+              //   • Video moved to top bar → Profile takes this exact slot
               ...(!settings?.universalVideoInTopBar
-                ? [
-                    {
-                      id: "VIDEO" as const,
-                      label: "Video",
-                      Icon: Video,
-                      featureId: "VIDEO_ACCESS",
-                      isActive: currentLogicalTab === "VIDEO",
-                      onClick: () => switchToLogicalTab("VIDEO"),
-                    },
-                  ]
-                : []),
-              // Profile — moves into the menu drawer when Revision Hub V2 is on
-              // OR when admin forces "Profile in Menu". Otherwise stays here.
-              ...((settings?.revisionHubV2Enabled !== false || settings?.profileInMenuForced)
-                ? []
-                : [
-                    {
-                      id: "PROFILE" as const,
-                      label: "Profile",
-                      Icon: UserIconOutline,
-                      featureId: "PROFILE_PAGE",
-                      filledOnActive: true,
-                      isActive: currentLogicalTab === "PROFILE",
-                      onClick: () => switchToLogicalTab("PROFILE"),
-                    },
-                  ]),
+                ? [{ id: "VIDEO" as const, label: "Video", Icon: Video,
+                     featureId: "VIDEO_ACCESS",
+                     isActive: currentLogicalTab === "VIDEO",
+                     onClick: () => switchToLogicalTab("VIDEO") }]
+                : [{ id: "PROFILE" as const, label: "Profile", Icon: UserIconOutline,
+                     featureId: "PROFILE_PAGE", filledOnActive: true,
+                     isActive: currentLogicalTab === "PROFILE",
+                     onClick: () => switchToLogicalTab("PROFILE") }]),
               ...(!settings?.appStorePageHidden
                 ? [
                     {

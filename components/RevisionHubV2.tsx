@@ -1,282 +1,696 @@
-// Revision Hub V2 — auto-finds notes from the app's existing chapter content
-// for topics where the student is weak (based on per-page MCQ tracking).
-//
-// Designed independently from the legacy components/RevisionHub.tsx — this is
-// a fresh implementation. Notes are NEVER hand-added by admin; the app scans
-// already-loaded chapter notes (and recently-read content) for keyword
-// matches and presents them for revision.
+/**
+ * Revision Hub V2 — Spaced-Repetition + Pure Local-Search (No AI)
+ *
+ * Cycle:
+ *  MCQ galat → Notes due tomorrow → MCQ due after → good score → longer interval
+ *
+ * Notes finding: local storage ke sabhi cached chapters mein wrong-question words
+ * se match karta hai, jitna zyada match utna pehle dikhega. AI use nahi hota.
+ *
+ * Tabs:
+ *  [Aaj Ka Kaam] — today's notes + MCQ due
+ *  [Schedule]    — full upcoming schedule + how it works info
+ */
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, BrainCircuit, BookOpen, Trash2, ChevronRight, Sparkles, RefreshCw, Search } from 'lucide-react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import {
+  ArrowLeft, BrainCircuit, BookOpen, Trash2, ChevronRight, Sparkles,
+  CheckCircle, ChevronDown, ChevronUp, Calendar, Zap, Info,
+  RefreshCw, Target, Search, FileText, AlertCircle, ListChecks, Clock
+} from 'lucide-react';
 import type { SystemSettings, User } from '../types';
-import { getWeakBuckets, keywordsForBucket, clearTracker, type WeakBucket } from '../utils/revisionTrackerV2';
-import { fetchChapters } from '../services/groq';
-import { getRecentChapters, type RecentChapterEntry } from '../utils/recentReads';
+import {
+  getDueItems, getUpcomingItems, markNotesReviewed, markMcqDone,
+  clearTracker, getAllBuckets, bucketKey, keywordsForBucket, type WeakBucket
+} from '../utils/revisionTrackerV2';
+import { searchNotesByWords, type NoteSearchResult } from '../utils/noteSearcher';
 
 interface Props {
   user: User;
   settings?: SystemSettings;
   onBack: () => void;
   onOpenChapter?: (subjectId: string, chapterId: string, chapterTitle?: string) => void;
+  onOpenMcq?: (subjectId: string, chapterId: string, chapterTitle?: string, topic?: string) => void;
 }
 
-interface NoteHit {
+type ActiveTab = 'daily' | 'schedule';
+
+function daysUntil(ts: number): string {
+  const diff = ts - Date.now();
+  const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+  if (days <= 0) return 'Aaj';
+  if (days === 1) return 'Kal';
+  return `${days} din mein`;
+}
+
+function accuracyColor(acc: number): string {
+  if (acc < 0.3) return 'rose';
+  if (acc < 0.5) return 'orange';
+  if (acc < 0.7) return 'amber';
+  return 'emerald';
+}
+
+interface SubjectGroup {
+  subjectId: string;
+  subjectName: string;
+  chapters: ChapterGroup[];
+}
+interface ChapterGroup {
   chapterId: string;
   chapterTitle: string;
-  subjectId?: string;
-  snippet: string;
-  matchedKeywords: string[];
-  source: 'recent' | 'chapter';
+  buckets: WeakBucket[];
 }
 
-// Strip HTML and collapse whitespace.
-function clean(html: string): string {
-  if (!html) return '';
-  const txt = html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-  return txt.replace(/\s+/g, ' ').trim();
-}
-
-function findSnippet(text: string, keywords: string[]): { snippet: string; matched: string[] } | null {
-  if (!text) return null;
-  const lower = text.toLowerCase();
-  const matched: string[] = [];
-  let firstHit = -1;
-  for (const kw of keywords) {
-    const i = lower.indexOf(kw);
-    if (i >= 0) {
-      matched.push(kw);
-      if (firstHit < 0 || i < firstHit) firstHit = i;
+function groupBySubjectChapter(items: WeakBucket[]): SubjectGroup[] {
+  const map: Record<string, SubjectGroup> = {};
+  for (const b of items) {
+    const sid = b.subjectId;
+    const sname = b.subjectName || sid;
+    if (!map[sid]) map[sid] = { subjectId: sid, subjectName: sname, chapters: [] };
+    const sg = map[sid];
+    let cg = sg.chapters.find(c => c.chapterId === b.chapterId);
+    if (!cg) {
+      cg = { chapterId: b.chapterId, chapterTitle: b.chapterTitle || b.chapterId, buckets: [] };
+      sg.chapters.push(cg);
     }
+    cg.buckets.push(b);
   }
-  if (matched.length === 0) return null;
-  const start = Math.max(0, firstHit - 80);
-  const end = Math.min(text.length, firstHit + 240);
-  let snippet = text.slice(start, end).trim();
-  if (start > 0) snippet = '… ' + snippet;
-  if (end < text.length) snippet = snippet + ' …';
-  return { snippet, matched };
+  return Object.values(map);
 }
 
-export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenChapter }) => {
-  const [buckets, setBuckets] = useState<WeakBucket[]>([]);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [hits, setHits] = useState<NoteHit[]>([]);
-  const [scanning, setScanning] = useState(false);
+// ─────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────
 
-  // Reload weak topics whenever the page is opened or after a clear.
-  useEffect(() => { setBuckets(getWeakBuckets()); }, []);
+export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenChapter, onOpenMcq }) => {
+  const revisionConfig = settings?.revisionConfig;
 
-  const active = useMemo(() => buckets.find(b => `${b.chapterId}::${b.pageKey}::${b.topic}` === activeKey) || null, [buckets, activeKey]);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('daily');
+  const [dueItems, setDueItems] = useState<WeakBucket[]>([]);
+  const [upcomingItems, setUpcomingItems] = useState<WeakBucket[]>([]);
+  const [totalTracked, setTotalTracked] = useState(0);
+  const [allBuckets, setAllBuckets] = useState<WeakBucket[]>([]);
 
-  // When a weak topic is selected, scan recently-read chapters' content
-  // (already cached locally) for keyword matches and surface snippets.
-  useEffect(() => {
-    let cancelled = false;
-    if (!active) { setHits([]); return; }
-    setScanning(true);
-    const keywords = keywordsForBucket(active);
+  const [expandedChapters, setExpandedChapters] = useState<Record<string, boolean>>({});
+  const [noteResults, setNoteResults] = useState<Record<string, NoteSearchResult[]>>({});
+  const [loadingNotes, setLoadingNotes] = useState<Record<string, boolean>>({});
+  const [selfRateKey, setSelfRateKey] = useState<string | null>(null);
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
 
-    (async () => {
-      const out: NoteHit[] = [];
+  const reload = useCallback(() => {
+    const due = getDueItems();
+    setDueItems(due);
+    setUpcomingItems(getUpcomingItems(30));
+    const all = getAllBuckets();
+    setAllBuckets(all);
+    setTotalTracked(all.filter(b => b.wrongQuestions.length > 0).length);
+    setNoteResults({});
+    setLoadingNotes({});
+    setSelfRateKey(null);
+  }, []);
 
-      // 1) Scan recent chapters' titles + descriptions cheaply.
-      const recents: RecentChapterEntry[] = (() => { try { return getRecentChapters(); } catch { return []; } })();
-      recents.forEach(r => {
-        const ct = r.chapter?.title || '';
-        const cd = (r.chapter as any)?.description || '';
-        const sn = r.subject?.name || '';
-        const blob = clean(`${ct} ${cd} ${sn}`);
-        const hit = findSnippet(blob, keywords);
-        if (hit) out.push({
-          chapterId: r.chapter?.id || r.id,
-          chapterTitle: ct || 'Chapter',
-          subjectId: r.subject?.id,
-          snippet: hit.snippet,
-          matchedKeywords: hit.matched,
-          source: 'recent',
-        });
-      });
+  useEffect(() => { reload(); }, []);
 
-      // 2) Pull fresh chapter list from the catalog and scan titles + descriptions.
-      try {
-        const board = (user.board || 'CBSE') as any;
-        const lang = ((user as any).preferredLanguage || 'English') as any;
-        const stream = (user.stream || 'Science') as any;
-        const cls = ((user as any).classLevel || (user as any).class || '10') as any;
-        const subjectStub = { id: active.subjectId, name: active.subjectName || active.subjectId } as any;
-        const data = await fetchChapters(board, cls, stream, subjectStub, lang).catch(() => []);
-        (data || []).forEach((ch: any) => {
-          const blob = clean(`${ch.title || ''} ${ch.description || ''}`);
-          const hit = findSnippet(blob, keywords);
-          if (hit && !out.find(o => o.chapterId === ch.id)) {
-            out.push({
-              chapterId: ch.id,
-              chapterTitle: ch.title || 'Chapter',
-              subjectId: active.subjectId,
-              snippet: hit.snippet,
-              matchedKeywords: hit.matched,
-              source: 'chapter',
-            });
-          }
-        });
-      } catch {/* network optional */}
+  const dueNotes = useMemo(() => dueItems.filter(b => !b.stage || b.stage === 'NOTES'), [dueItems]);
+  const dueMcq   = useMemo(() => dueItems.filter(b => b.stage === 'MCQ'),               [dueItems]);
 
-      if (!cancelled) {
-        setHits(out.slice(0, 30));
-        setScanning(false);
-      }
-    })();
+  const notesGroups    = useMemo(() => groupBySubjectChapter(dueNotes),    [dueNotes]);
+  const mcqGroups      = useMemo(() => groupBySubjectChapter(dueMcq),      [dueMcq]);
+  const upcomingGroups = useMemo(() => groupBySubjectChapter(
+    showAllUpcoming ? upcomingItems : upcomingItems.slice(0, 10)
+  ), [upcomingItems, showAllUpcoming]);
 
-    return () => { cancelled = true; };
-  }, [active, user]);
+  const toggleChapter = (key: string) =>
+    setExpandedChapters(p => ({ ...p, [key]: !p[key] }));
 
-  const handleClear = () => {
-    if (!confirm('Clear all Revision Hub tracking data? Weak-topic buckets will be reset.')) return;
-    clearTracker();
-    setBuckets([]);
-    setActiveKey(null);
+  // ── Load matching notes for a bucket from local storage (no AI) ──────────
+  const loadNotesForBucket = useCallback(async (b: WeakBucket) => {
+    const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
+    if (noteResults[k] !== undefined || loadingNotes[k]) return;
+
+    setLoadingNotes(p => ({ ...p, [k]: true }));
+    try {
+      const words = keywordsForBucket(b);
+      const results = await searchNotesByWords(words, 10);
+      setNoteResults(p => ({ ...p, [k]: results }));
+    } catch {
+      setNoteResults(p => ({ ...p, [k]: [] }));
+    } finally {
+      setLoadingNotes(p => ({ ...p, [k]: false }));
+    }
+  }, [noteResults, loadingNotes]);
+
+  // ── Mark notes reviewed → schedule MCQ ──────────────────────────────────
+  const handleNotesRead = (b: WeakBucket, noteResult?: NoteSearchResult) => {
+    const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
+    markNotesReviewed(k, revisionConfig);
+    if (noteResult) {
+      onOpenChapter?.(b.subjectId, noteResult.chapterId, noteResult.noteTitle || noteResult.chapterTitleFromKey);
+    } else {
+      onOpenChapter?.(b.subjectId, b.chapterId, b.chapterTitle);
+    }
+    reload();
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white pb-20">
-      <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3">
-        <button onClick={onBack} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200">
-          <ArrowLeft size={18} />
-        </button>
-        <div className="flex-1">
-          <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-            <BrainCircuit size={20} className="text-indigo-600" />
-            {settings?.appName ? `${settings.appName} Revision Hub` : 'Revision Hub'}
-          </h2>
-          <p className="text-[11px] text-slate-500 -mt-0.5">Auto-finds notes for your weakest topics</p>
-        </div>
-        {buckets.length > 0 && (
-          <button onClick={handleClear} className="p-2 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-600" title="Clear tracker">
-            <Trash2 size={16} />
+  // ── MCQ open + self-rating ────────────────────────────────────────────────
+  const handleMcqOpen = (b: WeakBucket) => {
+    const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
+    setSelfRateKey(k);
+    if (onOpenMcq) onOpenMcq(b.subjectId, b.chapterId, b.chapterTitle, b.topic);
+    else if (onOpenChapter) onOpenChapter(b.subjectId, b.chapterId, b.chapterTitle);
+  };
+
+  const handleSelfRate = (key: string, score: 'weak' | 'average' | 'strong') => {
+    const acc = score === 'strong' ? 0.85 : score === 'average' ? 0.60 : 0.25;
+    markMcqDone(key, acc, revisionConfig);
+    setSelfRateKey(null);
+    reload();
+  };
+
+  const handleClear = () => {
+    clearTracker();
+    setShowClearConfirm(false);
+    reload();
+  };
+
+  const totalDue = dueItems.length;
+
+  // ── Sub-components ────────────────────────────────────────────────────────
+
+  const SectionHeader = ({
+    icon, label, count, color,
+  }: { icon: React.ReactNode; label: string; count: number; color: string }) => (
+    <div className="flex items-center gap-2 px-1 mb-2">
+      <div className={`w-7 h-7 rounded-lg bg-${color}-100 text-${color}-600 flex items-center justify-center`}>{icon}</div>
+      <p className="text-sm font-black text-slate-800">{label}</p>
+      <span className={`ml-auto text-xs font-bold bg-${color}-100 text-${color}-700 rounded-full px-2 py-0.5`}>{count}</span>
+    </div>
+  );
+
+  const EmptyCard = ({ msg }: { msg: string }) => (
+    <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-center">
+      <CheckCircle size={22} className="mx-auto text-emerald-400 mb-2" />
+      <p className="text-sm font-bold text-slate-600">{msg}</p>
+    </div>
+  );
+
+  // Notes bucket card
+  const NotesBucketCard = ({ b }: { b: WeakBucket }) => {
+    const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
+    const acc = b.correct / Math.max(b.total, 1);
+    const tone = accuracyColor(acc);
+    const results = noteResults[k];
+    const loading = loadingNotes[k] ?? false;
+    const isSearched = results !== undefined;
+
+    return (
+      <div className="border-b border-slate-100 last:border-b-0">
+        <div className="px-4 py-3 flex items-start gap-3">
+          <div className={`w-10 h-10 rounded-xl bg-${tone}-50 text-${tone}-600 flex flex-col items-center justify-center shrink-0 font-black`}>
+            <span className="text-xs leading-none">{Math.round(acc * 100)}%</span>
+            <span className="text-[8px] uppercase">acc</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-slate-800 truncate">{b.topic}</p>
+            {b.pageLabel && <p className="text-[10px] text-slate-500">{b.pageLabel}</p>}
+            <p className="text-[10px] text-rose-500 font-bold">{b.wrongCount} galat · {b.total} attempts</p>
+          </div>
+          <button
+            onClick={() => loadNotesForBucket(b)}
+            className={`shrink-0 flex items-center gap-1.5 text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors ${isSearched ? 'bg-slate-400' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+            disabled={loading}
+          >
+            {loading ? <RefreshCw size={13} className="animate-spin" /> : <Search size={13} />}
+            {isSearched ? 'Searched' : 'Notes Dhundo'}
           </button>
+        </div>
+
+        {loading && (
+          <div className="px-4 pb-3 flex items-center gap-2 text-xs text-slate-500">
+            <RefreshCw size={12} className="animate-spin" /> Cached notes mein dhundh raha hai…
+          </div>
+        )}
+
+        {isSearched && !loading && (
+          <div className="px-4 pb-3 space-y-2">
+            {results.length === 0 && (
+              <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-700 flex gap-2">
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <span>Is topic se related koi cached notes nahi mila. Pehle us chapter ke notes padhein taaki woh cache ho jayein, phir dobara try karein.</span>
+              </div>
+            )}
+            {results.map((r, i) => (
+              <div key={r.storageKey + i} className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 bg-white border-b border-slate-100">
+                  <FileText size={13} className="text-indigo-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-800 truncate">{r.noteTitle || r.subjectName}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-1.5 py-0.5 leading-none truncate max-w-[140px]">
+                        📚 {r.bookName || r.subjectName}
+                      </span>
+                      {r.pageNo && (
+                        <span className="text-[10px] font-semibold text-violet-600 bg-violet-50 border border-violet-100 rounded px-1.5 py-0.5 leading-none shrink-0">
+                          📄 Topic {r.pageNo}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-400 shrink-0">{r.board} · Class {r.classLevel}</span>
+                    </div>
+                  </div>
+                  <div className={`shrink-0 flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${
+                    r.matchCount >= 4 ? 'bg-emerald-100 text-emerald-700' :
+                    r.matchCount >= 3 ? 'bg-indigo-100 text-indigo-700' :
+                    r.matchCount >= 2 ? 'bg-amber-100 text-amber-700' :
+                    'bg-slate-100 text-slate-500'
+                  }`}>
+                    {r.matchCount} match{r.matchCount !== 1 ? 'es' : ''}
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-700 px-3 py-2 leading-relaxed line-clamp-3">{r.noteContent}</p>
+                {r.matchedWords.length > 0 && (
+                  <div className="flex flex-wrap gap-1 px-3 pb-2">
+                    {r.matchedWords.slice(0, 6).map(w => (
+                      <span key={w} className="text-[9px] font-bold uppercase bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-full px-1.5 py-0.5">{w}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="px-3 pb-3">
+                  <button
+                    onClick={() => handleNotesRead(b, r)}
+                    className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded-xl transition-colors"
+                  >
+                    <BookOpen size={13} /> Yeh Notes Padho
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={() => handleNotesRead(b, undefined)}
+              className="w-full flex items-center justify-center gap-2 text-indigo-600 text-xs font-bold py-2 rounded-xl border border-indigo-200 hover:bg-indigo-50 transition-colors"
+            >
+              <BookOpen size={13} /> Original Chapter Kholo
+            </button>
+          </div>
+        )}
+
+        {b.wrongQuestions.length > 0 && !isSearched && !loading && (
+          <div className="px-4 pb-3 space-y-1.5">
+            {b.wrongQuestions.slice(0, 2).map((q, i) => (
+              <div key={i} className="rounded-lg bg-rose-50 border border-rose-100 px-3 py-2">
+                <p className="text-[11px] text-slate-700">{q.question}</p>
+                {q.correctOption && (
+                  <p className="text-[10px] text-emerald-700 font-bold mt-0.5">✓ {q.correctOption}</p>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
+    );
+  };
 
-      {!active && (
-        <div className="p-4 space-y-3">
-          {buckets.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
-              <Sparkles size={32} className="mx-auto text-indigo-400 mb-3" />
-              <p className="font-bold text-slate-700 mb-1">No weak topics yet</p>
-              <p className="text-sm text-slate-500">
-                Solve some MCQs first. As you attempt questions, the app tracks per-page accuracy and surfaces topics where you struggle here — along with notes from your chapters to revise.
-              </p>
+  // MCQ bucket card
+  const McqBucketCard = ({ b }: { b: WeakBucket }) => {
+    const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
+    const isSelfRating = selfRateKey === k;
+
+    return (
+      <div className="border-b border-slate-100 last:border-b-0 px-4 py-3">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+            <Target size={16} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-slate-800 truncate">{b.topic}</p>
+            {b.pageLabel && <p className="text-[10px] text-slate-500">{b.pageLabel}</p>}
+            <p className="text-[10px] text-rose-500 font-bold">{b.wrongCount} galat · {b.total} attempts</p>
+          </div>
+          {!isSelfRating && (
+            <button
+              onClick={() => handleMcqOpen(b)}
+              className="shrink-0 flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors"
+            >
+              <Zap size={13} /> Practice
+            </button>
+          )}
+        </div>
+
+        {isSelfRating && (
+          <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3">
+            <p className="text-xs font-bold text-slate-600 mb-2">MCQ practice ke baad apna performance rate karo:</p>
+            <div className="flex gap-2">
+              <button onClick={() => handleSelfRate(k, 'weak')}     className="flex-1 py-2 rounded-xl bg-rose-100    text-rose-700    text-xs font-bold border border-rose-200">😕 Weak</button>
+              <button onClick={() => handleSelfRate(k, 'average')}  className="flex-1 py-2 rounded-xl bg-amber-100   text-amber-700   text-xs font-bold border border-amber-200">🙂 Theek</button>
+              <button onClick={() => handleSelfRate(k, 'strong')}   className="flex-1 py-2 rounded-xl bg-emerald-100 text-emerald-700 text-xs font-bold border border-emerald-200">💪 Strong</button>
             </div>
-          )}
+          </div>
+        )}
 
-          {buckets.length > 0 && (
-            <p className="text-[11px] uppercase font-bold text-slate-500 px-1">{buckets.length} weak {buckets.length === 1 ? 'topic' : 'topics'} — sorted by lowest accuracy</p>
-          )}
+        {b.wrongQuestions.length > 0 && !isSelfRating && (
+          <div className="mt-2 space-y-1.5">
+            {b.wrongQuestions.slice(0, 2).map((q, i) => (
+              <div key={i} className="rounded-lg bg-rose-50 border border-rose-100 px-3 py-2">
+                <p className="text-[11px] text-slate-700">{q.question}</p>
+                {q.correctOption && (
+                  <p className="text-[10px] text-emerald-700 font-bold mt-0.5">✓ {q.correctOption}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
-          {buckets.map(b => {
-            const k = `${b.chapterId}::${b.pageKey}::${b.topic}`;
-            const pct = Math.round(b.accuracy * 100);
-            const tone = pct < 30 ? 'rose' : pct < 50 ? 'orange' : 'amber';
+  // Subject–Chapter accordion
+  const SubjectChapterList = ({
+    groups,
+    renderBucket,
+  }: {
+    groups: SubjectGroup[];
+    renderBucket: (b: WeakBucket) => React.ReactNode;
+  }) => (
+    <div className="space-y-3">
+      {groups.map(sg => (
+        <div key={sg.subjectId} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-2 bg-slate-50 border-b border-slate-100">
+            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">{sg.subjectName}</p>
+          </div>
+          {sg.chapters.map(cg => {
+            const chKey = `${sg.subjectId}::${cg.chapterId}`;
+            const expanded = expandedChapters[chKey] !== false;
             return (
-              <button
-                key={k}
-                onClick={() => setActiveKey(k)}
-                className={`w-full text-left rounded-2xl bg-white border border-slate-200 hover:border-indigo-300 hover:shadow-md transition p-4 flex items-center gap-3`}
-              >
-                <div className={`w-12 h-12 rounded-xl bg-${tone}-50 text-${tone}-600 flex flex-col items-center justify-center font-black shrink-0`}>
-                  <span className="text-base leading-none">{pct}%</span>
-                  <span className="text-[8px] uppercase tracking-wide">acc</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-slate-800 truncate">{b.topic}</p>
-                  <p className="text-[11px] text-slate-500 truncate">
-                    {b.subjectName || 'Subject'} · {b.chapterTitle || 'Chapter'}
-                    {b.pageLabel ? ` · ${b.pageLabel}` : ''}
-                  </p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{b.wrongCount} wrong / {b.total} attempted</p>
-                </div>
-                <ChevronRight size={18} className="text-slate-400 shrink-0" />
-              </button>
+              <div key={cg.chapterId}>
+                <button
+                  onClick={() => toggleChapter(chKey)}
+                  className="w-full flex items-center gap-2 px-4 py-3 hover:bg-slate-50 transition-colors text-left"
+                >
+                  <BookOpen size={15} className="text-indigo-500 shrink-0" />
+                  <span className="flex-1 text-sm font-bold text-slate-800 truncate">{cg.chapterTitle}</span>
+                  <span className="text-[10px] font-bold text-slate-400 shrink-0">{cg.buckets.length} topic{cg.buckets.length !== 1 ? 's' : ''}</span>
+                  {expanded ? <ChevronUp size={14} className="text-slate-400 shrink-0" /> : <ChevronDown size={14} className="text-slate-400 shrink-0" />}
+                </button>
+                {expanded && (
+                  <div className="border-t border-slate-100">
+                    {cg.buckets.map(b => (
+                      <div key={`${b.chapterId}::${b.pageKey}::${b.topic}`}>
+                        {renderBucket(b)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
-      )}
+      ))}
+    </div>
+  );
 
-      {active && (
-        <div className="p-4 space-y-4">
-          <button onClick={() => setActiveKey(null)} className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1">
-            <ArrowLeft size={14} /> Back to weak topics
-          </button>
-
-          <div className="rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 p-4">
-            <p className="text-[10px] font-bold uppercase text-indigo-700">Weak Topic</p>
-            <h3 className="text-xl font-black text-slate-800 mt-1">{active.topic}</h3>
-            <p className="text-xs text-slate-600 mt-1">
-              {active.subjectName || 'Subject'} · {active.chapterTitle || 'Chapter'}
-              {active.pageLabel ? ` · ${active.pageLabel}` : ''}
-            </p>
-            <div className="mt-2 text-[11px] text-indigo-700 font-bold">
-              Accuracy {Math.round(active.accuracy * 100)}% · {active.wrongCount} wrong / {active.total} attempted
+  // ── How It Works card ─────────────────────────────────────────────────────
+  const HowItWorksCard = () => (
+    <div className="rounded-2xl border border-indigo-200 bg-indigo-50 overflow-hidden">
+      <button
+        onClick={() => setShowHowItWorks(p => !p)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left"
+      >
+        <Info size={16} className="text-indigo-500 shrink-0" />
+        <p className="flex-1 text-sm font-black text-indigo-800">Revision Hub Kaise Kaam Karta Hai?</p>
+        {showHowItWorks ? <ChevronUp size={15} className="text-indigo-400 shrink-0" /> : <ChevronDown size={15} className="text-indigo-400 shrink-0" />}
+      </button>
+      {showHowItWorks && (
+        <div className="px-4 pb-4 space-y-2 border-t border-indigo-100">
+          <div className="flex gap-3 pt-2">
+            <span className="w-6 h-6 rounded-full bg-rose-100 text-rose-700 text-xs font-black flex items-center justify-center shrink-0 mt-0.5">①</span>
+            <p className="text-sm text-indigo-700">MCQ mein <strong>galat jawab</strong> dete ho → woh topic yahan track hota hai</p>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-black flex items-center justify-center shrink-0 mt-0.5">②</span>
+            <p className="text-sm text-indigo-700"><strong>Agla din:</strong> "Notes Dhundo" tap karo → app apne saare cached notes scan karta hai (AI nahi, sirf word-match) → best matching notes dikhata hai</p>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-black flex items-center justify-center shrink-0 mt-0.5">③</span>
+            <p className="text-sm text-indigo-700">Notes padh lene ke baad → <strong>MCQ Practice</strong> schedule hoti hai. Practice ke baad self-rate karo (Weak/Theek/Strong)</p>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-black flex items-center justify-center shrink-0 mt-0.5">④</span>
+            <p className="text-sm text-indigo-700">Achha score → interval badhta hai; weak → jaldi wapas aata hai</p>
+          </div>
+          <div className="mt-2 rounded-xl bg-white border border-indigo-100 p-2">
+            <div className="flex items-center gap-1 text-[11px] flex-wrap">
+              <span className="bg-rose-100 text-rose-700 font-bold px-2 py-0.5 rounded-full">MCQ Galat</span>
+              <ChevronRight size={10} className="text-slate-400" />
+              <span className="bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-full">Notes (kal)</span>
+              <ChevronRight size={10} className="text-slate-400" />
+              <span className="bg-emerald-100 text-emerald-700 font-bold px-2 py-0.5 rounded-full">MCQ Practice</span>
+              <ChevronRight size={10} className="text-slate-400" />
+              <span className="bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded-full">Interval ↑</span>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
 
-          <div>
-            <p className="text-[11px] font-bold uppercase text-slate-500 mb-2 flex items-center gap-1">
-              <Search size={12} /> Notes auto-found from your chapters
-              {scanning && <RefreshCw size={11} className="animate-spin ml-1" />}
-            </p>
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-indigo-50/40 to-white pb-24">
 
-            {!scanning && hits.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center">
-                <p className="text-sm text-slate-500">
-                  No matching notes found yet. Try opening a related chapter so its content gets cached, then come back.
-                </p>
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-200">
+        <div className="px-4 py-3 flex items-center gap-3">
+          <button onClick={onBack} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 shrink-0">
+            <ArrowLeft size={18} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-black text-slate-800 flex items-center gap-2 truncate">
+              <BrainCircuit size={20} className="text-indigo-600 shrink-0" /> Revision Hub
+            </h2>
+            <p className="text-[11px] text-slate-500 -mt-0.5">Local word-match · Koi AI nahi</p>
+          </div>
+          {totalTracked > 0 && (
+            <button onClick={() => setShowClearConfirm(true)} className="p-2 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-500 shrink-0">
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
+
+        {/* Tab bar */}
+        <div className="flex border-t border-slate-100">
+          <button
+            onClick={() => setActiveTab('daily')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-black transition-colors ${
+              activeTab === 'daily'
+                ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/60'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <ListChecks size={14} />
+            Aaj Ka Kaam
+            {totalDue > 0 && (
+              <span className="bg-rose-500 text-white text-[9px] font-black rounded-full w-4 h-4 flex items-center justify-center">
+                {totalDue > 9 ? '9+' : totalDue}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('schedule')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-black transition-colors ${
+              activeTab === 'schedule'
+                ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/60'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Calendar size={14} />
+            Schedule
+            {upcomingItems.length > 0 && (
+              <span className="bg-slate-300 text-slate-700 text-[9px] font-black rounded-full w-4 h-4 flex items-center justify-center">
+                {upcomingItems.length > 9 ? '9+' : upcomingItems.length}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Confirm clear */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl p-5 max-w-xs w-full shadow-2xl">
+            <p className="font-black text-slate-800 mb-2">Reset Revision Hub?</p>
+            <p className="text-sm text-slate-500 mb-5">Sab tracking data aur schedule delete ho jayega.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowClearConfirm(false)} className="flex-1 py-2 rounded-xl bg-slate-100 text-sm font-bold">Cancel</button>
+              <button onClick={handleClear} className="flex-1 py-2 rounded-xl bg-rose-500 text-white text-sm font-bold">Reset</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="p-4 space-y-5">
+
+        {/* ═══════════════════════════════════════════════════════
+            TAB 1 — AAJ KA KAAM (Daily Tasks)
+        ════════════════════════════════════════════════════════ */}
+        {activeTab === 'daily' && (
+          <>
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm text-center">
+                <p className="text-2xl font-black text-indigo-600">{totalDue}</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase">Due Aaj</p>
+              </div>
+              <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm text-center">
+                <p className="text-2xl font-black text-blue-600">{dueNotes.length}</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase">Notes</p>
+              </div>
+              <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm text-center">
+                <p className="text-2xl font-black text-emerald-600">{dueMcq.length}</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase">MCQ</p>
+              </div>
+            </div>
+
+            {/* Empty state */}
+            {totalTracked === 0 && (
+              <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50 p-6 text-center">
+                <Sparkles size={30} className="mx-auto text-indigo-400 mb-3" />
+                <p className="font-black text-indigo-800 text-base mb-1">Abhi koi topic track nahi ho raha</p>
+                <p className="text-sm text-indigo-600 mb-4">MCQ mein galat jawab do → woh topic yahan automatically aa jayega</p>
+                <button onClick={() => { setShowHowItWorks(true); setActiveTab('schedule'); }} className="text-xs font-bold text-indigo-600 underline">
+                  Kaise kaam karta hai? →
+                </button>
               </div>
             )}
 
-            <div className="space-y-2">
-              {hits.map((h, i) => (
-                <button
-                  key={i}
-                  onClick={() => onOpenChapter?.(h.subjectId || active.subjectId, h.chapterId, h.chapterTitle)}
-                  className="w-full text-left rounded-xl bg-white border border-slate-200 hover:border-emerald-300 hover:shadow-sm p-3 transition"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <BookOpen size={14} className="text-emerald-600 shrink-0" />
-                    <span className="font-bold text-sm text-slate-800 truncate">{h.chapterTitle}</span>
-                    <span className="ml-auto text-[9px] uppercase font-bold text-slate-400">{h.source === 'recent' ? 'Recent' : 'Catalog'}</span>
-                  </div>
-                  <p className="text-[12px] text-slate-600 leading-snug">{h.snippet}</p>
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {h.matchedKeywords.slice(0, 4).map(kw => (
-                      <span key={kw} className="text-[9px] font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-2 py-0.5">{kw}</span>
-                    ))}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {active.wrongQuestions.length > 0 && (
-            <div>
-              <p className="text-[11px] font-bold uppercase text-slate-500 mb-2">Recent wrong questions</p>
-              <div className="space-y-2">
-                {active.wrongQuestions.slice(0, 5).map((q, i) => (
-                  <div key={i} className="rounded-xl bg-rose-50 border border-rose-200 p-3">
-                    <p className="text-sm text-slate-800">{q.question}</p>
-                    {q.correctOption && (
-                      <p className="text-[11px] text-emerald-700 mt-1"><span className="font-bold">Correct:</span> {q.correctOption}</p>
-                    )}
-                    {q.explanation && (
-                      <p className="text-[11px] text-slate-600 mt-1">{q.explanation}</p>
-                    )}
-                  </div>
-                ))}
+            {/* Notes due today */}
+            {totalTracked > 0 && (
+              <div>
+                <SectionHeader icon={<BookOpen size={14} />} label="Aaj Notes Padhne Hain" count={dueNotes.length} color="indigo" />
+                {dueNotes.length === 0
+                  ? <EmptyCard msg="Aaj koi notes pending nahi!" />
+                  : <SubjectChapterList groups={notesGroups} renderBucket={b => <NotesBucketCard b={b} />} />
+                }
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+
+            {/* MCQ due today */}
+            {totalTracked > 0 && (
+              <div>
+                <SectionHeader icon={<Target size={14} />} label="Aaj MCQ Practice Karni Hai" count={dueMcq.length} color="emerald" />
+                {dueMcq.length === 0
+                  ? <EmptyCard msg="Aaj koi MCQ pending nahi!" />
+                  : <SubjectChapterList groups={mcqGroups} renderBucket={b => <McqBucketCard b={b} />} />
+                }
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════
+            TAB 2 — SCHEDULE (Upcoming + How it Works)
+        ════════════════════════════════════════════════════════ */}
+        {activeTab === 'schedule' && (
+          <>
+            {/* How it works */}
+            <HowItWorksCard />
+
+            {/* All upcoming items */}
+            {upcomingItems.length === 0 && totalTracked === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-center">
+                <Calendar size={24} className="mx-auto text-slate-300 mb-2" />
+                <p className="text-sm font-bold text-slate-500">Koi scheduled revision nahi hai abhi</p>
+                <p className="text-xs text-slate-400 mt-1">MCQ practice karo → galat jawab yahan track honge</p>
+              </div>
+            )}
+
+            {upcomingItems.length > 0 && (
+              <div>
+                <div className="flex items-center gap-2 px-1 mb-2">
+                  <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center">
+                    <Clock size={14} />
+                  </div>
+                  <p className="text-sm font-black text-slate-700">Upcoming Schedule</p>
+                  <span className="ml-auto text-xs font-bold bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">{upcomingItems.length} items</span>
+                </div>
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  {(showAllUpcoming ? upcomingItems : upcomingItems.slice(0, 10)).map(b => {
+                    const acc = b.correct / Math.max(b.total, 1);
+                    const tone = accuracyColor(acc);
+                    const isToday = !b.nextDueAt || b.nextDueAt <= Date.now();
+                    return (
+                      <div key={`${b.chapterId}::${b.pageKey}::${b.topic}`} className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 last:border-b-0">
+                        <div className={`w-9 h-9 rounded-xl bg-${tone}-50 text-${tone}-600 flex items-center justify-center shrink-0`}>
+                          {b.stage === 'MCQ' ? <Target size={14} /> : <BookOpen size={14} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">{b.topic}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{b.subjectName} · {b.chapterTitle}</p>
+                        </div>
+                        <div className="shrink-0 text-right space-y-0.5">
+                          <p className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${b.stage === 'MCQ' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                            {b.stage === 'MCQ' ? 'MCQ' : 'Notes'}
+                          </p>
+                          <p className={`text-[10px] font-bold ${isToday ? 'text-rose-600' : 'text-slate-500'}`}>
+                            {b.nextDueAt ? daysUntil(b.nextDueAt) : 'Aaj'}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {upcomingItems.length > 10 && (
+                    <button
+                      onClick={() => setShowAllUpcoming(p => !p)}
+                      className="w-full py-3 text-xs font-bold text-indigo-600 hover:bg-slate-50 flex items-center justify-center gap-1"
+                    >
+                      {showAllUpcoming
+                        ? <><ChevronUp size={13} /> Kam Dikhao</>
+                        : <><ChevronDown size={13} /> Sab Dikhao ({upcomingItems.length})</>}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* All tracked topics summary */}
+            {allBuckets.length > 0 && (
+              <div>
+                <div className="flex items-center gap-2 px-1 mb-2">
+                  <div className="w-7 h-7 rounded-lg bg-rose-100 text-rose-500 flex items-center justify-center">
+                    <Target size={14} />
+                  </div>
+                  <p className="text-sm font-black text-slate-700">Sare Tracked Topics</p>
+                  <span className="ml-auto text-xs font-bold bg-rose-100 text-rose-600 rounded-full px-2 py-0.5">{totalTracked}</span>
+                </div>
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  {allBuckets.filter(b => b.wrongQuestions.length > 0).slice(0, 20).map(b => {
+                    const acc = b.correct / Math.max(b.total, 1);
+                    const tone = accuracyColor(acc);
+                    return (
+                      <div key={`${b.chapterId}::${b.pageKey}::${b.topic}`} className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 last:border-b-0">
+                        <div className={`w-8 h-8 rounded-lg bg-${tone}-50 text-${tone}-600 flex flex-col items-center justify-center shrink-0 font-black`}>
+                          <span className="text-[10px] leading-none">{Math.round(acc * 100)}%</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">{b.topic}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{b.subjectName} · {b.chapterTitle}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-[10px] text-rose-500 font-bold">{b.wrongCount} galat</p>
+                          <p className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${b.stage === 'MCQ' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                            {b.stage === 'MCQ' ? 'MCQ ready' : 'Notes'}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+      </div>
     </div>
   );
 };

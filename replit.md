@@ -28,6 +28,47 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
 - Profile: Settings sheet with Light Mode, Recovery, Data
 - External Apps: Open inside the app via in-app iframe overlay (not new browser tab)
 
+## Recent Changes (Apr 29 — Bottom Nav Cascading Slot System)
+- **`types.ts`**: Added `starredPageHidden?: boolean` to SystemSettings.
+- **`AdminDashboard.tsx`**: Added "Important Notes (GK)" toggle in Nav Settings section — when hidden, Video slides into GK's slot.
+- **`StudentDashboard.tsx`**: Rewrote bottom nav with clean cascading slot logic:
+  - **Home**: always visible
+  - **Homework**: always visible when active homework exists (previously hidden when RevHub disabled — now reverted)
+  - **Slot A (RevHub)**: shows if `revisionHubV2Enabled !== false`; else GK/Video/Profile slide left
+  - **Slot B (GK)**: shows if `!starredPageHidden`; else Video/Profile slide left
+  - **Slot C (Video/Profile)**: Video if `!universalVideoInTopBar`, Profile if `universalVideoInTopBar`
+  - Removed old "Profile at end" fallback case (Profile only in Video slot now)
+
+## Recent Changes (Apr 29 — TTS Hindi Fix)
+- **`utils/textToSpeech.ts`**: Three fixes for choppy Hindi TTS reading:
+  1. **Underscore bug fix**: `_` was being removed without space (causing "हर_सौ" → "हरसौ", read as "harsau"). Now replaced with space.
+  2. **NFC normalization**: Devanagari matras (ी, ि, ु etc.) normalized to composed form before speaking — prevents "tor tor" choppy reading.
+  3. **Devanagari number words**: When text is primarily Devanagari, numbers are now replaced with Devanagari words (एक, दो, सौ, हजार…) instead of Roman phonetics (ek, do, sau…). Mixed-script mode-switching was causing TTS engine to stutter between Hindi and English reading modes.
+  4. **Zero-width char removal**: ZWJ, ZWNJ, BOM etc. removed before speaking.
+  5. **₹ sign**: Replaced with "rupaye" so TTS reads it correctly.
+
+## Recent Changes (Apr 29 — Revision Hub V2 Tabs + MCQ Bug Fix + Nav Fixes)
+- **`RevisionHubV2.tsx` (tabs added)**: Two tabs — "Aaj Ka Kaam" (daily notes + MCQ due today) and "Schedule" (upcoming schedule + all tracked topics + "How it works" collapsible). "How it works" always available in Schedule tab (not just empty state).
+- **`TodayMcqSession.tsx` (MCQ bug fix)**: Wrong answers from Revision MCQ sessions now call `recordAttempt` → they correctly appear in Revision Hub tracker. Previously these sessions were silently lost.
+- **`StudentDashboard.tsx` bottom nav**: When `revisionHubV2Enabled === false`, Homework tab is also hidden from nav (GK/Important becomes more visible).
+
+## Recent Changes (Apr 29 — Revision Hub V2: Pure Local Word-Match, No AI)
+- **`utils/noteSearcher.ts` (NEW)**: Pure local-storage note searcher. AI ka use bilkul nahi. Scan karta hai saare `nst_content_*` cached chapters ko — wrong MCQ questions ke words se word-match karta hai. Jitna zyada match utna pehle result. Score = unique matching words count per note. `searchNotesByWords(queryWords, maxResults)` function.
+- **`components/RevisionHubV2.tsx` (rewritten)**: "Notes Dhundo" button press karo → app apne saare locally cached notes scan karta hai → results match count ke order mein dikhata hai (4+ match pehle, phir 3, phir 2, phir 1). Matched words bhi highlight hote hain. Original chapter kholne ka fallback bhi hai. **No AI, no network call for note search.**
+
+## Recent Changes (Apr 29 — Admin in Profile + Notes Fix + Revision Hub V2)
+- **Admin Panel in Profile tab** (`components/StudentDashboard.tsx`): Admin/Sub-Admin users ab Profile tab ke andar bhi "Admin Panel" button dekhenge (yellow card) — floating button ke saath yeh in-profile shortcut bhi available hai.
+- **Notes "......" truncation fix** (`utils/notesSplitter.ts`): `splitIntoTopics` ab pure-dots/ellipsis lines ko filter karta hai (jaise "......" ya "…") — ye AI truncation artifacts ya admin placeholders hain jo notes ke end mein dikh rahe the. `stripTrailingDots` bhi apply hota hai har topic text ke end pe.
+- **Revision Hub V2 — Spaced Repetition Cycle** (`components/RevisionHubV2.tsx`, `utils/revisionTrackerV2.ts`):
+  - MCQ mein galat jawab → topic Revision Hub queue mein enter hota hai (`stage: 'NOTES'`, `nextDueAt: tomorrow`)
+  - Agle din student ko "Aaj Notes Padhne Hain" mein woh topic milta hai → "Padho" button → chapter notes open, MCQ schedule ho jata hai
+  - Uske baad "Aaj MCQ Practice Karni Hai" → "Practice" → MCQ open, phir self-rating (Weak/Average/Strong)
+  - Self-rating ke basis pe next interval decide hota hai (admin-configurable)
+  - MCQs + Notes dono book/page wise organized (Subject → Chapter → Page/Topic)
+  - "Upcoming" section bhi hai jo aane wale 7 din ke items dikhata hai
+  - Admin (Store Manager tab) ab full interval config kar sakta hai: score thresholds (Strong/Average/Mastery %) + per-tier intervals (Weak/Average/Strong/Mastered topics ke liye Notes aur MCQ due days)
+  - `revisionTrackerV2.ts` me naye functions: `getDueItems()`, `getUpcomingItems()`, `markNotesReviewed()`, `markMcqDone()` with admin config support
+
 ## Recent Changes (Apr 29 — Splash Font Picker)
 - **AppLoadingScreen.tsx** ab user ko app short name (e.g. "IIC") ka font choose karne deta hai. 14 stylish/branded/professional font choices: Default, Orbitron (Tech), Audiowide, Russo One, Bebas Neue, Black Ops One, Righteous, Monoton (Neon), Playfair Display (Elegant), Cinzel (Classic), Permanent Marker, Press Start 2P (Retro), Pacifico, Rajdhani.
 - Picker access: bottom footer me "T Aa" button (version ke baad) — tap karke full-screen overlay khulta hai jisme har font ka live preview saath label dikhta hai.

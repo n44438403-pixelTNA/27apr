@@ -58,14 +58,30 @@ export const stripHtml = (html: string): string => {
     tempDiv.innerHTML = clean;
     clean = tempDiv.textContent || tempDiv.innerText || "";
 
+    // NFC normalization: ensures Devanagari matras (ी, ि, ु, ू etc.) are
+    // composed with their base consonant — prevents TTS from reading them as
+    // separate sounds (the "tor tor" choppy reading issue).
+    if (typeof clean.normalize === 'function') {
+        clean = clean.normalize('NFC');
+    }
+
+    // Remove zero-width and invisible Unicode control chars that confuse TTS engines
+    // (zero-width space, zero-width joiner/non-joiner, BOM, etc.)
+    clean = clean.replace(/[\u200B\u200C\u200D\u200E\u200F\u2028\u2029\uFEFF]/g, '');
+
     clean = clean.replace(/\$\$/g, ' ');
     clean = clean.replace(/\$/g, ' ');
 
     clean = clean.replace(/^\s{0,3}#{1,6}\s+/gm, ' ');
     clean = clean.replace(/#+/g, ' ');
     clean = clean.replace(/\*+/g, ' ');
-    clean = clean.replace(/(^|\s)_+(\S)/g, '$1$2');
-    clean = clean.replace(/(\S)_+(\s|$)/g, '$1$2');
+
+    // FIX: Replace ALL underscores with spaces.
+    // The old logic `(\S)_+(\S) → $1$2` was REMOVING the underscore without a space,
+    // causing words to merge — e.g. `हर_सौ` → `हरसौ` (TTS read as "harsau").
+    // Underscores between words must become spaces so TTS reads each word separately.
+    clean = clean.replace(/_+/g, ' ');
+
     clean = clean.replace(/~{2,}/g, ' ');
     clean = clean.replace(/`+/g, ' ');
     clean = clean.replace(/^\s*>+\s?/gm, ' ');
@@ -73,6 +89,9 @@ export const stripHtml = (html: string): string => {
     clean = clean.replace(/^\s*\d+\.\s+/gm, ' ');
     clean = clean.replace(/\|/g, ' ');
     clean = clean.replace(/\\([*_#`~])/g, '$1');
+
+    // Replace ₹ sign with spoken word so TTS doesn't skip/mispronounce it
+    clean = clean.replace(/₹/g, ' rupaye ');
 
     clean = clean.replace(/\s+/g, ' ').trim();
 
@@ -83,7 +102,103 @@ export const stripHtml = (html: string): string => {
 // HINDI NUMBER → WORDS
 // Reads digits the way a human Hindi speaker would: 2019 → "do hazaar unnees".
 // Used as a TTS preprocessor when lang starts with "hi".
+//
+// TWO variants:
+//   ROMAN  — phonetic Roman spelling (ek, do, teen…)  → for Hinglish / mixed text
+//   DEVANAGARI — actual Devanagari words (एक, दो, तीन…) → for pure Hindi content
+//
+// When the surrounding text is primarily Devanagari, using Devanagari number words
+// prevents the TTS engine from switching between Hindi and English reading modes,
+// which was causing the choppy/robotic "harsau / yebsab" artefact.
 // ---------------------------------------------------------------------------
+
+/** True if >25% of alphabetic chars are Devanagari → treat as Hindi text. */
+export function isDevanagariText(text: string): boolean {
+    if (!text) return false;
+    const devaCount = (text.match(/[\u0900-\u097F]/g) || []).length;
+    const alphaCount = (text.match(/[a-zA-Z\u0900-\u097F]/g) || []).length;
+    return alphaCount > 0 && devaCount / alphaCount > 0.25;
+}
+
+// Devanagari number words 0–99
+const DEVA_0_TO_99 = [
+    'शून्य','एक','दो','तीन','चार','पाँच','छह','सात','आठ','नौ',
+    'दस','ग्यारह','बारह','तेरह','चौदह','पंद्रह','सोलह','सत्रह','अठारह','उन्नीस',
+    'बीस','इक्कीस','बाईस','तेईस','चौबीस','पच्चीस','छब्बीस','सत्ताईस','अट्ठाईस','उनतीस',
+    'तीस','इकतीस','बत्तीस','तैंतीस','चौंतीस','पैंतीस','छत्तीस','सैंतीस','अड़तीस','उनतालीस',
+    'चालीस','इकतालीस','बयालीस','तैंतालीस','चवालीस','पैंतालीस','छियालीस','सैंतालीस','अड़तालीस','उनचास',
+    'पचास','इक्यावन','बावन','तिरेपन','चौवन','पचपन','छप्पन','सत्तावन','अट्ठावन','उनसठ',
+    'साठ','इकसठ','बासठ','तिरसठ','चौंसठ','पैंसठ','छियासठ','सड़सठ','अड़सठ','उनहत्तर',
+    'सत्तर','इकहत्तर','बहत्तर','तिहत्तर','चौहत्तर','पचहत्तर','छिहत्तर','सतहत्तर','अठहत्तर','उनासी',
+    'अस्सी','इक्यासी','बयासी','तिरासी','चौरासी','पचासी','छियासी','सतासी','अठासी','नवासी',
+    'नब्बे','इक्यानवे','बानवे','तिरानवे','चौरानवे','पचानवे','छियानवे','सतानवे','अठानवे','निन्यानवे'
+];
+
+const devaBelow1000 = (n: number): string => {
+    if (n < 0) return '';
+    if (n < 100) return DEVA_0_TO_99[n] || String(n);
+    const hundreds = Math.floor(n / 100);
+    const rest = n % 100;
+    const head = `${DEVA_0_TO_99[hundreds]} सौ`;
+    return rest === 0 ? head : `${head} ${DEVA_0_TO_99[rest]}`;
+};
+
+export const numberToDevanagariWords = (input: number | string): string => {
+    let s = String(input).replace(/,/g, '').trim();
+    if (!s) return '';
+    const negative = s.startsWith('-');
+    if (negative) s = s.slice(1);
+    let decimalPart = '';
+    if (s.includes('.')) {
+        const [intRaw, decRaw] = s.split('.');
+        s = intRaw || '0';
+        if (decRaw) {
+            decimalPart = ' दशमलव ' + decRaw.split('').map(d => DEVA_0_TO_99[parseInt(d, 10)] || d).join(' ');
+        }
+    }
+    s = s.replace(/[^0-9]/g, '');
+    if (!s) return '';
+    let n = parseInt(s, 10);
+    if (!Number.isFinite(n)) return s;
+    if (n > 9999999999) {
+        return (negative ? 'ऋण ' : '') + s.split('').map(d => DEVA_0_TO_99[parseInt(d, 10)] || d).join(' ') + decimalPart;
+    }
+    if (n === 0) return (negative ? 'ऋण ' : '') + 'शून्य' + decimalPart;
+    const parts: string[] = [];
+    const crore = Math.floor(n / 10000000); n %= 10000000;
+    const lakh  = Math.floor(n / 100000);   n %= 100000;
+    const hazaar = Math.floor(n / 1000);    n %= 1000;
+    const rem = n;
+    if (crore  > 0) parts.push(`${devaBelow1000(crore)} करोड़`);
+    if (lakh   > 0) parts.push(`${devaBelow1000(lakh)} लाख`);
+    if (hazaar > 0) parts.push(`${devaBelow1000(hazaar)} हजार`);
+    if (rem    > 0) parts.push(devaBelow1000(rem));
+    return (negative ? 'ऋण ' : '') + parts.join(' ') + decimalPart;
+};
+
+const yearStyleDevanagari = (cleaned: string): string | null => {
+    if (!/^\d{4}$/.test(cleaned)) return null;
+    const num = parseInt(cleaned, 10);
+    if (num < 1100 || num > 9999) return null;
+    const head = parseInt(cleaned.slice(0, 2), 10);
+    const tail = parseInt(cleaned.slice(2, 4), 10);
+    const headStr = DEVA_0_TO_99[head];
+    if (!headStr) return null;
+    if (tail === 0) return `${headStr} सौ`;
+    return `${headStr} सौ ${DEVA_0_TO_99[tail]}`;
+};
+
+export const replaceNumbersWithDevanagariWords = (text: string): string => {
+    if (!text) return text;
+    return text.replace(/-?\d+(?:,\d+)*(?:\.\d+)?/g, (match) => {
+        const cleaned = match.replace(/,/g, '');
+        const yearForm = yearStyleDevanagari(cleaned);
+        if (yearForm) return yearForm;
+        const words = numberToDevanagariWords(cleaned);
+        return words || match;
+    });
+};
+
 const HINDI_ONES_TEENS_TO_99 = [
     'shunya', 'ek', 'do', 'teen', 'chaar', 'paanch', 'chhah', 'saat', 'aath', 'nau',
     'das', 'gyaarah', 'baarah', 'terah', 'chaudah', 'pandrah', 'solah', 'satrah', 'athaarah', 'unnees',
@@ -281,13 +396,24 @@ export const speakText = async (
         return null;
     }
 
-    // For Hindi reading, convert digit sequences to Hindi words so the engine
-    // pronounces "2019" as "do hazaar unnees" instead of spelling it out
-    // ("two zero one nine") which sounds robotic. Applied before chunking so
-    // expanded text still respects the chunk boundaries.
+    // For Hindi reading, convert digit sequences to spoken Hindi words so the
+    // engine pronounces "2019" as "unnees sau unnees" (or "बीस सौ उन्नीस") instead
+    // of spelling it out letter-by-letter which sounds robotic.
+    //
+    // CRITICAL: If the text is primarily Devanagari script, we must use Devanagari
+    // number words (एक, दो, सौ, हजार…) — NOT Roman phonetics (ek, do, sau…).
+    // Mixing Roman words into Devanagari text causes the TTS engine to switch
+    // between Hindi and English pronunciation modes mid-sentence, producing the
+    // choppy "harsau / yebsab" artefact users reported.
     if ((lang || '').toLowerCase().startsWith('hi')) {
         try {
-            cleanText = replaceNumbersWithHindiWords(cleanText);
+            if (isDevanagariText(cleanText)) {
+                // Pure/mostly Devanagari text → use Devanagari number words
+                cleanText = replaceNumbersWithDevanagariWords(cleanText);
+            } else {
+                // Hinglish / Roman script → use phonetic Roman words
+                cleanText = replaceNumbersWithHindiWords(cleanText);
+            }
         } catch (e) {
             console.warn('Hindi number normalization failed:', e);
         }

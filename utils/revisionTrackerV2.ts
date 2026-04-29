@@ -1,12 +1,13 @@
-// Revision Hub V2 — page-aware MCQ attempt tracker.
-// Stores per-topic, per-chapter, per-page wrong-answer history so the new
-// Revision Hub can detect weak areas and auto-search the app's notes for
-// related study points to revise.
+// Revision Hub V2 — page-aware MCQ attempt tracker with spaced-repetition scheduling.
+// Stores per-topic, per-chapter, per-page wrong-answer history + revision schedule so
+// the Revision Hub can show students what to review today (notes) and what to practice
+// tomorrow (MCQ), cycling until the topic is mastered.
 //
 // Storage: localStorage key `nst_revision_tracker_v2` → JSON map keyed by
 // `${subjectId}::${chapterId}::${pageKey}::${topic}`.
 
 import type { MCQItem } from '../types';
+import type { RevisionConfig } from '../types';
 
 export interface TopicBucket {
   subjectId: string;
@@ -21,6 +22,14 @@ export interface TopicBucket {
   lastAttemptAt: number;
   // Up to 10 most-recent wrong question stems — used as extra search keywords.
   wrongQuestions: { question: string; correctOption?: string; explanation?: string; at: number }[];
+  // Spaced-repetition schedule ------------------------------------------------
+  // 'NOTES'  → student should read notes for this topic today
+  // 'MCQ'    → student should practice MCQ for this topic today
+  stage?: 'NOTES' | 'MCQ';
+  // Unix ms timestamp when this item becomes due for the next review
+  nextDueAt?: number;
+  // How many full cycles (notes → MCQ) the student has completed for this topic
+  cycleCount?: number;
 }
 
 export type TrackerMap = Record<string, TopicBucket>;
@@ -42,6 +51,21 @@ function safeWrite(map: TrackerMap) {
 
 export function bucketKey(subjectId: string, chapterId: string, pageKey: string, topic: string) {
   return `${subjectId}::${chapterId}::${pageKey}::${topic}`;
+}
+
+/** Returns the start-of-tomorrow (midnight) as a Unix ms timestamp. */
+function tomorrowMidnight(): number {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Returns midnight today. */
+function todayMidnight(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 export interface RecordAttemptArgs {
@@ -73,6 +97,9 @@ export function recordAttempt(args: RecordAttemptArgs) {
       total: 0, correct: 0,
       lastAttemptAt: now,
       wrongQuestions: [],
+      stage: 'NOTES',
+      nextDueAt: tomorrowMidnight(),
+      cycleCount: 0,
     };
     prev.total += 1;
     const ans = args.userAnswers[idx];
@@ -84,6 +111,18 @@ export function recordAttempt(args: RecordAttemptArgs) {
         { question: q.question, correctOption: q.options?.[q.correctAnswer], explanation: q.explanation, at: now },
         ...prev.wrongQuestions,
       ].slice(0, 10);
+
+      // Reset to NOTES stage if this is a new wrong answer and currently in MCQ or no stage
+      if (!prev.stage || prev.stage === 'MCQ') {
+        prev.stage = 'NOTES';
+        // Only reschedule if not already due today or earlier
+        const currentDue = prev.nextDueAt ?? 0;
+        if (currentDue > now) {
+          prev.nextDueAt = tomorrowMidnight();
+        }
+      } else if (!prev.nextDueAt) {
+        prev.nextDueAt = tomorrowMidnight();
+      }
     }
     prev.lastAttemptAt = now;
     // keep latest labels in case admin renames things later
@@ -112,6 +151,74 @@ export function getWeakBuckets(opts?: { minAttempts?: number; maxAccuracy?: numb
     .map(b => ({ ...b, accuracy: b.correct / Math.max(b.total, 1), wrongCount: b.total - b.correct }))
     .filter(b => b.accuracy <= maxAccuracy)
     .sort((a, b) => a.accuracy - b.accuracy || b.wrongCount - a.wrongCount);
+}
+
+/** Returns items that are due for review today or overdue. */
+export function getDueItems(): WeakBucket[] {
+  const now = Date.now();
+  return getAllBuckets()
+    .filter(b => b.wrongQuestions.length > 0)                   // has at least one wrong question
+    .filter(b => !b.nextDueAt || b.nextDueAt <= now)             // due today or overdue
+    .map(b => ({ ...b, accuracy: b.correct / Math.max(b.total, 1), wrongCount: b.total - b.correct }))
+    .sort((a, b) => (a.nextDueAt || 0) - (b.nextDueAt || 0));  // most overdue first
+}
+
+/** Returns items coming up in the next N days (but not due today). */
+export function getUpcomingItems(days = 7): WeakBucket[] {
+  const now = Date.now();
+  const limit = now + days * 24 * 3600 * 1000;
+  return getAllBuckets()
+    .filter(b => b.wrongQuestions.length > 0)
+    .filter(b => b.nextDueAt && b.nextDueAt > now && b.nextDueAt <= limit)
+    .map(b => ({ ...b, accuracy: b.correct / Math.max(b.total, 1), wrongCount: b.total - b.correct }))
+    .sort((a, b) => (a.nextDueAt || 0) - (b.nextDueAt || 0));
+}
+
+/** Mark a topic's notes as reviewed → schedule the MCQ for tomorrow. */
+export function markNotesReviewed(key: string, config?: RevisionConfig) {
+  const map = safeRead();
+  const b = map[key];
+  if (!b) return;
+  const notesInterval = config?.intervals?.weak?.revision ?? 86400; // default 1 day
+  // MCQ due tomorrow (or use weak.mcq if admin wants a gap after notes)
+  const mcqGap = Math.min(config?.intervals?.weak?.mcq ?? 86400, 86400); // cap at 1 day for notes→MCQ
+  b.stage = 'MCQ';
+  b.nextDueAt = Date.now() + mcqGap * 1000;
+  map[key] = b;
+  safeWrite(map);
+}
+
+/** Mark an MCQ session done. accuracy = 0..1. Schedules next revision based on performance. */
+export function markMcqDone(key: string, accuracy: number, config?: RevisionConfig) {
+  const map = safeRead();
+  const b = map[key];
+  if (!b) return;
+
+  const thresholds = config?.thresholds ?? { strong: 65, average: 50, mastery: 80 };
+  const intervals = config?.intervals ?? {
+    weak:     { revision: 86400,      mcq: 259200  },
+    average:  { revision: 259200,     mcq: 432000  },
+    strong:   { revision: 604800,     mcq: 864000  },
+    mastered: { revision: 2592000,    mcq: 864000  },
+  };
+
+  const pct = accuracy * 100;
+  let nextRevisionSecs: number;
+  if (pct >= thresholds.mastery) {
+    nextRevisionSecs = intervals.mastered.revision;
+  } else if (pct >= thresholds.strong) {
+    nextRevisionSecs = intervals.strong.revision;
+  } else if (pct >= thresholds.average) {
+    nextRevisionSecs = intervals.average.revision;
+  } else {
+    nextRevisionSecs = intervals.weak.revision;
+  }
+
+  b.stage = 'NOTES';
+  b.nextDueAt = Date.now() + nextRevisionSecs * 1000;
+  b.cycleCount = (b.cycleCount || 0) + 1;
+  map[key] = b;
+  safeWrite(map);
 }
 
 export function clearTracker() {

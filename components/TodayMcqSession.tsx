@@ -4,6 +4,7 @@ import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List } 
 import { getChapterData, saveUserToLive, saveTestResult, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
 import { generateAnalysisJson } from '../utils/analysisUtils';
+import { recordAttempt as recordRevisionAttempt } from '../utils/revisionTrackerV2';
 
 interface Props {
     user: User;
@@ -323,6 +324,22 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
         };
 
         setSessionResults(prev => [...prev, result]);
+
+        // Record wrong answers into Revision Hub tracker so they show in Revision Hub
+        if (currentMcqData.length > 0) {
+            const userAnswersArr = currentMcqData.map((_, idx) => userAnswersMap[idx] ?? null);
+            try {
+                recordRevisionAttempt({
+                    subjectId: topic.subjectId || 'REVISION',
+                    subjectName: topic.subjectName || 'Revision',
+                    chapterId: topic.chapterId,
+                    chapterTitle: topic.chapterName,
+                    pageKey: topic.chapterId,
+                    questions: currentMcqData,
+                    userAnswers: userAnswersArr,
+                });
+            } catch (_) { /* silent — tracking is non-critical */ }
+        }
 
         // Save to DB immediately to be safe
         saveTestResult(user.id, result);

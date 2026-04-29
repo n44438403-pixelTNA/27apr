@@ -6,6 +6,23 @@ export interface NotesTopic {
 }
 
 /**
+ * Returns true if the string is essentially just ellipsis / dots / placeholders
+ * and carries no real content — these lines come from AI truncation artifacts
+ * or admin placeholder text and should be hidden from students.
+ */
+function isPlaceholderLine(t: string): boolean {
+  const stripped = t.replace(/[.\u2026\s…\-_*]/g, '').trim();
+  return stripped.length === 0;
+}
+
+/**
+ * Removes trailing ellipsis / dots from a string (e.g. "topic text......" → "topic text").
+ */
+function stripTrailingDots(t: string): string {
+  return t.replace(/[\s.…]+$/, '').trim();
+}
+
+/**
  * Splits notes content into a list of topic lines.
  * Handles markdown bullets (`*`, `-`, `•`), numbered items, headings (`###`),
  * `SET - N` style section labels, and plain HTML / text. Each non-empty line
@@ -85,14 +102,21 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
   for (const t of topics) {
     const cleaned = t.text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\s+/g, ' ').trim();
     if (!cleaned) continue;
+
+    // Skip pure-placeholder lines (only dots, dashes, ellipsis etc.)
+    if (isPlaceholderLine(cleaned)) continue;
+
     if (t.isHeading || !cleaned.includes('।')) {
-      exploded.push({ ...t, text: cleaned });
+      const finalText = t.isHeading ? cleaned : stripTrailingDots(cleaned);
+      if (finalText) exploded.push({ ...t, text: finalText });
       continue;
     }
     // Keep the danda attached to each sentence so TTS pauses naturally.
     const parts = cleaned.split(/(?<=।)\s*/).map(p => p.trim()).filter(Boolean);
     for (const p of parts) {
-      exploded.push({ text: p, isHeading: false });
+      if (!isPlaceholderLine(p)) {
+        exploded.push({ text: stripTrailingDots(p) || p, isHeading: false });
+      }
     }
   }
   return exploded;

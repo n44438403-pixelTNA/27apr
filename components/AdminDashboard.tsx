@@ -3268,6 +3268,146 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       </div>
                   </div>
 
+                  {/* REVISION HUB — INTERVAL CONFIGURATION */}
+                  {(localSettings.revisionConfig?.trackWrongAnswers ?? true) && (
+                      <div className="bg-white p-4 rounded-xl border border-indigo-200 shadow-inner mb-4 animate-in fade-in slide-in-from-top-2">
+                          <h5 className="font-bold text-indigo-800 mb-1 flex items-center gap-2">
+                              <BrainCircuit size={16} className="text-indigo-600" /> Revision Hub — Interval Settings
+                          </h5>
+                          <p className="text-[10px] text-indigo-600 mb-4">
+                              MCQ mein galat hone ke baad student ko kab Notes aur kab MCQ milega — yahan adjust karein (days mein).
+                          </p>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                              {/* Score thresholds */}
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-600 block mb-1">Strong Score % (min)</label>
+                                  <input type="number" min={50} max={100} className="w-full p-2 border rounded text-sm"
+                                      value={localSettings.revisionConfig?.thresholds?.strong ?? 65}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          thresholds: { ...(localSettings.revisionConfig?.thresholds || {strong:65,average:50,mastery:80}), strong: Number(e.target.value) }
+                                      } as any})}
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-600 block mb-1">Average Score % (min)</label>
+                                  <input type="number" min={20} max={90} className="w-full p-2 border rounded text-sm"
+                                      value={localSettings.revisionConfig?.thresholds?.average ?? 50}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          thresholds: { ...(localSettings.revisionConfig?.thresholds || {strong:65,average:50,mastery:80}), average: Number(e.target.value) }
+                                      } as any})}
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-600 block mb-1">Mastery Score % (min)</label>
+                                  <input type="number" min={70} max={100} className="w-full p-2 border rounded text-sm"
+                                      value={localSettings.revisionConfig?.thresholds?.mastery ?? 80}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          thresholds: { ...(localSettings.revisionConfig?.thresholds || {strong:65,average:50,mastery:80}), mastery: Number(e.target.value) }
+                                      } as any})}
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-600 block mb-1">Mastery Required Count</label>
+                                  <input type="number" min={1} max={10} className="w-full p-2 border rounded text-sm"
+                                      value={localSettings.revisionConfig?.mastery?.requiredCount ?? 2}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          mastery: { requiredCount: Number(e.target.value) }
+                                      } as any})}
+                                  />
+                              </div>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              {/* Weak */}
+                              <div className="bg-rose-50 rounded-lg p-3 border border-rose-200">
+                                  <p className="text-[10px] font-black text-rose-700 uppercase mb-2">Weak Topic</p>
+                                  <label className="text-[10px] text-slate-600 block">Notes due after (days)</label>
+                                  <input type="number" min={1} max={30} className="w-full p-1.5 border rounded text-sm mb-2"
+                                      value={Math.round((localSettings.revisionConfig?.intervals?.weak?.revision ?? 86400) / 86400)}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          intervals: { ...(localSettings.revisionConfig?.intervals || {} as any), weak: { ...(localSettings.revisionConfig?.intervals?.weak || {} as any), revision: Number(e.target.value) * 86400 } }
+                                      } as any})}
+                                  />
+                                  <label className="text-[10px] text-slate-600 block">MCQ due after notes (days)</label>
+                                  <input type="number" min={1} max={30} className="w-full p-1.5 border rounded text-sm"
+                                      value={Math.round((localSettings.revisionConfig?.intervals?.weak?.mcq ?? 86400) / 86400)}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          intervals: { ...(localSettings.revisionConfig?.intervals || {} as any), weak: { ...(localSettings.revisionConfig?.intervals?.weak || {} as any), mcq: Number(e.target.value) * 86400 } }
+                                      } as any})}
+                                  />
+                              </div>
+                              {/* Average */}
+                              <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                                  <p className="text-[10px] font-black text-amber-700 uppercase mb-2">Average Topic</p>
+                                  <label className="text-[10px] text-slate-600 block">Next notes after (days)</label>
+                                  <input type="number" min={1} max={60} className="w-full p-1.5 border rounded text-sm mb-2"
+                                      value={Math.round((localSettings.revisionConfig?.intervals?.average?.revision ?? 259200) / 86400)}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          intervals: { ...(localSettings.revisionConfig?.intervals || {} as any), average: { ...(localSettings.revisionConfig?.intervals?.average || {} as any), revision: Number(e.target.value) * 86400 } }
+                                      } as any})}
+                                  />
+                                  <label className="text-[10px] text-slate-600 block">Next MCQ after (days)</label>
+                                  <input type="number" min={1} max={60} className="w-full p-1.5 border rounded text-sm"
+                                      value={Math.round((localSettings.revisionConfig?.intervals?.average?.mcq ?? 432000) / 86400)}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          intervals: { ...(localSettings.revisionConfig?.intervals || {} as any), average: { ...(localSettings.revisionConfig?.intervals?.average || {} as any), mcq: Number(e.target.value) * 86400 } }
+                                      } as any})}
+                                  />
+                              </div>
+                              {/* Strong */}
+                              <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+                                  <p className="text-[10px] font-black text-emerald-700 uppercase mb-2">Strong Topic</p>
+                                  <label className="text-[10px] text-slate-600 block">Next notes after (days)</label>
+                                  <input type="number" min={1} max={90} className="w-full p-1.5 border rounded text-sm mb-2"
+                                      value={Math.round((localSettings.revisionConfig?.intervals?.strong?.revision ?? 604800) / 86400)}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          intervals: { ...(localSettings.revisionConfig?.intervals || {} as any), strong: { ...(localSettings.revisionConfig?.intervals?.strong || {} as any), revision: Number(e.target.value) * 86400 } }
+                                      } as any})}
+                                  />
+                                  <label className="text-[10px] text-slate-600 block">Next MCQ after (days)</label>
+                                  <input type="number" min={1} max={90} className="w-full p-1.5 border rounded text-sm"
+                                      value={Math.round((localSettings.revisionConfig?.intervals?.strong?.mcq ?? 864000) / 86400)}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          intervals: { ...(localSettings.revisionConfig?.intervals || {} as any), strong: { ...(localSettings.revisionConfig?.intervals?.strong || {} as any), mcq: Number(e.target.value) * 86400 } }
+                                      } as any})}
+                                  />
+                              </div>
+                              {/* Mastered */}
+                              <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                                  <p className="text-[10px] font-black text-purple-700 uppercase mb-2">Mastered Topic</p>
+                                  <label className="text-[10px] text-slate-600 block">Next notes after (days)</label>
+                                  <input type="number" min={7} max={365} className="w-full p-1.5 border rounded text-sm mb-2"
+                                      value={Math.round((localSettings.revisionConfig?.intervals?.mastered?.revision ?? 2592000) / 86400)}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          intervals: { ...(localSettings.revisionConfig?.intervals || {} as any), mastered: { ...(localSettings.revisionConfig?.intervals?.mastered || {} as any), revision: Number(e.target.value) * 86400 } }
+                                      } as any})}
+                                  />
+                                  <label className="text-[10px] text-slate-600 block">Next MCQ after (days)</label>
+                                  <input type="number" min={7} max={365} className="w-full p-1.5 border rounded text-sm"
+                                      value={Math.round((localSettings.revisionConfig?.intervals?.mastered?.mcq ?? 864000) / 86400)}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {
+                                          ...localSettings.revisionConfig,
+                                          intervals: { ...(localSettings.revisionConfig?.intervals || {} as any), mastered: { ...(localSettings.revisionConfig?.intervals?.mastered || {} as any), mcq: Number(e.target.value) * 86400 } }
+                                      } as any})}
+                                  />
+                              </div>
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-3">
+                              ℹ️ Weak = score &lt; Average%; Average = score &lt; Strong%; Strong = score &lt; Mastery%; Mastered = score ≥ Mastery%
+                          </p>
+                      </div>
+                  )}
+
                   {/* EVENT DETAILED SETTINGS */}
                   {localSettings.specialDiscountEvent?.enabled && (
                       <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-inner mb-4 animate-in fade-in slide-in-from-top-2">
@@ -7028,10 +7168,26 @@ Statement 2"
                                   </div>
                               </div>
 
+                              <div className="flex items-center justify-between bg-amber-50 p-4 rounded-xl border border-amber-100">
+                                  <div>
+                                      <p className="font-bold text-amber-900 flex items-center gap-2">⭐ Important Notes (GK)</p>
+                                      <p className="text-xs text-amber-700">Jab hide hoga tab nav mein Video aa jayega uski jagah pe.</p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-amber-500 uppercase">{localSettings.starredPageHidden ? 'Hidden' : 'Visible'}</span>
+                                      <input
+                                          type="checkbox"
+                                          checked={!localSettings.starredPageHidden}
+                                          onChange={() => toggleSetting('starredPageHidden')}
+                                          className="w-5 h-5 accent-amber-600"
+                                      />
+                                  </div>
+                              </div>
+
                               <div className="flex items-center justify-between bg-rose-50 p-4 rounded-xl border border-rose-100">
                                   <div>
                                       <p className="font-bold text-rose-900 flex items-center gap-2">📺 Universal Video in Top Bar</p>
-                                      <p className="text-xs text-rose-700">Move Universal Video from bottom Video tab into the top header.</p>
+                                      <p className="text-xs text-rose-700">Move Universal Video from bottom Video tab into the top header. Tab mein Profile aa jayega.</p>
                                   </div>
                                   <div className="flex items-center gap-2">
                                       <span className="text-[10px] font-bold text-rose-400 uppercase">{localSettings.universalVideoInTopBar ? 'Top Bar' : 'Bottom Tab'}</span>
