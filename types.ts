@@ -508,6 +508,15 @@ export interface SystemSettings {
   mcqAnalysisCost?: number;
   appShortName?: string; // e.g. "IIC"
   appShortNameSize?: number; // Font size in pixels for loading-screen short name (admin slider, 24-120). Default 30.
+  splashFontId?: string; // Admin-chosen font family for the loading screen short name. See utils/splashFonts.ts
+  // Universal Video — when true, hides the bottom Video tab and shows a Video icon in the top header instead.
+  universalVideoInTopBar?: boolean;
+  // NEW Revision Hub V2 — auto-finds notes for weak topics tracked from MCQ attempts.
+  // When true, REVISION button appears in bottom nav after Homework, Profile moves into the menu drawer.
+  revisionHubV2Enabled?: boolean;
+  // Force Profile to live in the menu drawer regardless of Revision Hub V2 setting.
+  // When true, Profile is always in the drawer; when false, Profile only moves to drawer if Revision Hub V2 is enabled.
+  profileInMenuForced?: boolean;
   officialAppUrl?: string; // NEW: Play Store Link
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page

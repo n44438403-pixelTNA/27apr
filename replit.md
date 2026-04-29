@@ -302,3 +302,44 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
   - New `onSwitchToMcq?: () => void` prop.
   - Notes/MCQ tab strip inserted in sticky header (above existing School/Competition + Concept/Retention/Extended tabs), only when `onSwitchToMcq` provided and not in fullscreen.
 - Reused `FlashcardMcqView` overlay (no new flashcard component needed).
+
+## Recent Changes (Apr 29 — part 2) — Splash font moved to Admin + Important Notes drill-down
+- **Splash font picker MOVED from user-facing splash → Admin > General Settings (admin-only, applies to all users):**
+  - New `utils/splashFonts.ts` — single source of truth for `SPLASH_FONTS` list, `ensureGoogleFontLoaded`, `getSplashFontById`. Used by both `AppLoadingScreen.tsx` and `AdminDashboard.tsx`.
+  - `types.ts`: added `splashFontId?: string` to `SystemSettings` (line 514).
+  - `components/AppLoadingScreen.tsx`: removed inline `SPLASH_FONTS`, removed user-facing "Aa" picker button + overlay UI, removed `Type/Check/X` icon imports. Now reads `splashFontId` from `localStorage.nst_system_settings` (admin's choice), falls back to legacy `nst_splash_font_id`, then `'default'`. No more `showFontPicker` state — splash auto-progress timer no longer pauses.
+  - `components/AdminDashboard.tsx`: imported splash font helpers; added a new "Loading Screen Font" picker tile in General Settings right after the "Loading Screen Logo Text Size" slider (~line 6678). Renders all 14 fonts as a 2-col live-preview grid using the admin's current `appShortName`. Hover preloads the Google Font; tap saves to `localSettings.splashFontId` (persists with the existing settings save flow).
+- **Important Notes (saved/starred) page — 3-level page-wise drill-down for the "By Book / Page" view:**
+  - `components/StudentDashboard.tsx`: added `drillBookKey` and `drillPageKey` state (~line 1099) reset whenever `importantNotesView` changes; imported `ChevronLeft` from lucide-react.
+  - Replaced the always-expanded `bybook` render block (~line 10795) with a 3-level flow:
+    1. **Books list** — each book card shows total notes + page count, click to drill in.
+    2. **Pages of selected book** — breadcrumb + grid of page tiles each showing star count, click to drill in.
+    3. **Notes of selected page** — breadcrumb (Books / Book / Page N) + ordered list of important notes for that exact page; tap a note opens the existing `setOpenNotePrompt` confirmation popup which jumps the user to the source.
+  - The flat "List View" (which already shows book name + page number per note) is unchanged — drill-down is additive on the bybook tab only.
+
+## Recent Changes (Apr 29 — part 3) — Pruned dead admin tiles & toggles
+- `components/AdminDashboard.tsx`:
+  - **General Settings** — removed: Welcome Popup toggle + target dropdown, Terms Popup toggle, Student AI Chat toggle, 3D Models in Notes toggle, MCQ Maker Card (Home) toggle, MCQ Maker App URL field, Maintenance Mode toggle. Kept: Competition Mode + Continue Reading Filter Chips toggles (now in a clean 2-col grid right after the Force Update button).
+  - Removed the entire `activeTab === 'DOCUMENTATION'` render block (was unreachable — no tile pointed to it).
+  - Removed the entire `activeTab === 'REVISION_LOGIC'` render block (~155 lines — also unreachable; thresholds/intervals/mastery configs deleted from the admin UI).
+- `utils/featureRegistry.ts`: removed the `ADMIN_POPUPS` entry (Popup Config tile) — it pointed to a non-existent `CONFIG_POPUPS` route, so tapping it was a dead-end.
+- Deleted orphan files: `components/admin/DocumentationTab.tsx` and `utils/appDocumentation.ts` (only consumer was the removed DOCUMENTATION tab).
+- Verified: AI Center, Standalone AI Feature, Chat System Mode, Watermark Opacity, Loading Screen Intro Video URL — already absent from the codebase (no edits needed).
+- Untouched (intentional): the **Revision Logic Toggle** inside Store Manager → Advanced Store Events (different feature — controls store events, not the deleted REVISION_LOGIC tab); the **Chat Room Manager** under `CONFIG_CHAT` (this is room CRUD, not "Chat System Mode").
+
+## Recent Changes (Apr 29 — part 4) — Revision Hub V2, Universal Video top-bar toggle, 200+ splash fonts
+- **Splash font picker expanded to 200+ Google Fonts (admin-only):**
+  - `utils/splashFonts.ts`: rewrote `SPLASH_FONTS` to 205 entries covering display, serif, sans, handwriting, monospace, script, decorative families. `ensureGoogleFontLoaded()` lazy-injects each `<link>` only once on hover/save. Picker still lives on the Admin Loading Screen settings tile (no student exposure).
+- **Universal Video — top-bar admin toggle:**
+  - `types.ts`: added `universalVideoInTopBar?: boolean` to `SystemSettings`.
+  - `components/AdminDashboard.tsx`: new General Settings toggle "Universal Video in Top Bar" (right before the Competition Mode block).
+  - `components/StudentDashboard.tsx`: when toggle is ON, a `Video` icon button appears in the top header that opens the existing Universal Video flow; the bottom-nav `VIDEO` tab is hidden so it isn't duplicated.
+- **Revision Hub V2 — page-aware MCQ tracking → auto note search (fresh code, no admin notes):**
+  - `utils/revisionTrackerV2.ts` (new): localStorage-backed tracker keyed by `${subjectId}::${chapterId}::${pageKey}::${topic}` where `pageKey = pg-${chapter.pageNo}` if present else `chapterId`. Exposes `recordAttempt`, `getWeakBuckets` (sorted by wrong-rate × volume), `keywordsForBucket` (extracts salient keywords from topic + chapter title), and `clearTracker`.
+  - `components/McqView.tsx`: imported `recordRevisionAttempt`; on submit, every wrong answer is logged with subjectId, chapterId, pageNo, and the question's topic/chapterTitle so weak-area buckets accumulate.
+  - `components/RevisionHubV2.tsx` (new): lists weak buckets, then for the active bucket auto-searches recent chapters (`getRecentChapters`) and the live catalog (`fetchChapters`) for matching titles/descriptions and surfaces snippets the student can tap to jump straight into that chapter via `handleChapterSelect`. No admin-curated notes are involved.
+  - `components/StudentDashboard.tsx`: added `LogicalTab 'REVISION_V2'` + native-active-tabs entry; render branch wires `onOpenChapter → handleChapterSelect` (lightweight stub; chapter view loads its own content); REVISION tab inserted in bottom nav right after HOMEWORK, gated by `settings.revisionHubV2Enabled !== false`.
+- **Profile-in-menu admin toggle:**
+  - `types.ts`: added `revisionHubV2Enabled?: boolean` and `profileInMenuForced?: boolean`.
+  - `components/AdminDashboard.tsx`: two new General Settings toggles — "Revision Hub V2" (master switch for the new tab) and "Force Profile in Menu Drawer" (moves Profile out of the bottom nav even when V2 is off).
+  - `components/StudentDashboard.tsx`: PROFILE bottom tab is suppressed when V2 is enabled OR `profileInMenuForced` is true; in either case a Profile entry is added to the sidebar drawer under the "Account" category so the user can still reach it.

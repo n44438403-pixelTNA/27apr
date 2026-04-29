@@ -39,46 +39,16 @@ import { BrainCircuit, Globe, LogOut, LayoutDashboard, BookOpen, Headphones, Hel
 import { SUPPORT_EMAIL, APP_VERSION } from './constants';
 import { StudentTab, PendingReward, MCQResult, SubscriptionHistoryEntry } from './types';
 
-const TermsPopup: React.FC<{ onClose: () => void, text?: string }> = ({ onClose, text }) => (
-    <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4 animate-in fade-in duration-300">
-        <div className="bg-white w-full md:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="bg-white p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 z-10">
-                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
-                    <FileText className="text-[var(--primary)]" /> Terms & Conditions
-                </h3>
-            </div>
-            <div className="p-6 overflow-y-auto space-y-4 text-sm text-slate-600 leading-relaxed custom-scrollbar whitespace-pre-wrap">
-                <p className="text-slate-900 font-medium">Please read carefully before using NST AI Assistant.</p>
-                <p>{text || "By continuing, you agree to abide by these rules and the standard terms of service."}</p>
-            </div>
-            <div className="p-4 border-t border-slate-100 bg-white sticky bottom-0 z-10">
-                <button onClick={onClose} className="w-full bg-[var(--primary)] hover:opacity-90 text-white font-bold py-3.5 rounded-xl shadow-lg transition-all active:scale-95">I Agree & Continue</button>
-            </div>
-        </div>
-    </div>
-);
-
 const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-  // Try to read settings from local storage directly for intro video
-  const initialSettings = (() => {
-    try {
-      const raw = localStorage.getItem('nst_system_settings');
-      return raw ? JSON.parse(raw) : null;
-    } catch(e) { return null; }
-  })();
-
-  const hasSeenVideo = sessionStorage.getItem('nst_has_seen_intro_video') === 'true';
-  // Use state.settings first to be dynamic if local storage is outdated/empty.
-  const [showIntroVideo, setShowIntroVideo] = useState(!hasSeenVideo);
   const [isAppLoading, setIsAppLoading] = useState(() => sessionStorage.getItem('nst_has_loaded') !== 'true');
 
   useEffect(() => {
-    if (!isAppLoading && !showIntroVideo) {
+    if (!isAppLoading) {
       sessionStorage.setItem('nst_has_loaded', 'true');
     }
-  }, [isAppLoading, showIntroVideo]);
+  }, [isAppLoading]);
 
   // TESTING OVERRIDE: Render component directly bypassing auth
   useEffect(() => {
@@ -290,15 +260,12 @@ const App: React.FC = () => {
     loading: false,
     error: null,
     language: 'English',
-    showWelcome: false,
     globalMessage: null,
     settings: {
         appName: 'IIC',
         appShortName: 'IIC',
         aiName: 'IIC AI',
         themeColor: '#3b82f6',
-        maintenanceMode: false,
-        maintenanceMessage: 'We are upgrading our servers. Please check back later.',
         customCSS: '',
         apiKeys: [],
         welcomeTitle: 'Unlock Smart Learning', 
@@ -373,7 +340,6 @@ const App: React.FC = () => {
 
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [tempSelectedChapter, setTempSelectedChapter] = useState<Chapter | null>(null);
-  const [showTerms, setShowTerms] = useState(false);
   const [generationDataReady, setGenerationDataReady] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false); // NEW
   const [loadingMessage, setLoadingMessage] = useState<string>(''); // NEW
@@ -438,7 +404,6 @@ const App: React.FC = () => {
   const [popupQueue, setPopupQueue] = useState<('TRACKER' | 'CHALLENGE' | 'WELCOME')[]>([]);
   const [showUpdatePopup, setShowUpdatePopup] = useState(false); // NEW
   const [loadingContentType, setLoadingContentType] = useState<ContentType | undefined>(undefined); // NEW
-  const [mCode, setMCode] = useState(''); // MAINTENANCE MODE
 
   // --- VERSION CONTROL INIT ---
   useEffect(() => {
@@ -963,13 +928,9 @@ const App: React.FC = () => {
           } catch(e) {}
       }
       
-      const hasAcceptedTerms = localStorage.getItem('nst_terms_accepted');
-      if (!hasAcceptedTerms && loadedSettings.showTermsPopup !== false) setShowTerms(true);
-
       // POPUP QUEUE INITIALIZATION
       const queue: ('TRACKER' | 'CHALLENGE' | 'WELCOME' | 'THREE_TIER')[] = [];
       const loggedInUserStr = localStorage.getItem('nst_current_user');
-      const hasSeenWelcome = localStorage.getItem('nst_has_seen_welcome');
 
       setPopupQueue(queue);
 
@@ -1023,8 +984,7 @@ const App: React.FC = () => {
           selectedBoard: user.board || null, 
           selectedClass: safeClass, 
           selectedStream: user.stream || null, 
-          language: user.board === 'BSEB' ? 'Hindi' : 'English', 
-          showWelcome: !hasSeenWelcome && !!hasAcceptedTerms
+          language: user.board === 'BSEB' ? 'Hindi' : 'English'
         }));
       } catch(e) {
         console.error("Error parsing user from localStorage:", e);
@@ -1164,18 +1124,6 @@ const App: React.FC = () => {
       updateSettings(newSettings);
   };
 
-  const handleAcceptTerms = () => {
-      localStorage.setItem('nst_terms_accepted', 'true');
-      setShowTerms(false);
-      const hasSeenWelcome = localStorage.getItem('nst_has_seen_welcome');
-      if (!hasSeenWelcome) setState(prev => ({ ...prev, showWelcome: true }));
-  };
-
-  const handleStartApp = () => {
-    localStorage.setItem('nst_has_seen_welcome', 'true');
-    setState(prev => ({ ...prev, showWelcome: false }));
-  };
-
   useEffect(() => {
     if (state.user && state.view === 'STUDENT_DASHBOARD') {
         const queue: PopupType[] = [];
@@ -1205,7 +1153,6 @@ const App: React.FC = () => {
           ...prev,
           user,
           view: 'ONBOARDING',
-          showWelcome: false
         }));
         return;
     }
@@ -1218,7 +1165,6 @@ const App: React.FC = () => {
       selectedClass: user.classLevel || null,
       selectedStream: user.stream || null,
       language: user.board === 'BSEB' ? 'Hindi' : 'English',
-      showWelcome: false
     }));
   };
 
@@ -2228,8 +2174,6 @@ const App: React.FC = () => {
 
       if (type === 'CHALLENGE') {
           localStorage.setItem('nst_last_daily_challenge_date', new Date().toDateString());
-      } else if (type === 'WELCOME') {
-          handleStartApp();
       }
   };
 
@@ -2354,99 +2298,8 @@ const App: React.FC = () => {
   // cached Firebase data and show only a thin top banner so the user knows.
   // The banner is rendered alongside the rest of the app (see top-of-tree below).
 
-  // --- MAINTENANCE SCREEN ---
-  const isMaintenanceBypassed = sessionStorage.getItem('nst_maintenance_bypassed') === 'true';
-
-  useEffect(() => {
-      if (showIntroVideo && (state.settings?.loadingScreenVideoUrl || initialSettings?.loadingScreenVideoUrl)) {
-          const timer = setTimeout(() => {
-              sessionStorage.setItem('nst_has_seen_intro_video', 'true');
-              setShowIntroVideo(false);
-          }, 15000);
-          return () => clearTimeout(timer);
-      }
-  }, [showIntroVideo, state.settings?.loadingScreenVideoUrl, initialSettings?.loadingScreenVideoUrl]);
-
-  if (showIntroVideo && (state.settings?.loadingScreenVideoUrl || initialSettings?.loadingScreenVideoUrl)) {
-      const vidUrl = state.settings?.loadingScreenVideoUrl || initialSettings?.loadingScreenVideoUrl;
-      const isDrive = vidUrl.includes('drive.google.com');
-      // Attempt to auto-play by appending parameter
-      let finalUrl = isDrive ? vidUrl.replace(/\/view.*$/, '/preview') : vidUrl;
-      finalUrl += finalUrl.includes('?') ? '&autoplay=1' : '?autoplay=1';
-
-      return (
-          <div className="fixed inset-0 z-[10000] bg-white flex flex-col items-center justify-center">
-              <iframe
-                src={finalUrl}
-                className="w-full h-full max-w-4xl max-h-[80vh] border-0"
-                allow="autoplay; fullscreen"
-                allowFullScreen
-              ></iframe>
-              <button
-                onClick={() => {
-                  sessionStorage.setItem('nst_has_seen_intro_video', 'true');
-                  setShowIntroVideo(false);
-                }}
-                className="absolute top-4 right-4 bg-black/5 hover:bg-black/10 text-black/50 backdrop-blur-sm px-4 py-2 rounded-full font-bold text-xs transition-all"
-              >
-                Skip
-              </button>
-          </div>
-      );
-  }
-
   if (isAppLoading) {
       return <AppLoadingScreen isPremium={state.user?.isPremium || false} onComplete={() => setIsAppLoading(false)} />;
-  }
-
-  if (state.settings.maintenanceMode && !isMaintenanceBypassed) {
-      return (
-          <div className="min-h-[100dvh] bg-slate-900 flex flex-col items-center justify-center text-white p-8 text-center animate-in fade-in">
-              <div className="bg-red-500/10 p-6 rounded-full mb-6 animate-pulse">
-                  <Lock size={64} className="text-red-500" />
-              </div>
-              <h1 className="text-3xl font-black mb-4">Under Maintenance</h1>
-              <p className="text-slate-400 mb-8 w-full leading-relaxed">
-                  {state.settings.maintenanceMessage || "We are currently upgrading our servers. Please check back later."}
-              </p>
-
-              {/* Admin Bypass Code Display */}
-              {(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') && state.settings.maintenanceBypassCode && (
-                  <div className="mb-6 p-3 bg-red-900/30 border border-red-800 rounded-lg">
-                      <p className="text-xs text-red-300 font-bold uppercase mb-1">Admin Access Code</p>
-                      <p className="text-xl font-mono font-black text-red-400 tracking-widest">{state.settings.maintenanceBypassCode}</p>
-                  </div>
-              )}
-
-              {/* Bypass Code Input (Admins Only) */}
-              {(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') && (
-                  <div className="flex gap-2">
-                      <input
-                          type="password"
-                          placeholder="Access Code"
-                          value={mCode}
-                          onChange={e => setMCode(e.target.value)}
-                          className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-xs font-mono text-white focus:border-red-500 outline-none"
-                      />
-                      <button
-                          onClick={() => {
-                              if (state.settings.maintenanceBypassCode && mCode === state.settings.maintenanceBypassCode) {
-                                  // Bypass Logic: Locally disable maintenance mode for this session
-                                  sessionStorage.setItem('nst_maintenance_bypassed', 'true');
-                                  // Force re-render/update
-                                  setState(prev => ({...prev}));
-                              } else {
-                                  alert("Invalid Access Code");
-                              }
-                          }}
-                          className="bg-red-600 text-white px-3 py-2 rounded text-xs font-bold hover:bg-red-700"
-                      >
-                          Unlock
-                      </button>
-                  </div>
-              )}
-          </div>
-      );
   }
 
   return (
@@ -2557,7 +2410,7 @@ const App: React.FC = () => {
                   style={{
                       width: `${state.settings.watermarkSize || 150}px`,
                       height: 'auto',
-                      opacity: state.settings.watermarkOpacity || 0.05,
+                      opacity: 0.05,
                       position: 'absolute',
                       top: state.settings.watermarkPosition?.top || '50%',
                       left: state.settings.watermarkPosition?.left || '50%',
@@ -2608,8 +2461,6 @@ const App: React.FC = () => {
               </button>
           </div>
       )}
-
-      {showTerms && <TermsPopup onClose={handleAcceptTerms} text={state.settings.termsText} />}
 
       {!isFullScreen && state.view !== 'STUDENT_DASHBOARD' && (
       <header className="bg-white sticky top-0 z-30 shadow-sm border-b border-slate-100">

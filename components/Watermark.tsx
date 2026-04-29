@@ -10,7 +10,7 @@ export const Watermark: React.FC<Props> = ({ user, settings }) => {
   if (!settings) return null;
   if (settings.isWatermarkEnabled === false) return null; // Global Toggle
 
-  const opacity = settings.watermarkOpacity ?? 0.05;
+  const opacity = 0.05;
   const size = settings.watermarkSize ?? 150;
   const angle = settings.watermarkAngle ?? -10;
   const logo = settings.appLogo || 'https://via.placeholder.com/150?text=App+Logo';

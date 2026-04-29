@@ -23,7 +23,7 @@ import { AdminTrendingNotes } from './AdminTrendingNotes';
 import { SyllabusManager } from './SyllabusManager';
 import { FeatureGroupList } from './admin/FeatureGroupList';
 import { ALL_FEATURES } from '../utils/featureRegistry';
-import { DocumentationTab } from './admin/DocumentationTab';
+import { SPLASH_FONTS, getSplashFontById, ensureGoogleFontLoaded } from '../utils/splashFonts';
 import { NstaFeatureManager } from './admin/NstaFeatureManager';
 // @ts-ignore
 import JSZip from 'jszip';
@@ -123,12 +123,10 @@ type AdminTab =
   | 'CONFIG_GATING'
   | 'WHATSAPP_CONNECT'
   | 'POWER_MANAGER'
-  | 'REVISION_LOGIC' // NEW
   | 'PLAN_MATRIX'
   | 'DEPLOY'
   | 'EVENT_MANAGER' // NEW
   | 'NSTA_CONTROL' // NEW - Replaces APP_SOUL
-  | 'DOCUMENTATION'
   | 'HOMEWORK_MANAGER' // NEW
   | 'DAILY_GK_MANAGER' // NEW
   | 'TEACHERS'; // NEW
@@ -547,8 +545,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [localSettings, setLocalSettings] = useState<SystemSettings>(settings || {
       appName: 'IIC',
       themeColor: '#3b82f6',
-      maintenanceMode: false,
-      maintenanceMessage: 'We are upgrading our servers.',
       customCSS: '',
       apiKeys: [],
       adminCode: '', adminEmail: '', adminPhones: [{id: '1', number: '8227070298', name: 'Admin', isDefault: true}], footerText: '',
@@ -3733,122 +3729,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           </div>
       )}
 
-      {activeTab === 'CONFIG_POPUPS' && (
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right">
-              <div className="flex items-center gap-4 mb-6 border-b pb-4">
-                  <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
-                  <h3 className="text-xl font-black text-slate-800">Popup Management</h3>
-                  <div className="ml-auto">
-                      <button
-                          onClick={() => handleSaveSettings()}
-                          disabled={isSettingsSaving}
-                          className={`bg-orange-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-orange-700 flex items-center gap-2 ${isSettingsSaving ? 'opacity-70 cursor-wait' : ''}`}
-                      >
-                          {isSettingsSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                          {isSettingsSaving ? 'Saving...' : 'Save Config'}
-                      </button>
-                  </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* EXPIRY WARNING CONFIG */}
-                  <div className="bg-red-50 p-6 rounded-xl border border-red-200">
-                      <div className="flex justify-between items-center mb-4">
-                          <h4 className="font-bold text-red-900 flex items-center gap-2">
-                              <AlertTriangle size={20} /> Expiry Warning
-                          </h4>
-                          <input
-                              type="checkbox"
-                              checked={localSettings.popupConfigs?.isExpiryWarningEnabled !== false}
-                              onChange={(e) => setLocalSettings({
-                                  ...localSettings,
-                                  popupConfigs: {
-                                      ...localSettings.popupConfigs,
-                                      isExpiryWarningEnabled: e.target.checked
-                                  } as any
-                              })}
-                              className="w-6 h-6 accent-red-600"
-                          />
-                      </div>
-                      <p className="text-xs text-red-700 mb-4">Shows a warning popup when subscription is about to expire.</p>
-
-                      <div className="space-y-4">
-                          <div>
-                              <label className="text-xs font-bold text-slate-600 uppercase">Start Showing Before (Hours)</label>
-                              <input
-                                  type="number"
-                                  value={localSettings.popupConfigs?.expiryWarningHours || 48}
-                                  onChange={(e) => setLocalSettings({
-                                      ...localSettings,
-                                      popupConfigs: {
-                                          ...localSettings.popupConfigs,
-                                          expiryWarningHours: Number(e.target.value)
-                                      } as any
-                                  })}
-                                  className="w-full p-2 border rounded-lg font-bold"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-xs font-bold text-slate-600 uppercase">Repeat Interval (Minutes)</label>
-                              <input
-                                  type="number"
-                                  value={localSettings.popupConfigs?.expiryWarningIntervalMinutes || 60}
-                                  onChange={(e) => setLocalSettings({
-                                      ...localSettings,
-                                      popupConfigs: {
-                                          ...localSettings.popupConfigs,
-                                          expiryWarningIntervalMinutes: Number(e.target.value)
-                                      } as any
-                                  })}
-                                  className="w-full p-2 border rounded-lg font-bold"
-                              />
-                          </div>
-                      </div>
-                  </div>
-
-                  {/* UPSELL POPUP CONFIG */}
-                  <div className="bg-purple-50 p-6 rounded-xl border border-purple-200">
-                      <div className="flex justify-between items-center mb-4">
-                          <h4 className="font-bold text-purple-900 flex items-center gap-2">
-                              <Crown size={20} /> Upsell / Upgrade Popup
-                          </h4>
-                          <input
-                              type="checkbox"
-                              checked={localSettings.popupConfigs?.isUpsellEnabled !== false}
-                              onChange={(e) => setLocalSettings({
-                                  ...localSettings,
-                                  popupConfigs: {
-                                      ...localSettings.popupConfigs,
-                                      isUpsellEnabled: e.target.checked
-                                  } as any
-                              })}
-                              className="w-6 h-6 accent-purple-600"
-                          />
-                      </div>
-                      <p className="text-xs text-purple-700 mb-4">Prompts Free/Basic users to upgrade to Ultra for more features.</p>
-
-                      <div className="space-y-4">
-                          <div>
-                              <label className="text-xs font-bold text-slate-600 uppercase">Show Every (Minutes)</label>
-                              <input
-                                  type="number"
-                                  value={localSettings.popupConfigs?.upsellPopupIntervalMinutes || 120}
-                                  onChange={(e) => setLocalSettings({
-                                      ...localSettings,
-                                      popupConfigs: {
-                                          ...localSettings.popupConfigs,
-                                          upsellPopupIntervalMinutes: Number(e.target.value)
-                                      } as any
-                                  })}
-                                  className="w-full p-2 border rounded-lg font-bold"
-                              />
-                          </div>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
-
       {/* --- PREMIUM VIDEO MANAGEMENT TAB (NEW) --- */}
       {activeTab === 'PREMIUM_VIDEO_MANAGER' && (
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right">
@@ -4576,21 +4456,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               </div>
 
               <div className="space-y-6">
-                  {/* APP IDENTITY & AI CHAT */}
+                  {/* APP IDENTITY */}
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                       <div className="flex justify-between items-center mb-3">
                           <h4 className="font-bold text-slate-700">App Identity & Features</h4>
-                          {/* AI CHAT TOGGLE */}
-                          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-indigo-100 shadow-sm">
-                              <Bot size={16} className="text-indigo-600"/>
-                              <span className="text-xs font-bold text-slate-600">Student AI Chat</span>
-                              <div
-                                  onClick={() => toggleSetting('isChatEnabled')}
-                                  className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${localSettings.isChatEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                              >
-                                  <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all shadow-sm ${localSettings.isChatEnabled ? 'left-4.5' : 'left-0.5'}`} style={{left: localSettings.isChatEnabled ? '18px' : '2px'}}></div>
-                              </div>
-                          </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                           <div>
@@ -4600,16 +4469,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   value={localSettings.appName || ''} 
                                   onChange={(e) => setLocalSettings({...localSettings, appName: e.target.value})}
                                   className="w-full p-2 border rounded-lg"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Watermark Opacity ({localSettings.watermarkOpacity || 0.9})</label>
-                              <input
-                                  type="range"
-                                  min="0.1" max="1.0" step="0.1"
-                                  value={localSettings.watermarkOpacity || 0.9}
-                                  onChange={(e) => setLocalSettings({...localSettings, watermarkOpacity: Number(e.target.value)})}
-                                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
                               />
                           </div>
                           <div>
@@ -4639,17 +4498,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   className="w-full p-2 bg-slate-50 border rounded-lg text-sm"
                               />
                               <p className="text-[10px] text-slate-500 mt-1">This video will play in the Custom Page. (Google Drive link)</p>
-                          </div>
-                          <div className="md:col-span-2">
-                              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Loading Screen Intro Video URL</label>
-                              <input
-                                  type="text"
-                                  placeholder="Paste Google Drive video URL here"
-                                  value={localSettings.loadingScreenVideoUrl || ''}
-                                  onChange={(e) => setLocalSettings({...localSettings, loadingScreenVideoUrl: e.target.value})}
-                                  className="w-full p-2 bg-slate-50 border rounded-lg text-sm"
-                              />
-                              <p className="text-[10px] text-slate-500 mt-1">This video will play BEFORE the app loading screen. (Google Drive link)</p>
                           </div>
                       </div>
                   </div>
@@ -6824,6 +6672,54 @@ Statement 2"
                               <p className="text-[10px] font-bold text-indigo-500 mt-2 text-center">Live preview — yahi loading screen pe dikhega</p>
                           </div>
 
+                          {/* NEW: Loading-screen short-name FONT picker */}
+                          <div className="bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                  <label className="text-xs font-bold uppercase text-purple-700">Loading Screen Font</label>
+                                  <span className="text-[10px] font-black text-purple-900 bg-white px-2 py-0.5 rounded-md border border-purple-200">
+                                      {getSplashFontById(localSettings.splashFontId).label}
+                                  </span>
+                              </div>
+                              <p className="text-[10px] font-bold text-purple-500 mb-2">
+                                  Splash screen pe app short name kis font me dikhe — sabhi users ke liye yahi font apply hoga.
+                              </p>
+                              <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                                  {SPLASH_FONTS.map(f => {
+                                      const isActive = (localSettings.splashFontId || 'default') === f.id;
+                                      return (
+                                          <button
+                                              key={f.id}
+                                              type="button"
+                                              onMouseEnter={() => { if (f.gfontParam) ensureGoogleFontLoaded(f.gfontParam); }}
+                                              onClick={() => {
+                                                  if (f.gfontParam) ensureGoogleFontLoaded(f.gfontParam);
+                                                  setLocalSettings({ ...localSettings, splashFontId: f.id });
+                                              }}
+                                              className={`text-left px-3 py-2.5 rounded-xl border-2 transition-all active:scale-[0.98] ${
+                                                  isActive
+                                                      ? 'bg-purple-100 border-purple-500 shadow-md'
+                                                      : 'bg-white border-purple-100 hover:border-purple-300'
+                                              }`}
+                                          >
+                                              <div
+                                                  className="text-lg font-black truncate bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent uppercase"
+                                                  style={{
+                                                      ...(f.family ? { fontFamily: f.family } : {}),
+                                                      ...(f.letterSpacing ? { letterSpacing: f.letterSpacing } : {}),
+                                                  }}
+                                              >
+                                                  {localSettings.appShortName || 'IIC'}
+                                              </div>
+                                              <div className={`text-[9px] font-black uppercase tracking-wider mt-0.5 truncate ${isActive ? 'text-purple-700' : 'text-slate-500'}`}>
+                                                  {f.label}
+                                                  {isActive && ' ✓'}
+                                              </div>
+                                          </button>
+                                      );
+                                  })}
+                              </div>
+                          </div>
+
                       {/* AI Model Control */}
                       <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800 mb-4">
                         <div className="flex items-center gap-2 mb-4 text-blue-700 dark:text-blue-400 font-bold">
@@ -6904,22 +6800,6 @@ Statement 2"
                       </div>
 
                       {/* VERSION CONTROL */}
-                          {/* CHAT MODE SELECTOR */}
-                          <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200">
-                              <label className="text-xs font-bold uppercase text-indigo-800 mb-2 block">Chat System Mode</label>
-                              <div className="grid grid-cols-3 gap-2">
-                                  {['PRIVATE_ONLY', 'UNIVERSAL_ONLY', 'BOTH'].map(mode => (
-                                      <button 
-                                          key={mode} 
-                                          onClick={() => setLocalSettings({...localSettings, chatMode: mode as any})}
-                                          className={`py-2 rounded-lg text-xs font-bold border transition-all ${localSettings.chatMode === mode ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-indigo-100 hover:bg-indigo-50'}`}
-                                      >
-                                          {mode.replace('_', ' ')}
-                                      </button>
-                                  ))}
-                              </div>
-                          </div>
-
                           {/* FOOTER CUSTOMIZATION */}
                           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
                               <label className="text-xs font-bold uppercase text-slate-800 mb-3 block underline decoration-blue-500 decoration-2 underline-offset-4">Footer Customization</label>
@@ -7020,84 +6900,6 @@ Statement 2"
                               </div>
                           </div>
 
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
-                      <div className="flex items-center justify-between mb-4">
-                          <h4 className="font-bold text-slate-800">Standalone AI Feature</h4>
-                          <label className="flex items-center cursor-pointer">
-                              <div className="relative">
-                                  <input type="checkbox" className="sr-only" checked={localSettings.isAiEnabled || false} onChange={() => toggleSetting('isAiEnabled')} />
-                                  <div className={`block w-10 h-6 rounded-full transition-colors ${localSettings.isAiEnabled ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                                  <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${localSettings.isAiEnabled ? 'transform translate-x-4' : ''}`}></div>
-                              </div>
-                              <div className="ml-3 text-sm font-medium text-slate-700">Enable for Students</div>
-                          </label>
-                      </div>
-                      
-                      <div className="space-y-3">
-                          <div>
-                              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Custom Prompt for Notes</label>
-                              <textarea 
-                                  value={localSettings.aiNotesPrompt || ''} 
-                                  onChange={e => setLocalSettings({...localSettings, aiNotesPrompt: e.target.value})} 
-                                  className="w-full p-2 border rounded-lg h-24 text-sm"
-                                  placeholder="Enter custom prompt for the AI Notes generator..."
-                              />
-                          </div>
-                          
-                          <div className="grid grid-cols-3 gap-3">
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-600 uppercase">Free Limit (Daily)</label>
-                                  <input 
-                                      type="number" 
-                                      value={localSettings.aiLimits?.free || 0} 
-                                      onChange={e => setLocalSettings({
-                                          ...localSettings, 
-                                          aiLimits: { ...(localSettings.aiLimits || {free:0, basic:0, ultra:0}), free: Number(e.target.value) }
-                                      })} 
-                                      className="w-full p-2 border rounded-lg" 
-                                  />
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-600 uppercase">Basic Limit (Daily)</label>
-                                  <input 
-                                      type="number" 
-                                      value={localSettings.aiLimits?.basic || 0} 
-                                      onChange={e => setLocalSettings({
-                                          ...localSettings, 
-                                          aiLimits: { ...(localSettings.aiLimits || {free:0, basic:0, ultra:0}), basic: Number(e.target.value) }
-                                      })} 
-                                      className="w-full p-2 border rounded-lg" 
-                                  />
-                              </div>
-
-                          <div>
-                                  <label className="text-[10px] font-bold text-slate-600 uppercase">Ultra Limit (Daily)</label>
-                                  <input 
-                                      type="number" 
-                                      value={localSettings.aiLimits?.ultra || 0} 
-                                      onChange={e => setLocalSettings({
-                                          ...localSettings, 
-                                          aiLimits: { ...(localSettings.aiLimits || {free:0, basic:0, ultra:0}), ultra: Number(e.target.value) }
-                                      })} 
-                                      className="w-full p-2 border rounded-lg" 
-                                  />
-                              </div>
-
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                          <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Maintenance Bypass Code</label>
-                          <input
-                              type="text"
-                              value={localSettings.maintenanceBypassCode || ''}
-                              onChange={e => setLocalSettings({...localSettings, maintenanceBypassCode: e.target.value})}
-                              placeholder="Enter dynamic code..."
-                              className="w-full p-2 border rounded-lg font-bold text-slate-800"
-                          />
-                          <p className="text-[10px] text-slate-500 mt-1">This code allows entry during maintenance mode.</p>
-                      </div>
-                          </div>
-                      </div>
-                  </div>
-                          
                           {/* NEW: Extra Settings */}
                           {/* FOOTER CUSTOMIZATION */}
                           <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 mt-4">
@@ -7208,48 +7010,59 @@ Statement 2"
                               </button>
                           </div>
 
-                          {/* NEW: POPUP CONTROLS */}
-                          <div className="grid grid-cols-2 gap-3 mb-4">
-                              <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
-                                  <div><p className="font-bold text-slate-700 text-sm">Welcome Popup</p><p className="text-[10px] text-slate-500">Show on startup</p></div>
-                                  <input type="checkbox" checked={localSettings.showWelcomePopup !== false} onChange={() => toggleSetting('showWelcomePopup')} className="w-5 h-5 accent-blue-600" />
-                              </div>
-                              <div className="bg-white p-3 rounded-xl border border-slate-200">
-                                  <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Target Audience</label>
-                                  <select 
-                                      value={localSettings.welcomePopupTarget || 'ALL'} 
-                                      onChange={e => setLocalSettings({...localSettings, welcomePopupTarget: e.target.value as any})}
-                                      className="w-full p-2 border rounded-lg text-sm font-bold bg-slate-50"
-                                  >
-                                      <option value="ALL">Everyone (Free + Ultra)</option>
-                                      <option value="FREE_ONLY">Free Users Only</option>
-                                      <option value="ULTRA_ONLY">Ultra Users Only</option>
-                                  </select>
-                              </div>
-                              <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
-                                  <div><p className="font-bold text-slate-700 text-sm">Terms Popup</p><p className="text-[10px] text-slate-500">Show terms agreement</p></div>
-                                  <input type="checkbox" checked={localSettings.showTermsPopup !== false} onChange={() => toggleSetting('showTermsPopup')} className="w-5 h-5 accent-blue-600" />
-                              </div>
-                          </div>
-
-                          {/* AI & COMPETITION TOGGLES (NEW) */}
+                          {/* REVISION HUB V2 + UNIVERSAL VIDEO + PROFILE PLACEMENT */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
-                              <div className="flex items-center justify-between bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                              <div className="flex items-center justify-between bg-purple-50 p-4 rounded-xl border border-purple-100">
                                   <div>
-                                      <p className="font-bold text-indigo-900 flex items-center gap-2"><Bot size={16}/> Student AI Chat</p>
-                                      <p className="text-xs text-indigo-700">Enable AI Tutor for students</p>
+                                      <p className="font-bold text-purple-900 flex items-center gap-2"><BrainCircuit size={16}/> Revision Hub (New)</p>
+                                      <p className="text-xs text-purple-700">Show new Revision Hub button in nav (after Homework). Auto-finds notes for weak topics.</p>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                      <span className="text-[10px] font-bold text-indigo-400 uppercase">{localSettings.isAiEnabled !== false ? 'Active' : 'Off'}</span>
+                                      <span className="text-[10px] font-bold text-purple-400 uppercase">{localSettings.revisionHubV2Enabled !== false ? 'Visible' : 'Hidden'}</span>
                                       <input
                                           type="checkbox"
-                                          checked={localSettings.isAiEnabled !== false}
-                                          onChange={() => toggleSetting('isAiEnabled')}
-                                          className="w-5 h-5 accent-indigo-600"
+                                          checked={localSettings.revisionHubV2Enabled !== false}
+                                          onChange={() => toggleSetting('revisionHubV2Enabled')}
+                                          className="w-5 h-5 accent-purple-600"
                                       />
                                   </div>
                               </div>
 
+                              <div className="flex items-center justify-between bg-rose-50 p-4 rounded-xl border border-rose-100">
+                                  <div>
+                                      <p className="font-bold text-rose-900 flex items-center gap-2">📺 Universal Video in Top Bar</p>
+                                      <p className="text-xs text-rose-700">Move Universal Video from bottom Video tab into the top header.</p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-rose-400 uppercase">{localSettings.universalVideoInTopBar ? 'Top Bar' : 'Bottom Tab'}</span>
+                                      <input
+                                          type="checkbox"
+                                          checked={!!localSettings.universalVideoInTopBar}
+                                          onChange={() => toggleSetting('universalVideoInTopBar')}
+                                          className="w-5 h-5 accent-rose-600"
+                                      />
+                                  </div>
+                              </div>
+
+                              <div className="flex items-center justify-between bg-amber-50 p-4 rounded-xl border border-amber-100">
+                                  <div>
+                                      <p className="font-bold text-amber-900 flex items-center gap-2">👤 Force Profile in Menu</p>
+                                      <p className="text-xs text-amber-700">Always keep Profile inside the menu drawer (not in bottom nav). Off = Profile follows Revision Hub setting.</p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-amber-500 uppercase">{localSettings.profileInMenuForced ? 'Forced' : 'Auto'}</span>
+                                      <input
+                                          type="checkbox"
+                                          checked={!!localSettings.profileInMenuForced}
+                                          onChange={() => toggleSetting('profileInMenuForced')}
+                                          className="w-5 h-5 accent-amber-600"
+                                      />
+                                  </div>
+                              </div>
+                          </div>
+
+                          {/* COMPETITION MODE + HOME RESUME FILTER */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
                               <div className="flex items-center justify-between bg-blue-50 p-4 rounded-xl border border-blue-100">
                                   <div>
                                       <p className="font-bold text-blue-900 flex items-center gap-2"><Trophy size={16}/> Competition Mode</p>
@@ -7262,40 +7075,6 @@ Statement 2"
                                           checked={localSettings.isCompetitionModeEnabled !== false}
                                           onChange={() => toggleSetting('isCompetitionModeEnabled')}
                                           className="w-5 h-5 accent-blue-600"
-                                      />
-                                  </div>
-                              </div>
-
-                              {/* 3D MODELS TOGGLE */}
-                              <div className="flex items-center justify-between bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                                  <div>
-                                      <p className="font-bold text-emerald-900 flex items-center gap-2">3D Models in Notes</p>
-                                      <p className="text-xs text-emerald-700">Allow interactive 3D diagrams</p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                      <span className="text-[10px] font-bold text-emerald-500 uppercase">{localSettings.enable3DModels ? 'Active' : 'Off'}</span>
-                                      <input
-                                          type="checkbox"
-                                          checked={localSettings.enable3DModels || false}
-                                          onChange={() => toggleSetting('enable3DModels')}
-                                          className="w-5 h-5 accent-emerald-600"
-                                      />
-                                  </div>
-                              </div>
-
-                              {/* MCQ MAKER CARD TOGGLE */}
-                              <div className="flex items-center justify-between bg-teal-50 p-4 rounded-xl border border-teal-100">
-                                  <div>
-                                      <p className="font-bold text-teal-900 flex items-center gap-2">MCQ Maker Card (Home)</p>
-                                      <p className="text-xs text-teal-700">Show MCQ Maker card on student home page</p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                      <span className="text-[10px] font-bold text-teal-500 uppercase">{localSettings.showMcqMakerCard !== false ? 'Visible' : 'Hidden'}</span>
-                                      <input
-                                          type="checkbox"
-                                          checked={localSettings.showMcqMakerCard !== false}
-                                          onChange={() => toggleSetting('showMcqMakerCard')}
-                                          className="w-5 h-5 accent-teal-600"
                                       />
                                   </div>
                               </div>
@@ -7316,24 +7095,6 @@ Statement 2"
                                       />
                                   </div>
                               </div>
-
-                              {/* MCQ MAKER URL */}
-                              <div className="bg-teal-50 p-4 rounded-xl border border-teal-100">
-                                  <label className="text-[10px] font-bold text-teal-700 uppercase">MCQ Maker App URL</label>
-                                  <input
-                                      type="text"
-                                      value={localSettings.mcqAppUrl || ''}
-                                      onChange={e => setLocalSettings({...localSettings, mcqAppUrl: e.target.value})}
-                                      placeholder="https://mcq-n3tg.vercel.app/"
-                                      className="w-full mt-1 p-2 rounded-lg border border-teal-200 text-sm font-medium"
-                                  />
-                                  <p className="text-[9px] text-teal-600 mt-1">Loaded inside the MCQ Maker tab. Leave blank to use the default link.</p>
-                              </div>
-                          </div>
-
-                          <div className="flex items-center justify-between bg-red-50 p-4 rounded-xl border border-red-100">
-                              <div><p className="font-bold text-red-800">Maintenance Mode</p><p className="text-xs text-red-600">Lock app for users</p></div>
-                              <input type="checkbox" checked={localSettings.maintenanceMode} onChange={() => toggleSetting('maintenanceMode')} className="w-6 h-6 accent-red-600" />
                           </div>
                       </>
                   )}
@@ -12710,173 +12471,8 @@ Statement 2"
           </div>
       )}
 
-      {/* --- DOCUMENTATION TAB --- */}
-      {activeTab === 'DOCUMENTATION' && (
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-              <div className="flex items-center gap-4 mb-6 border-b pb-4">
-                  <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
-                  <h3 className="text-xl font-black text-slate-800">System Documentation</h3>
-              </div>
-              <DocumentationTab />
-          </div>
-      )}
+      {/* --- DOCUMENTATION TAB removed --- */}
 
-            {/* --- REVISION LOGIC CONFIGURATION --- */}
-      {activeTab === 'REVISION_LOGIC' && (
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right mb-8">
-          <div className="flex items-center gap-4 mb-6 border-b pb-4">
-              <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
-              <h3 className="text-xl font-black text-slate-800">Revision Engine Config</h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-          <div>
-              <label className="text-xs font-bold text-slate-600 uppercase">Strong Topic (Min %)</label>
-              <input
-                  type="number"
-                  value={localSettings.revisionConfig?.thresholds.strong ?? 80}
-                  onChange={(e) => setLocalSettings({
-                      ...localSettings,
-                      revisionConfig: {
-                          ...localSettings.revisionConfig!,
-                          thresholds: {
-                              ...localSettings.revisionConfig?.thresholds!,
-                              strong: parseInt(e.target.value) || 0
-                          }
-                      } as any
-                  })}
-                  className="w-full p-2 border rounded-lg font-bold"
-              />
-              <p className="text-[10px] text-slate-500 mt-1">Scores above this are "Strong"</p>
-          </div>
-          <div>
-              <label className="text-xs font-bold text-slate-600 uppercase">Average Topic (Min %)</label>
-              <input
-                  type="number"
-                  value={localSettings.revisionConfig?.thresholds.average ?? 50}
-                  onChange={(e) => setLocalSettings({
-                      ...localSettings,
-                      revisionConfig: {
-                          ...localSettings.revisionConfig!,
-                          thresholds: {
-                              ...localSettings.revisionConfig?.thresholds!,
-                              average: parseInt(e.target.value) || 0
-                          }
-                      } as any
-                  })}
-                  className="w-full p-2 border rounded-lg font-bold"
-              />
-              <p className="text-[10px] text-slate-500 mt-1">Scores between this and Strong are "Average"</p>
-          </div>
-          <div>
-              <label className="text-xs font-bold text-slate-600 uppercase">Mastery Score (Min %)</label>
-              <input
-                  type="number"
-                  value={localSettings.revisionConfig?.thresholds.mastery ?? 80}
-                  onChange={(e) => setLocalSettings({
-                      ...localSettings,
-                      revisionConfig: {
-                          ...localSettings.revisionConfig!,
-                          thresholds: {
-                              ...localSettings.revisionConfig?.thresholds!,
-                              mastery: parseInt(e.target.value) || 0
-                          }
-                      } as any
-                  })}
-                  className="w-full p-2 border rounded-lg font-bold"
-              />
-              <p className="text-[10px] text-slate-500 mt-1">Score needed to count towards Mastery</p>
-          </div>
-          <div>
-              <label className="text-xs font-bold text-slate-600 uppercase">Mastery Count</label>
-              <input
-                  type="number"
-                  value={localSettings.revisionConfig?.mastery.requiredCount ?? 2}
-                  onChange={(e) => setLocalSettings({
-                      ...localSettings,
-                      revisionConfig: {
-                          ...localSettings.revisionConfig!,
-                          mastery: {
-                              requiredCount: parseInt(e.target.value) || 1
-                          }
-                      } as any
-                  })}
-                  className="w-full p-2 border rounded-lg font-bold"
-              />
-              <p className="text-[10px] text-slate-500 mt-1">How many times user must score high to Master a topic</p>
-          </div>
-      </div>
-
-      {/* TIME INTERVALS */}
-      <div className="space-y-6">
-          {['weak', 'average', 'strong', 'mastered'].map(status => {
-              // Helper to get seconds safely
-              const getSeconds = (type: 'revision' | 'mcq') => {
-                  // @ts-ignore
-                  return localSettings.revisionConfig?.intervals?.[status]?.[type] || 0;
-              };
-
-              // Helper to update seconds
-              const updateSeconds = (type: 'revision' | 'mcq', totalSeconds: number) => {
-                      const newIntervals = {
-                          weak: { revision: 86400, mcq: 259200 },
-                          average: { revision: 259200, mcq: 432000 },
-                          strong: { revision: 604800, mcq: 864000 },
-                          mastered: { revision: 2592000, mcq: 864000 },
-                          ...(localSettings.revisionConfig?.intervals || {})
-                      };
-                      // @ts-ignore
-                      newIntervals[status] = {
-                          // @ts-ignore
-                          ...newIntervals[status],
-                          [type]: totalSeconds
-                      };
-
-                      setLocalSettings({
-                          ...localSettings,
-                          revisionConfig: {
-                              thresholds: localSettings.revisionConfig?.thresholds || { strong: 80, average: 50, mastery: 80 },
-                              mastery: localSettings.revisionConfig?.mastery || { requiredCount: 2 },
-                              intervals: newIntervals
-                          }
-                      });
-              };
-
-              const renderTimeInput = (label: string, type: 'revision' | 'mcq', color: string) => {
-                  const totalSeconds = getSeconds(type);
-                  const d = Math.floor(totalSeconds / (24 * 3600));
-                  const h = Math.floor((totalSeconds % (24 * 3600)) / 3600);
-                  const m = Math.floor((totalSeconds % 3600) / 60);
-
-                  return (
-                      <div className={`p-3 rounded-xl border ${color} bg-white flex flex-col gap-2`}>
-                          <span className="text-[10px] font-bold uppercase">{label}</span>
-                          <div className="flex items-center gap-2">
-                              <input type="number" value={d} onChange={e => updateSeconds(type, (parseInt(e.target.value||'0')*86400) + h*3600 + m*60)} className="w-12 p-1 border rounded text-xs font-bold text-center" /> d
-                              <input type="number" value={h} onChange={e => updateSeconds(type, d*86400 + (parseInt(e.target.value||'0')*3600) + m*60)} className="w-12 p-1 border rounded text-xs font-bold text-center" /> h
-                          </div>
-                      </div>
-                  );
-              };
-
-              return (
-                  <div key={status} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                      <h4 className="font-bold text-slate-700 capitalize mb-3">{status} Status Topic</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {renderTimeInput('Next Revision Note Date', 'revision', 'border-blue-200 text-blue-700')}
-                          {renderTimeInput('Next MCQ Practice Date', 'mcq', 'border-purple-200 text-purple-700')}
-                      </div>
-                  </div>
-              );
-          })}
-      </div>
-      <div className="mt-8 flex justify-end">
-          <button onClick={handleSaveSettings} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-blue-700 transition-colors">
-              <Save size={20} /> Save Configuration
-          </button>
-      </div>
-      </div>
-      )}
 
       {activeTab === 'NSTA_CONTROL' && (
           <NstaFeatureManager settings={localSettings} onUpdateSettings={setLocalSettings} onBack={() => setActiveTab('DASHBOARD')} />

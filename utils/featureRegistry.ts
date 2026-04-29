@@ -201,17 +201,6 @@ export const ALL_FEATURES: Feature[] = [
 
     // --- SECONDARY (Layer 2: Tools & Exploration) ---
     {
-        id: 'AI_CENTER',
-        label: 'AI Center',
-        group: 'AI',
-        surfaceLevel: 2,
-        requiredSubscription: 'FREE',
-        adminVisible: true,
-        path: 'AI_HUB',
-        icon: 'Sparkles',
-        description: 'Central hub for all AI tools.'
-    },
-    {
         id: 'TOOLS',
         label: 'Tools',
         group: 'TOOLS',
@@ -836,29 +825,7 @@ export const ALL_FEATURES: Feature[] = [
         icon: 'ShoppingBag',
         color: 'purple'
     },
-    {
-        id: 'ADMIN_POPUPS',
-        label: 'Popup Config',
-        group: 'ADVANCED',
-        surfaceLevel: 3,
-        adminVisible: true,
-        adminTab: 'CONFIG_POPUPS',
-        requiredPermission: 'MANAGE_SETTINGS',
-        icon: 'Bell',
-        color: 'orange'
-    },
-    {
-        id: 'ADMIN_REVISION',
-        label: 'Revision Logic',
-        group: 'ADVANCED',
-        surfaceLevel: 3,
-        adminVisible: true,
-        adminTab: 'REVISION_LOGIC',
-        requiredPermission: 'MANAGE_SETTINGS',
-        icon: 'RotateCcw',
-        color: 'indigo'
-    },
-
+    /* ADMIN_POPUPS / Popup Config — removed (feature deprecated) */
     {
         id: 'ADMIN_CODES',
         label: 'Gift Codes',
@@ -902,17 +869,6 @@ export const ALL_FEATURES: Feature[] = [
         requiresSuperAdmin: true,
         icon: 'Trash2',
         color: 'red'
-    },
-    {
-        id: 'ADMIN_DOCS',
-        label: 'Documentation',
-        group: 'ADVANCED',
-        surfaceLevel: 3,
-        adminVisible: true,
-        adminTab: 'DOCUMENTATION',
-        requiredPermission: 'MANAGE_SETTINGS',
-        icon: 'BookOpen',
-        color: 'teal'
     },
     {
         id: 'ADMIN_NSTA_CONTROL',

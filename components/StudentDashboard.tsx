@@ -116,6 +116,7 @@ import {
   LogOut,
   Clock,
   ChevronRight,
+  ChevronLeft,
   Volume2,
   Square,
   GraduationCap,
@@ -123,8 +124,6 @@ import {
   PlusCircle,
   Search,
   Users,
-  List,
-  BookOpen,
 } from "lucide-react";
 import { speakText, stopSpeech } from "../utils/textToSpeech";
 import { hapticLight, hapticMedium, hapticStrong } from "../utils/haptic";
@@ -157,9 +156,9 @@ import { RevisionHub } from "./RevisionHub"; // NEW
 import { AiHub } from "./AiHub"; // NEW: AI Hub
 import { McqReviewHub } from "./McqReviewHub"; // NEW
 import { UniversalVideoView } from "./UniversalVideoView"; // NEW
+import { RevisionHubV2 } from "./RevisionHubV2"; // NEW: Revision Hub V2 with auto-note search
 import { CustomBloggerPage } from "./CustomBloggerPage";
 import { ReferralPopup } from "./ReferralPopup";
-import { StudentAiAssistant } from "./StudentAiAssistant";
 import { SpeakButton } from "./SpeakButton";
 import { McqSpeakButtons } from "./McqSpeakButtons";
 import { FlashcardMcqView } from "./FlashcardMcqView";
@@ -753,9 +752,6 @@ export const StudentDashboard: React.FC<Props> = ({
   const [activeExternalApp, setActiveExternalApp] = useState<string | null>(
     null,
   );
-  const [mcqAppOpen, setMcqAppOpen] = useState<boolean>(false);
-  const MCQ_APP_URL_DEFAULT = "https://mcq-n3tg.vercel.app/";
-  const MCQ_APP_URL = settings?.mcqAppUrl?.trim() || MCQ_APP_URL_DEFAULT;
   const [contentTypePref, setContentTypePref] = useState<
     "ALL" | "PDF" | "AUDIO" | "VIDEO"
   >(() => {
@@ -1041,7 +1037,7 @@ export const StudentDashboard: React.FC<Props> = ({
   // student returns to exactly where they were when they tap that tab again.
   // Eg: creating an MCQ on Home → tap Profile → tap Home → MCQ creator restores.
   // Reading a homework note → tap GK → tap Homework → same note reopens.
-  type LogicalTab = 'HOME' | 'HOMEWORK' | 'GK' | 'VIDEO' | 'PROFILE' | 'APP_STORE';
+  type LogicalTab = 'HOME' | 'HOMEWORK' | 'REVISION_V2' | 'GK' | 'VIDEO' | 'PROFILE' | 'APP_STORE';
   const [currentLogicalTab, setCurrentLogicalTab] = useState<LogicalTab>('HOME');
   const [tabSnapshots, setTabSnapshots] = useState<Record<string, any>>({});
   // Last-read line index per homework note id (for tap-to-resume after tab switch).
@@ -1096,6 +1092,12 @@ export const StudentDashboard: React.FC<Props> = ({
   // 2-category view toggle for the Important Notes pages: 'list' = original
   // flat list, 'bybook' = grouped by source book / page.
   const [importantNotesView, setImportantNotesView] = useState<'list' | 'bybook'>('list');
+  // Drill-down state for the "By Book / Page" view: select a book to see its
+  // pages, then select a page to see only that page's important notes
+  // arranged in order. Reset whenever view/tab changes.
+  const [drillBookKey, setDrillBookKey] = useState<string | null>(null);
+  const [drillPageKey, setDrillPageKey] = useState<string | null>(null);
+  useEffect(() => { setDrillBookKey(null); setDrillPageKey(null); }, [importantNotesView]);
   // Confirmation popup before opening full notes from an Important-Note tap.
   const [openNotePrompt, setOpenNotePrompt] = useState<{
     topicText: string;
@@ -2375,7 +2377,6 @@ export const StudentDashboard: React.FC<Props> = ({
     activeTab,
     contentViewStep,
     showLessonModal,
-    mcqAppOpen,
     showSidebar,
     showInbox,
     initialParentSubject,
@@ -2388,7 +2389,6 @@ export const StudentDashboard: React.FC<Props> = ({
       activeTab,
       contentViewStep,
       showLessonModal,
-      mcqAppOpen,
       showSidebar,
       showInbox,
       initialParentSubject,
@@ -2420,7 +2420,6 @@ export const StudentDashboard: React.FC<Props> = ({
       if (s.showSidebar) { setShowSidebar(false); reTrap(); return; }
       if (s.showInbox) { setShowInbox(false); reTrap(); return; }
       if (s.showLessonModal) { setShowLessonModal(false); reTrap(); return; }
-      if (s.mcqAppOpen) { setMcqAppOpen(false); reTrap(); return; }
 
       // 2. PDF / VIDEO / AUDIO / MCQ tabs (content player tabs)
       if (
@@ -3928,6 +3927,27 @@ export const StudentDashboard: React.FC<Props> = ({
           },
         ],
       },
+      // Profile — surfaces inside the menu drawer when admin moved it out of
+      // the bottom nav (Revision Hub V2 enabled OR profileInMenuForced).
+      ...((settings?.revisionHubV2Enabled !== false || settings?.profileInMenuForced)
+        ? [{
+            category: "Account",
+            items: [
+              {
+                id: "PROFILE_MENU",
+                label: "Profile",
+                icon: UserIconOutline,
+                color: "indigo",
+                action: () => {
+                  onTabChange("PROFILE");
+                  setCurrentLogicalTab("PROFILE");
+                  setShowSidebar(false);
+                },
+                featureId: "PROFILE_PAGE",
+              },
+            ],
+          }]
+        : []),
       {
         category: "Help & Support",
         items: [
@@ -4878,37 +4898,6 @@ export const StudentDashboard: React.FC<Props> = ({
                 })()}
               </div>
 
-              {/* MCQ MAKER (in-app) - controlled by admin */}
-              {settings?.showMcqMakerCard !== false && (
-                <button
-                  onClick={() => setMcqAppOpen(true)}
-                  className="col-span-2 relative overflow-hidden rounded-3xl p-5 text-left shadow-sm hover:shadow-md active:scale-[0.99] transition-all group bg-gradient-to-br from-emerald-50 via-teal-50 to-emerald-50 border border-slate-200"
-                >
-                  <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-emerald-100/60 blur-2xl"></div>
-                  <div className="absolute -bottom-12 -left-8 w-36 h-36 rounded-full bg-teal-100/60 blur-2xl"></div>
-
-                  <div className="relative z-10 flex items-center gap-4">
-                    <div className="bg-emerald-100 rounded-2xl p-3.5 border border-emerald-200 shrink-0">
-                      <ListChecks size={28} className="text-emerald-700" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-widest border border-emerald-200">
-                          New
-                        </span>
-                        <Sparkles size={12} className="text-emerald-600" />
-                      </div>
-                      <h3 className="font-black text-slate-800 text-lg leading-tight">
-                        MCQ Maker
-                      </h3>
-                      <p className="text-slate-600 text-xs font-medium mt-0.5">
-                        Create your own MCQs
-                      </p>
-                    </div>
-                    <ArrowRight size={20} className="text-emerald-700 shrink-0 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </button>
-              )}
             </div>
           </DashboardSectionWrapper>
           </div>
@@ -4935,6 +4924,24 @@ export const StudentDashboard: React.FC<Props> = ({
           user={user}
           onBack={() => onTabChange("HOME")}
           settings={settings}
+        />
+      );
+    }
+
+    // 5b. REVISION HUB V2 (auto-finds notes for weak topics tracked from MCQ attempts)
+    if (activeTab === "REVISION_V2") {
+      return (
+        <RevisionHubV2
+          user={user}
+          settings={settings}
+          onBack={() => { onTabChange("HOME"); setCurrentLogicalTab("HOME"); }}
+          onOpenChapter={(subjectId, chapterId, chapterTitle) => {
+            // Open chapter via the existing chapter-select flow. We pass a
+            // lightweight stub — the chapter view will load its own content.
+            try {
+              handleChapterSelect({ id: chapterId, title: chapterTitle || 'Chapter' } as any);
+            } catch {/* noop */}
+          }}
         />
       );
     }
@@ -5903,6 +5910,18 @@ export const StudentDashboard: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar justify-end pl-2 z-10 ml-auto">
+            {/* Universal Video — admin-toggled top-bar shortcut. Only visible
+                when admin moved Universal Video out of the bottom nav. */}
+            {settings?.universalVideoInTopBar && (
+              <button
+                onClick={() => { onTabChange("UNIVERSAL_VIDEO"); setCurrentLogicalTab("VIDEO"); }}
+                className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/20 hover:bg-white/30 text-white shrink-0 active:scale-95 transition"
+                title="Universal Video"
+              >
+                <Video size={14} />
+                <span className="text-[10px] font-bold uppercase">Video</span>
+              </button>
+            )}
             {/* Streak Badge — tap to see details */}
             <button
               onClick={() => setShowStreakPopup(v => !v)}
@@ -8762,7 +8781,6 @@ export const StudentDashboard: React.FC<Props> = ({
               compMcqTab,
               compMcqIndex,
               compMcqSelected,
-              mcqAppOpen,
               activeExternalApp,
               showAllNotesCatalog,
               viewingUserHistory,
@@ -8791,7 +8809,6 @@ export const StudentDashboard: React.FC<Props> = ({
               setCompMcqTab(s.compMcqTab ?? 'PRACTICE');
               setCompMcqIndex(s.compMcqIndex ?? 0);
               setCompMcqSelected(s.compMcqSelected ?? null);
-              setMcqAppOpen(!!s.mcqAppOpen);
               setActiveExternalApp(s.activeExternalApp ?? null);
               setShowAllNotesCatalog(false);
               setViewingUserHistory(s.viewingUserHistory ?? null);
@@ -8822,7 +8839,6 @@ export const StudentDashboard: React.FC<Props> = ({
                 compMcqTab: 'PRACTICE',
                 compMcqIndex: 0,
                 compMcqSelected: null,
-                mcqAppOpen: false,
                 activeExternalApp: null,
                 showAllNotesCatalog: null,
                 viewingUserHistory: null,
@@ -8833,6 +8849,7 @@ export const StudentDashboard: React.FC<Props> = ({
               switch (tab) {
                 case 'HOME':     return { ...empty, activeTab: 'HOME' };
                 case 'HOMEWORK': return { ...empty, activeTab: 'HOME', showHomeworkHistory: true };
+                case 'REVISION_V2': return { ...empty, activeTab: 'REVISION_V2' };
                 case 'GK':       return { ...empty, activeTab: 'HOME', showDailyGkHistory: true };
                 case 'VIDEO':    return { ...empty, activeTab: 'UNIVERSAL_VIDEO' };
                 case 'PROFILE':  return { ...empty, activeTab: 'PROFILE' };
@@ -8853,6 +8870,7 @@ export const StudentDashboard: React.FC<Props> = ({
             const LOGICAL_TAB_NATIVE_ACTIVE_TABS: Record<LogicalTab, string[]> = {
               HOME:      ['HOME', 'COURSES', 'PDF', 'VIDEO', 'AUDIO', 'MCQ', 'MCQ_REVIEW'],
               HOMEWORK:  ['HOME', 'COURSES', 'PDF', 'VIDEO', 'AUDIO', 'MCQ', 'MCQ_REVIEW'],
+              REVISION_V2: ['REVISION_V2'],
               GK:        ['HOME'],
               VIDEO:     ['UNIVERSAL_VIDEO'],
               PROFILE:   ['PROFILE'],
@@ -8928,6 +8946,19 @@ export const StudentDashboard: React.FC<Props> = ({
                     ]
                   : [];
               })(),
+              // Revision Hub V2 — admin-toggled. Sits right after Homework.
+              ...(settings?.revisionHubV2Enabled !== false
+                ? [
+                    {
+                      id: "REVISION_V2" as const,
+                      label: "Revision",
+                      Icon: BrainCircuit,
+                      filledOnActive: true,
+                      isActive: currentLogicalTab === "REVISION_V2",
+                      onClick: () => switchToLogicalTab("REVISION_V2"),
+                    },
+                  ]
+                : []),
               {
                 id: "GK",
                 label: "Important",
@@ -8936,23 +8967,34 @@ export const StudentDashboard: React.FC<Props> = ({
                 isActive: showStarredPage,
                 onClick: () => setShowStarredPage(true),
               },
-              {
-                id: "VIDEO",
-                label: "Video",
-                Icon: Video,
-                featureId: "VIDEO_ACCESS",
-                isActive: currentLogicalTab === "VIDEO",
-                onClick: () => switchToLogicalTab("VIDEO"),
-              },
-              {
-                id: "PROFILE",
-                label: "Profile",
-                Icon: UserIconOutline,
-                featureId: "PROFILE_PAGE",
-                filledOnActive: true,
-                isActive: currentLogicalTab === "PROFILE",
-                onClick: () => switchToLogicalTab("PROFILE"),
-              },
+              // Universal Video bottom tab — hidden when admin moved it to the top bar.
+              ...(!settings?.universalVideoInTopBar
+                ? [
+                    {
+                      id: "VIDEO" as const,
+                      label: "Video",
+                      Icon: Video,
+                      featureId: "VIDEO_ACCESS",
+                      isActive: currentLogicalTab === "VIDEO",
+                      onClick: () => switchToLogicalTab("VIDEO"),
+                    },
+                  ]
+                : []),
+              // Profile — moves into the menu drawer when Revision Hub V2 is on
+              // OR when admin forces "Profile in Menu". Otherwise stays here.
+              ...((settings?.revisionHubV2Enabled !== false || settings?.profileInMenuForced)
+                ? []
+                : [
+                    {
+                      id: "PROFILE" as const,
+                      label: "Profile",
+                      Icon: UserIconOutline,
+                      featureId: "PROFILE_PAGE",
+                      filledOnActive: true,
+                      isActive: currentLogicalTab === "PROFILE",
+                      onClick: () => switchToLogicalTab("PROFILE"),
+                    },
+                  ]),
               ...(!settings?.appStorePageHidden
                 ? [
                     {
@@ -9178,14 +9220,6 @@ export const StudentDashboard: React.FC<Props> = ({
         </div>
       )}
 
-      {/* STUDENT AI ASSISTANT (Chat Check) */}
-      <StudentAiAssistant
-        user={user}
-        settings={settings}
-        isOpen={activeTab === "AI_CHAT"}
-        onClose={() => onTabChange("HOME")}
-      />
-
       {/* INBOX MODAL */}
       {showInbox && (
         <div
@@ -9282,51 +9316,6 @@ export const StudentDashboard: React.FC<Props> = ({
           </div>
         </div>
       )}
-
-      {/* MCQ APP OVERLAY (in-app) */}
-      {mcqAppOpen && (() => {
-        let mcqHost = "";
-        try { mcqHost = new URL(MCQ_APP_URL).host; } catch { mcqHost = MCQ_APP_URL; }
-        return (
-        <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in slide-in-from-bottom-full duration-300">
-          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-white border-b border-slate-200 shadow-sm shrink-0">
-            <button
-              onClick={() => setMcqAppOpen(false)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-sm font-medium transition-colors shrink-0"
-              aria-label="Back to IIC"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-              <span>Back</span>
-            </button>
-            <div className="flex flex-col items-center min-w-0 flex-1">
-              <span className="text-sm font-semibold text-slate-700">MCQ Maker</span>
-              <span className="text-[10px] text-slate-400 truncate max-w-full">{mcqHost}</span>
-            </div>
-            <button
-              onClick={() => setMcqAppOpen(false)}
-              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 transition-colors shrink-0"
-              aria-label="Close"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-            </button>
-          </div>
-          <div className="flex-1 w-full bg-slate-50 relative">
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-sm pointer-events-none">
-              <div className="w-10 h-10 border-4 border-slate-200 border-t-slate-500 rounded-full animate-spin mb-3"></div>
-              <span>Loading {mcqHost}...</span>
-            </div>
-            <iframe
-              key={MCQ_APP_URL}
-              src={MCQ_APP_URL}
-              className="absolute inset-0 w-full h-full border-none bg-white"
-              title="MCQ Maker"
-              allow="autoplay; camera; microphone; fullscreen; display-capture; clipboard-read; clipboard-write"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-presentation"
-            />
-          </div>
-        </div>
-        );
-      })()}
 
       {/* EXTERNAL APP OVERLAY */}
       {activeExternalApp && (
@@ -10880,47 +10869,150 @@ RULES:
                 );
               })
             ) : (
-              // === BY BOOK / PAGE grouped view ===
-              groupStarredByBook(filtered).map(book => (
-                <div key={book.lessonTitle} className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-sm overflow-hidden">
-                  <div className="px-4 py-3 bg-indigo-100/60 border-b border-indigo-200 flex items-center gap-2">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-sm">
-                      <BookOpen size={16} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-black text-sm text-indigo-900 leading-tight truncate">{book.lessonTitle}</p>
-                      <p className="text-[10px] text-indigo-600 font-bold tracking-wide">
-                        {book.subject ? `${book.subject} · ` : ''}{book.total} important note{book.total !== 1 ? 's' : ''}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="divide-y divide-indigo-100">
-                    {book.pageList.map(pg => (
-                      <div key={`${book.lessonTitle}_${pg.pageNo ?? pg.pageIndex ?? 'n'}`} className="px-3 py-2.5">
-                        {(pg.pageNo != null || pg.pageIndex != null) && (
-                          <p className="text-[10px] font-black text-indigo-500 uppercase tracking-wider mb-1.5 px-1">
-                            📄 Page {pg.pageNo ?? (pg.pageIndex! + 1)}
-                          </p>
-                        )}
-                        <div className="space-y-1.5">
-                          {pg.notes.map(note => (
-                            <button
-                              key={note.id}
-                              type="button"
-                              onClick={() => setOpenNotePrompt({ topicText: note.topicText, source: note.source })}
-                              className="w-full text-left px-3 py-2 rounded-xl bg-white border border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/50 active:scale-[0.99] transition-all flex items-start gap-2"
-                            >
-                              <Star size={11} className="fill-amber-500 text-amber-500 shrink-0 mt-0.5" />
-                              <span className="font-semibold text-[12px] text-slate-700 leading-snug flex-1">{note.topicText}</span>
-                              <ChevronRight size={12} className="text-indigo-400 shrink-0 mt-1" />
-                            </button>
-                          ))}
+              // === BY BOOK / PAGE drill-down view ===
+              (() => {
+                const grouped = groupStarredByBook(filtered);
+                const activeBook = drillBookKey ? grouped.find(b => b.lessonTitle === drillBookKey) : null;
+                const activePage = activeBook && drillPageKey
+                  ? activeBook.pageList.find(p => `${p.pageNo ?? p.pageIndex ?? 'n'}` === drillPageKey)
+                  : null;
+
+                // LEVEL 0 — Book picker
+                if (!activeBook) {
+                  return (
+                    <>
+                      <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wider px-1">
+                        📚 Apni book chuno — uski top important notes dikhenge
+                      </div>
+                      {grouped.map(book => (
+                        <button
+                          key={book.lessonTitle}
+                          type="button"
+                          onClick={() => { setDrillBookKey(book.lessonTitle); setDrillPageKey(null); }}
+                          className="w-full text-left rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-sm hover:border-indigo-400 hover:shadow-md active:scale-[0.99] transition-all flex items-center gap-3 px-4 py-3"
+                        >
+                          <div className="w-11 h-11 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                            <BookOpen size={18} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-sm text-indigo-900 leading-tight truncate">{book.lessonTitle}</p>
+                            <p className="text-[10px] text-indigo-600 font-bold tracking-wide mt-0.5">
+                              {book.subject ? `${book.subject} · ` : ''}{book.total} note{book.total !== 1 ? 's' : ''} · {book.pageList.length} page{book.pageList.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                          <ChevronRight size={16} className="text-indigo-400 shrink-0" />
+                        </button>
+                      ))}
+                    </>
+                  );
+                }
+
+                // LEVEL 1 — Page picker for selected book
+                if (!activePage) {
+                  return (
+                    <>
+                      {/* Breadcrumb */}
+                      <div className="flex items-center gap-2 text-[11px] font-black text-indigo-700 px-1">
+                        <button
+                          onClick={() => { setDrillBookKey(null); setDrillPageKey(null); }}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200"
+                        >
+                          <ChevronLeft size={12} /> Books
+                        </button>
+                        <span className="text-indigo-300">/</span>
+                        <span className="truncate">{activeBook.lessonTitle}</span>
+                      </div>
+                      <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-sm overflow-hidden">
+                        <div className="px-4 py-3 bg-indigo-100/60 border-b border-indigo-200 flex items-center gap-2">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                            <BookOpen size={16} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-sm text-indigo-900 leading-tight truncate">{activeBook.lessonTitle}</p>
+                            <p className="text-[10px] text-indigo-600 font-bold tracking-wide">
+                              {activeBook.subject ? `${activeBook.subject} · ` : ''}{activeBook.total} important note{activeBook.total !== 1 ? 's' : ''} · {activeBook.pageList.length} page{activeBook.pageList.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="p-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {activeBook.pageList.map(pg => {
+                            const pgKey = `${pg.pageNo ?? pg.pageIndex ?? 'n'}`;
+                            const pgLabel = pg.pageNo != null ? `Page ${pg.pageNo}` :
+                              pg.pageIndex != null ? `Page ${pg.pageIndex + 1}` : 'Untagged';
+                            return (
+                              <button
+                                key={pgKey}
+                                type="button"
+                                onClick={() => setDrillPageKey(pgKey)}
+                                className="rounded-xl border-2 border-indigo-100 bg-white hover:border-indigo-400 hover:bg-indigo-50 active:scale-95 transition-all p-3 text-center"
+                              >
+                                <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wider">📄</div>
+                                <div className="font-black text-sm text-indigo-900 mt-0.5 truncate">{pgLabel}</div>
+                                <div className="text-[10px] font-bold text-amber-600 mt-0.5">
+                                  {pg.notes.length} ⭐ note{pg.notes.length !== 1 ? 's' : ''}
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              ))
+                    </>
+                  );
+                }
+
+                // LEVEL 2 — Notes of selected page (page-wise arranged)
+                const pgLabel = activePage.pageNo != null ? `Page ${activePage.pageNo}` :
+                  activePage.pageIndex != null ? `Page ${activePage.pageIndex + 1}` : 'Untagged';
+                return (
+                  <>
+                    {/* Breadcrumb */}
+                    <div className="flex items-center gap-1.5 text-[11px] font-black text-indigo-700 px-1 flex-wrap">
+                      <button
+                        onClick={() => { setDrillBookKey(null); setDrillPageKey(null); }}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200"
+                      >
+                        <ChevronLeft size={12} /> Books
+                      </button>
+                      <span className="text-indigo-300">/</span>
+                      <button
+                        onClick={() => setDrillPageKey(null)}
+                        className="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 truncate max-w-[40%]"
+                      >
+                        {activeBook.lessonTitle}
+                      </button>
+                      <span className="text-indigo-300">/</span>
+                      <span className="truncate">{pgLabel}</span>
+                    </div>
+                    <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-sm overflow-hidden">
+                      <div className="px-4 py-3 bg-indigo-100/60 border-b border-indigo-200 flex items-center gap-2">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-sm font-black text-xs">
+                          📄
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-sm text-indigo-900 leading-tight truncate">{pgLabel}</p>
+                          <p className="text-[10px] text-indigo-600 font-bold tracking-wide truncate">
+                            {activeBook.lessonTitle} · {activePage.notes.length} note{activePage.notes.length !== 1 ? 's' : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="p-3 space-y-1.5">
+                        {activePage.notes.map(note => (
+                          <button
+                            key={note.id}
+                            type="button"
+                            onClick={() => setOpenNotePrompt({ topicText: note.topicText, source: note.source })}
+                            className="w-full text-left px-3 py-2.5 rounded-xl bg-white border border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/50 active:scale-[0.99] transition-all flex items-start gap-2"
+                          >
+                            <Star size={12} className="fill-amber-500 text-amber-500 shrink-0 mt-0.5" />
+                            <span className="font-semibold text-[12px] text-slate-700 leading-snug flex-1">{note.topicText}</span>
+                            <ChevronRight size={12} className="text-indigo-400 shrink-0 mt-1" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()
             )}
           </>)}
 

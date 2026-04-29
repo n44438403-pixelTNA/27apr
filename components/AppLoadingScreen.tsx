@@ -1,51 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, HelpCircle, Video, Headphones, BrainCircuit, Bot, WifiOff, Users, Type, Check, X } from 'lucide-react';
+import { BookOpen, HelpCircle, Video, Headphones, BrainCircuit, Bot, WifiOff, Users } from 'lucide-react';
 import { APP_VERSION } from '../constants';
-
-// === STYLISH BRANDED FONT CHOICES for the splash short name ===
-// Each entry: { id, label, family, googleFontParam, weight }.
-// We lazy-load the chosen font from Google Fonts on first use (and cache via
-// localStorage). Default = the existing Inter/system stack so existing users
-// see no change unless they pick something.
-type SplashFont = {
-  id: string;
-  label: string;
-  /** CSS font-family value for the h1 */
-  family: string;
-  /** Google Fonts URL family param (e.g. 'Orbitron:wght@900'). Empty = system. */
-  gfontParam: string;
-  /** Optional CSS letterSpacing override */
-  letterSpacing?: string;
-};
-
-const SPLASH_FONTS: SplashFont[] = [
-  { id: 'default',     label: 'Default',          family: '', gfontParam: '' },
-  { id: 'orbitron',    label: 'Orbitron · Tech',  family: '"Orbitron", sans-serif', gfontParam: 'Orbitron:wght@900', letterSpacing: '0.05em' },
-  { id: 'audiowide',   label: 'Audiowide',        family: '"Audiowide", sans-serif', gfontParam: 'Audiowide' },
-  { id: 'russo',       label: 'Russo One · Bold', family: '"Russo One", sans-serif', gfontParam: 'Russo+One' },
-  { id: 'bebas',       label: 'Bebas Neue',       family: '"Bebas Neue", sans-serif', gfontParam: 'Bebas+Neue', letterSpacing: '0.08em' },
-  { id: 'blackops',    label: 'Black Ops · Military', family: '"Black Ops One", sans-serif', gfontParam: 'Black+Ops+One' },
-  { id: 'righteous',   label: 'Righteous',        family: '"Righteous", sans-serif', gfontParam: 'Righteous' },
-  { id: 'monoton',     label: 'Monoton · Neon',   family: '"Monoton", sans-serif', gfontParam: 'Monoton' },
-  { id: 'playfair',    label: 'Playfair · Elegant', family: '"Playfair Display", serif', gfontParam: 'Playfair+Display:wght@900' },
-  { id: 'cinzel',      label: 'Cinzel · Classic', family: '"Cinzel", serif', gfontParam: 'Cinzel:wght@900', letterSpacing: '0.06em' },
-  { id: 'marker',      label: 'Permanent Marker', family: '"Permanent Marker", cursive', gfontParam: 'Permanent+Marker' },
-  { id: 'pressstart',  label: 'Press Start · Retro', family: '"Press Start 2P", monospace', gfontParam: 'Press+Start+2P' },
-  { id: 'pacifico',    label: 'Pacifico · Casual', family: '"Pacifico", cursive', gfontParam: 'Pacifico' },
-  { id: 'rajdhani',    label: 'Rajdhani · Modern', family: '"Rajdhani", sans-serif', gfontParam: 'Rajdhani:wght@700' },
-];
-
-/** Inject a Google Fonts <link> for the given family param, only once per param. */
-function ensureGoogleFontLoaded(gfontParam: string) {
-  if (!gfontParam) return;
-  const id = `gfont-${gfontParam.replace(/[^a-zA-Z0-9]/g, '-')}`;
-  if (document.getElementById(id)) return;
-  const link = document.createElement('link');
-  link.id = id;
-  link.rel = 'stylesheet';
-  link.href = `https://fonts.googleapis.com/css2?family=${gfontParam}&display=swap`;
-  document.head.appendChild(link);
-}
+import { getSplashFontById, ensureGoogleFontLoaded } from '../utils/splashFonts';
 
 interface AppLoadingScreenProps {
   onComplete: () => void;
@@ -134,24 +90,27 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
     }
   });
 
-  // === Splash Font Picker (user-selectable, persisted in localStorage) ===
-  const [splashFontId, setSplashFontId] = useState<string>(() => {
-    try { return localStorage.getItem('nst_splash_font_id') || 'default'; }
-    catch { return 'default'; }
+  // === Splash Font (admin-controlled, read from system settings) ===
+  // Falls back to a legacy localStorage choice (`nst_splash_font_id`) for
+  // users who picked one before the picker was moved into Admin > General
+  // Settings, then defaults to "default".
+  const [splashFontId] = useState<string>(() => {
+    try {
+      const settingsRaw = localStorage.getItem('nst_system_settings');
+      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
+      const adminChoice = settingsObj?.splashFontId;
+      if (adminChoice) return adminChoice as string;
+      return localStorage.getItem('nst_splash_font_id') || 'default';
+    } catch {
+      return 'default';
+    }
   });
-  const [showFontPicker, setShowFontPicker] = useState(false);
-  const activeFont = SPLASH_FONTS.find(f => f.id === splashFontId) || SPLASH_FONTS[0];
+  const activeFont = getSplashFontById(splashFontId);
 
   // Lazy-load the chosen Google Font on mount AND whenever it changes.
   useEffect(() => {
     if (activeFont.gfontParam) ensureGoogleFontLoaded(activeFont.gfontParam);
   }, [activeFont.gfontParam]);
-
-  // When picker opens, eagerly preload ALL Google Fonts so previews look right.
-  useEffect(() => {
-    if (!showFontPicker) return;
-    SPLASH_FONTS.forEach(f => { if (f.gfontParam) ensureGoogleFontLoaded(f.gfontParam); });
-  }, [showFontPicker]);
 
   const onCompleteRef = useRef(onComplete);
   const appNameRef = useRef(appName);
@@ -160,9 +119,6 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
   useEffect(() => { appNameRef.current = appName; }, [appName]);
 
   useEffect(() => {
-    // Pause the auto-advance timer while the user is browsing the font picker
-    // — otherwise the splash auto-completes and yanks them off the screen.
-    if (showFontPicker) return;
     const duration = isPremium ? 1000 : 3000;
     const intervalTime = isPremium ? 33 : 100;
     const steps = duration / intervalTime;
@@ -204,7 +160,7 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [showFontPicker, isPremium]);
+  }, [isPremium]);
 
   const handleLogoTap = () => {
     if (logoTapped) return;
@@ -331,112 +287,9 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
             <p className={`text-[11px] ${t.badge} font-mono font-bold tracking-widest`}>
               v{APP_VERSION}
             </p>
-            <span className={t.badge}>|</span>
-            <button
-              type="button"
-              onClick={() => setShowFontPicker(true)}
-              className={`text-[11px] font-black ${t.badge} tracking-wide flex items-center gap-1 hover:opacity-80 transition-opacity`}
-              title="App name ka font change karein"
-            >
-              <Type size={11} /> Aa
-            </button>
           </div>
         </div>
       </div>
-
-      {/* === SPLASH FONT PICKER OVERLAY === */}
-      {showFontPicker && (
-        <div className="absolute inset-0 z-[10000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className={`w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-3xl shadow-2xl ${themeVariant === 'light' ? 'bg-white' : 'bg-slate-900'}`}>
-            <div className={`sticky top-0 z-10 px-5 py-4 flex items-center justify-between border-b ${themeVariant === 'light' ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <div className="flex items-center gap-2">
-                <Type size={18} className={themeVariant === 'light' ? 'text-indigo-600' : 'text-indigo-400'} />
-                <h3 className={`font-black text-base ${themeVariant === 'light' ? 'text-slate-800' : 'text-white'}`}>
-                  Splash Font
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowFontPicker(false)}
-                className={`p-1.5 rounded-full ${themeVariant === 'light' ? 'hover:bg-slate-100 text-slate-600' : 'hover:bg-slate-800 text-slate-300'}`}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <p className={`px-5 pt-3 pb-1 text-[11px] font-bold tracking-wide ${themeVariant === 'light' ? 'text-slate-500' : 'text-slate-400'}`}>
-              {appName} ka style choose karein — branded · stylish · professional
-            </p>
-
-            <div className="p-3 space-y-2">
-              {SPLASH_FONTS.map(f => {
-                const isActive = f.id === splashFontId;
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => {
-                      setSplashFontId(f.id);
-                      try { localStorage.setItem('nst_splash_font_id', f.id); } catch {}
-                      try { if (navigator.vibrate) navigator.vibrate(20); } catch {}
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all text-left active:scale-[0.98] ${
-                      isActive
-                        ? (themeVariant === 'light'
-                            ? 'bg-indigo-50 border-indigo-400 shadow-md'
-                            : 'bg-indigo-900/40 border-indigo-500 shadow-md')
-                        : (themeVariant === 'light'
-                            ? 'bg-slate-50 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50'
-                            : 'bg-slate-800/50 border-slate-700 hover:border-indigo-500')
-                    }`}
-                  >
-                    <span
-                      className={`flex-1 text-2xl font-black ${
-                        themeVariant === 'light' ? 'text-slate-800' : 'text-white'
-                      }`}
-                      style={{
-                        ...(f.family ? { fontFamily: f.family } : {}),
-                        ...(f.letterSpacing ? { letterSpacing: f.letterSpacing } : {}),
-                      }}
-                    >
-                      {appName}
-                    </span>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <span className={`text-[10px] font-black uppercase tracking-wider ${
-                        isActive
-                          ? (themeVariant === 'light' ? 'text-indigo-700' : 'text-indigo-300')
-                          : (themeVariant === 'light' ? 'text-slate-500' : 'text-slate-400')
-                      }`}>
-                        {f.label}
-                      </span>
-                      {isActive && (
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black ${
-                          themeVariant === 'light' ? 'bg-indigo-600 text-white' : 'bg-indigo-500 text-white'
-                        }`}>
-                          <Check size={10} /> Active
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className={`sticky bottom-0 px-5 py-3 border-t ${themeVariant === 'light' ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <button
-                type="button"
-                onClick={() => setShowFontPicker(false)}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black text-sm shadow-lg active:scale-95 transition-transform"
-              >
-                Done
-              </button>
-              <p className={`text-[10px] text-center mt-2 ${themeVariant === 'light' ? 'text-slate-400' : 'text-slate-500'}`}>
-                Yeh font har baar splash screen pe save rahega
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

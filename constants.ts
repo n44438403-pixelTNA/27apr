@@ -484,7 +484,6 @@ export const NSTA_DEFAULT_FEATURES = [
     { category: '📚 CONTENT', id: 'NAV_STORE_CREDITS', label: 'Store & Credits', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '🛠️ TOOLS', id: 'NAV_SALE_BANNER', label: 'Sale Banner', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '📱 UI / NAVIGATION', id: 'NAV_HOME', label: 'Home Tab', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '🤖 AI HUB', id: 'AI_CENTER', label: 'AI Center', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '🛠️ TOOLS', id: 'TOOLS', label: 'Tools', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '🎮 GAME/REWARDS', id: 'GAMES', label: 'Game Zone', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '📚 CONTENT', id: 'STORE_ACCESS', label: 'Store', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },

@@ -11,6 +11,7 @@ import { LessonView } from './LessonView';
 import { MarksheetCard } from './MarksheetCard';
 import { AiInterstitial } from './AiInterstitial';
 import { FlashcardMcqView } from './FlashcardMcqView';
+import { recordAttempt as recordRevisionAttempt } from '../utils/revisionTrackerV2';
 
 interface Props {
   chapter: Chapter;
@@ -586,6 +587,20 @@ export const McqView: React.FC<Props> = ({
               total: topicStats.total + 1
           };
       });
+
+      // 4.1.b Revision Hub V2 — record per-page topic stats for the new revision tracker.
+      try {
+        recordRevisionAttempt({
+          subjectId: subject.id,
+          subjectName: subject.name,
+          chapterId: chapter.id,
+          chapterTitle: chapter.title,
+          pageKey: (chapter as any).pageNo ? `pg-${(chapter as any).pageNo}` : chapter.id,
+          pageLabel: (chapter as any).pageNo ? `Page ${(chapter as any).pageNo}` : undefined,
+          questions: submittedQuestions,
+          userAnswers: remappedAnswers,
+        });
+      } catch (e) { /* non-blocking */ }
 
       // 4.2 Add to History
       const newHistory = [result, ...(updatedUser.mcqHistory || [])];
