@@ -5297,12 +5297,14 @@ export const StudentDashboard: React.FC<Props> = ({
                     : "text-slate-600 ring-4 ring-slate-200"
               }`}
             >
-              {/* Show app logo if admin uploaded one, else fall back to first letter */}
+              {/* Show app logo if admin uploaded one, else fall back to first letter.
+                  object-cover + w-full h-full so the logo fully fills the circle
+                  (was previously object-contain p-2 which left a big white border). */}
               {settings?.appLogo ? (
                 <img
                   src={settings.appLogo}
                   alt={settings.appName || 'App Logo'}
-                  className="w-full h-full object-contain p-2"
+                  className="w-full h-full object-cover"
                 />
               ) : (
                 (user.name || "S").charAt(0)
@@ -6019,6 +6021,7 @@ export const StudentDashboard: React.FC<Props> = ({
               </button>
             )}
             {/* Streak Badge — tap to see details */}
+            {!(settings?.hiddenTopBarButtons || []).includes('STREAK') && (
             <button
               onClick={() => setShowStreakPopup(v => !v)}
               className={`flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-xs font-black border backdrop-blur-sm whitespace-nowrap shrink-0 active:scale-95 transition-all ${
@@ -6036,31 +6039,36 @@ export const StudentDashboard: React.FC<Props> = ({
               <span>{readingStreak.current}</span>
               {readingStreak.current >= 7 && <span className="text-[9px] ml-0.5">DAY</span>}
             </button>
+            )}
 
             {/* Credits */}
+            {!(settings?.hiddenTopBarButtons || []).includes('CREDITS') && (
             <button
               onClick={() => onTabChange("STORE")}
-              className="flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-xs font-black hover:scale-105 transition-transform bg-[#FDFBF7] text-slate-800 border border-amber-100 whitespace-nowrap shrink-0"
+              className="keep-light-badge flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-xs font-black hover:scale-105 transition-transform bg-[#FDFBF7] text-slate-800 border border-amber-100 whitespace-nowrap shrink-0"
             >
               <Crown size={14} className="fill-slate-800" /> {user.credits} CR
             </button>
+            )}
 
             {/* Custom Page / Lightning */}
+            {!(settings?.hiddenTopBarButtons || []).includes('LIGHTNING') && (
             <button
               onClick={() => onTabChange("CUSTOM_PAGE")}
-              className="p-1.5 rounded-full transition-colors relative bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100 shrink-0"
+              className="keep-light-badge p-1.5 rounded-full transition-colors relative bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100 shrink-0"
             >
               <Zap size={16} />
               {hasNewUpdate && (
                 <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
               )}
             </button>
+            )}
 
             {/* Notification Bell */}
-            {allNotifications.length > 0 && (
+            {!(settings?.hiddenTopBarButtons || []).includes('NOTIFICATION') && allNotifications.length > 0 && (
               <button
                 onClick={() => setShowNotifPage(true)}
-                className="p-1.5 rounded-full transition-colors relative bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100 shrink-0"
+                className="keep-light-badge p-1.5 rounded-full transition-colors relative bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100 shrink-0"
                 title="Notifications"
               >
                 <Bell size={16} />
@@ -6073,10 +6081,10 @@ export const StudentDashboard: React.FC<Props> = ({
             )}
 
             {/* Sale Discount Mini Button */}
-            {settings?.specialDiscountEvent?.enabled && (
+            {!(settings?.hiddenTopBarButtons || []).includes('SALE') && settings?.specialDiscountEvent?.enabled && (
               <button
                 onClick={() => onTabChange("STORE")}
-                className="p-1.5 rounded-full transition-colors relative bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100 shrink-0 flex items-center gap-1"
+                className="keep-light-badge p-1.5 rounded-full transition-colors relative bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100 shrink-0 flex items-center gap-1"
               >
                 <Ticket size={16} />
                 <span className="text-[10px] font-bold whitespace-nowrap">
@@ -9051,6 +9059,13 @@ export const StudentDashboard: React.FC<Props> = ({
               hapticLight();
               try { stopSpeech(); } catch (_) {}
               setSpeakingId(null);
+              // Close the Important Notes overlay if it's open — otherwise the
+              // overlay (z-[200]) keeps covering the dashboard even after the
+              // user taps Home / Homework / Profile / Revision in bottom nav.
+              if (showStarredPage) {
+                try { stopProfileStarRead(); } catch (_) {}
+                setShowStarredPage(false);
+              }
               if (target === currentLogicalTab) {
                 // Re-tap of the same logical tab — always go to the default root state
                 // for that tab (not the saved snapshot). This ensures that foreign
@@ -9090,7 +9105,10 @@ export const StudentDashboard: React.FC<Props> = ({
                 Icon: Home,
                 featureId: "NAV_HOME",
                 filledOnActive: true,
-                isActive: currentLogicalTab === "HOME",
+                // When the Important Notes overlay is open, Home should NOT
+                // appear active — only ONE bottom-nav tab can be active at a
+                // time. Same rule applies to all sibling tabs below.
+                isActive: !showStarredPage && currentLogicalTab === "HOME",
                 onClick: () => switchToLogicalTab("HOME"),
               },
               // ── HOMEWORK: always visible when there is active homework ──────
@@ -9106,7 +9124,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 });
                 return hasActiveHomework
                   ? [{ id: "HOMEWORK" as const, label: "Homework", Icon: GraduationCap,
-                       isActive: currentLogicalTab === "HOMEWORK",
+                       isActive: !showStarredPage && currentLogicalTab === "HOMEWORK",
                        onClick: () => switchToLogicalTab("HOMEWORK") }]
                   : [];
               })(),
@@ -9129,16 +9147,16 @@ export const StudentDashboard: React.FC<Props> = ({
               //  RevHub off + GK hidden: Video
               //  RevHub off + GK hidden + Video in top bar: Profile
 
-              // Slot A — Revision Hub (if enabled)
-              ...(settings?.revisionHubV2Enabled !== false
+              // Slot A — Revision Hub (if enabled AND not individually hidden)
+              ...(settings?.revisionHubV2Enabled !== false && !(settings?.hiddenBottomNavButtons || []).includes('REVISION_V2')
                 ? [{ id: "REVISION_V2" as const, label: "Revision", Icon: BrainCircuit,
                      filledOnActive: true,
-                     isActive: currentLogicalTab === "REVISION_V2",
+                     isActive: !showStarredPage && currentLogicalTab === "REVISION_V2",
                      onClick: () => switchToLogicalTab("REVISION_V2") }]
                 : []),
 
               // Slot B — GK / Important Notes (if not hidden by admin)
-              ...(!settings?.starredPageHidden
+              ...(!settings?.starredPageHidden && !(settings?.hiddenBottomNavButtons || []).includes('GK')
                 ? [{ id: "GK" as const, label: "Important", Icon: Star,
                      filledOnActive: true,
                      isActive: showStarredPage,
@@ -9148,23 +9166,25 @@ export const StudentDashboard: React.FC<Props> = ({
               // Slot C — Video OR Profile (mutual exclusive)
               //   • Video in bottom nav → Video tab
               //   • Video moved to top bar → Profile takes this exact slot
-              ...(!settings?.universalVideoInTopBar
+              ...(!settings?.universalVideoInTopBar && !(settings?.hiddenBottomNavButtons || []).includes('VIDEO')
                 ? [{ id: "VIDEO" as const, label: "Video", Icon: Video,
                      featureId: "VIDEO_ACCESS",
-                     isActive: currentLogicalTab === "VIDEO",
+                     isActive: !showStarredPage && currentLogicalTab === "VIDEO",
                      onClick: () => switchToLogicalTab("VIDEO") }]
-                : [{ id: "PROFILE" as const, label: "Profile", Icon: UserIconOutline,
+                : (settings?.universalVideoInTopBar && !(settings?.hiddenBottomNavButtons || []).includes('PROFILE')
+                ? [{ id: "PROFILE" as const, label: "Profile", Icon: UserIconOutline,
                      featureId: "PROFILE_PAGE", filledOnActive: true,
-                     isActive: currentLogicalTab === "PROFILE",
-                     onClick: () => switchToLogicalTab("PROFILE") }]),
-              ...(!settings?.appStorePageHidden
+                     isActive: !showStarredPage && currentLogicalTab === "PROFILE",
+                     onClick: () => switchToLogicalTab("PROFILE") }]
+                : [])),
+              ...(!settings?.appStorePageHidden && !(settings?.hiddenBottomNavButtons || []).includes('APP_STORE')
                 ? [
                     {
                       id: "APP_STORE" as const,
                       label: "Apps",
                       Icon: ShoppingBag,
                       filledOnActive: true,
-                      isActive: currentLogicalTab === "APP_STORE",
+                      isActive: !showStarredPage && currentLogicalTab === "APP_STORE",
                       onClick: () => switchToLogicalTab("APP_STORE"),
                     },
                   ]
@@ -10821,77 +10841,111 @@ RULES:
         // (z-[300]) stays visible AND tappable while the Important Notes
         // page is open. The inner scroller below uses pb-24 so list items
         // don't get hidden behind the bottom nav bar.
+        // bg-white (solid) — earlier `from-amber-50/40` was 40% transparent,
+        // letting the Home page's streak ("6/8") bleed through. Solid bg
+        // ensures the user sees only ONE page at a time.
         <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in slide-in-from-right-full duration-300">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-white sticky top-0 z-10">
-            <button onClick={() => { stopProfileStarRead(); setShowStarredPage(false); }} className="p-2 rounded-full hover:bg-slate-100 text-slate-700">
-              <ArrowLeft size={20} />
-            </button>
-            <div className="flex-1 min-w-0">
-              <h2 className="font-black text-base text-slate-800 flex items-center gap-2">
-                <Star size={16} className="text-amber-500" fill="currentColor" />
-                Important Notes
-              </h2>
-              <p className="text-[11px] text-slate-500">
-                {starredPageTab === 'mine'
-                  ? `${profileStarSearch ? `${filtered.length}/${starredNotes.length}` : starredNotes.length} note${starredNotes.length !== 1 ? 's' : ''} saved`
-                  : `${globalList.length} note${globalList.length !== 1 ? 's' : ''} from community`}
-              </p>
-            </div>
-            {starredPageTab === 'mine' && starredNotes.length > 0 && (
+          {/* === PREMIUM HEADER (gradient + crown) === */}
+          <div className="relative bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 sticky top-0 z-10 shadow-lg shadow-amber-200/50">
+            {/* Decorative pattern overlay */}
+            <div className="absolute inset-0 opacity-10 pointer-events-none" style={{
+              backgroundImage: `radial-gradient(circle at 20% 30%, white 1px, transparent 1px), radial-gradient(circle at 70% 60%, white 1px, transparent 1px)`,
+              backgroundSize: '40px 40px, 60px 60px',
+            }} />
+            <div className="relative flex items-center gap-3 px-4 pt-3 pb-3">
               <button
-                onClick={() => {
-                  if (!confirm('Delete every starred note?')) return;
-                  stopProfileStarRead();
-                  setStarredNotes([]);
-                  try { localStorage.removeItem('nst_starred_notes_v1'); } catch {}
-                }}
-                className="text-[11px] font-bold text-red-500 px-2 py-1 rounded-lg hover:bg-red-50"
+                onClick={() => { stopProfileStarRead(); setShowStarredPage(false); }}
+                className="p-2 rounded-xl bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm transition-all active:scale-95 shadow-sm"
               >
-                Clear All
+                <ArrowLeft size={18} />
               </button>
-            )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <h2 className="font-black text-lg text-white tracking-tight">Important Notes</h2>
+                  <span className="text-[8px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-md uppercase tracking-widest shadow-sm">⭐ Premium</span>
+                </div>
+                <p className="text-[11px] text-amber-50/90 font-semibold mt-0.5">
+                  {starredPageTab === 'mine'
+                    ? (starredNotes.length === 0
+                        ? 'Notes save karein, yahan dikhenge'
+                        : `${profileStarSearch ? `${filtered.length}/${starredNotes.length}` : starredNotes.length} saved · Tap to read`)
+                    : `${globalList.length} popular notes · Live community picks`}
+                </p>
+              </div>
+              {starredPageTab === 'mine' && starredNotes.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (!confirm('Delete every starred note?')) return;
+                    stopProfileStarRead();
+                    setStarredNotes([]);
+                    try { localStorage.removeItem('nst_starred_notes_v1'); } catch {}
+                  }}
+                  className="text-[10px] font-black text-white bg-red-500/80 hover:bg-red-600 px-2.5 py-1.5 rounded-xl backdrop-blur-sm border border-white/20 active:scale-95 transition-all"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Quick stat pills */}
+            <div className="relative px-4 pb-3 flex items-center gap-2">
+              <div className="flex-1 bg-white/15 backdrop-blur-sm border border-white/20 rounded-xl px-3 py-1.5 flex items-center gap-2">
+                <Star size={12} className="fill-amber-200 text-amber-200" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[8px] font-black uppercase tracking-widest text-amber-100/90">My Saved</div>
+                  <div className="text-sm font-black text-white -mt-0.5">{starredNotes.length}</div>
+                </div>
+              </div>
+              <div className="flex-1 bg-white/15 backdrop-blur-sm border border-white/20 rounded-xl px-3 py-1.5 flex items-center gap-2">
+                <Users size={12} className="text-white" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[8px] font-black uppercase tracking-widest text-amber-100/90">Community</div>
+                  <div className="text-sm font-black text-white -mt-0.5">{globalList.length}</div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* MY SAVED / GLOBAL tab toggle */}
-          <div className="px-4 pt-3 pb-2 bg-white border-b border-amber-50">
-            <div className="grid grid-cols-2 gap-1 p-1 bg-amber-50 rounded-2xl border border-amber-100">
+          {/* MY SAVED / GLOBAL tab toggle — pulled up so it overlaps the gradient like a card */}
+          <div className="px-4 -mt-2 pb-2 bg-transparent">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-white rounded-2xl border border-amber-200 shadow-md shadow-amber-100/40">
               <button
                 onClick={() => { stopProfileStarRead(); setStarredPageTab('mine'); }}
-                className={`py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                className={`py-2.5 rounded-xl text-[12px] font-black flex items-center justify-center gap-1.5 transition-all ${
                   starredPageTab === 'mine'
-                    ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
-                    : 'text-amber-600 hover:text-amber-800'
+                    ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md shadow-amber-200'
+                    : 'text-amber-700 hover:bg-amber-50'
                 }`}
               >
-                <Star size={12} className="fill-amber-500 text-amber-500" />
+                <Star size={13} className={starredPageTab === 'mine' ? 'fill-white text-white' : 'fill-amber-500 text-amber-500'} />
                 My Saved
-                <span className={`text-[9px] px-1.5 rounded-full ${starredPageTab === 'mine' ? 'bg-amber-500 text-white' : 'bg-amber-200 text-amber-800'}`}>
+                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${starredPageTab === 'mine' ? 'bg-white/30 text-white' : 'bg-amber-100 text-amber-800'}`}>
                   {starredNotes.length}
                 </span>
               </button>
               <button
                 onClick={() => { stopProfileStarRead(); setStarredPageTab('global'); }}
-                className={`py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                className={`py-2.5 rounded-xl text-[12px] font-black flex items-center justify-center gap-1.5 transition-all ${
                   starredPageTab === 'global'
-                    ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
-                    : 'text-amber-600 hover:text-amber-800'
+                    ? 'bg-gradient-to-br from-rose-400 to-orange-500 text-white shadow-md shadow-rose-200'
+                    : 'text-amber-700 hover:bg-amber-50'
                 }`}
               >
-                <Users size={12} />
-                Global
-                <span className={`text-[9px] px-1.5 rounded-full ${starredPageTab === 'global' ? 'bg-amber-500 text-white' : 'bg-amber-200 text-amber-800'}`}>
+                <TrendingUp size={13} />
+                Trending
+                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${starredPageTab === 'global' ? 'bg-white/30 text-white' : 'bg-amber-100 text-amber-800'}`}>
                   {globalList.length}
                 </span>
               </button>
             </div>
 
             {/* === SECONDARY VIEW TOGGLE: List View vs Book-wise Grouping === */}
-            <div className="mt-2 grid grid-cols-2 gap-1 p-1 bg-slate-50 rounded-2xl border border-slate-200">
+            <div className="mt-2 grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
               <button
                 onClick={() => setImportantNotesView('list')}
-                className={`py-1.5 rounded-xl text-[10px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                className={`py-1.5 rounded-lg text-[10px] font-black flex items-center justify-center gap-1.5 transition-all ${
                   importantNotesView === 'list'
-                    ? 'bg-white text-slate-700 shadow-sm border border-slate-300'
+                    ? 'bg-white text-slate-800 shadow-sm border border-slate-300'
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
@@ -10899,7 +10953,7 @@ RULES:
               </button>
               <button
                 onClick={() => setImportantNotesView('bybook')}
-                className={`py-1.5 rounded-xl text-[10px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                className={`py-1.5 rounded-lg text-[10px] font-black flex items-center justify-center gap-1.5 transition-all ${
                   importantNotesView === 'bybook'
                     ? 'bg-white text-indigo-700 shadow-sm border border-indigo-200'
                     : 'text-slate-500 hover:text-indigo-700'

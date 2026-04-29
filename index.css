@@ -683,6 +683,71 @@ button {
 .dark-mode-blue [class*="bg-purple-500"], .dark-mode-blue [class*="bg-purple-600"] { color: #ffffff !important; }
 .dark-mode-blue [class*="bg-orange-500"], .dark-mode-blue [class*="bg-orange-600"] { color: #ffffff !important; }
 
+/* ═══════════════════════════════════════════════════════════════
+   THEME-LIGHT BADGES — buttons that have a custom off-white bg
+   (e.g. top-bar Credits / Lightning / Notification / Sale chip).
+   These need to KEEP their dark text in dark/blue mode otherwise
+   the global slate-text overrides make the text invisible.
+   ═══════════════════════════════════════════════════════════════ */
+.dark-mode .keep-light-badge,
+.dark-mode-blue .keep-light-badge {
+  background-color: #FDFBF7 !important;
+  color: #1e293b !important;
+  border-color: #fde68a !important;
+}
+.dark-mode .keep-light-badge *,
+.dark-mode-blue .keep-light-badge * {
+  color: #1e293b !important;
+  fill: currentColor !important;
+}
+.dark-mode .keep-light-badge:hover,
+.dark-mode-blue .keep-light-badge:hover {
+  background-color: #fef9e7 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FLASHCARD VIEW — make the page bg follow the active theme.
+   Default (light) keeps the existing soft indigo→white→purple wash.
+   ═══════════════════════════════════════════════════════════════ */
+.dark-mode .flashcard-page-bg {
+  background: linear-gradient(135deg, #0a0a0a 0%, #111111 60%, #0a0a0a 100%) !important;
+}
+.dark-mode-blue .flashcard-page-bg {
+  background: linear-gradient(135deg, #050d1f 0%, #0a1733 60%, #050d1f 100%) !important;
+}
+.dark-mode .flashcard-page-bg .flashcard-topbar,
+.dark-mode-blue .flashcard-page-bg .flashcard-topbar,
+.dark-mode .flashcard-page-bg .flashcard-progressbar,
+.dark-mode-blue .flashcard-page-bg .flashcard-progressbar {
+  background-color: rgba(15, 23, 42, 0.85) !important;
+  border-color: #334155 !important;
+}
+.dark-mode-blue .flashcard-page-bg .flashcard-topbar,
+.dark-mode-blue .flashcard-page-bg .flashcard-progressbar {
+  background-color: rgba(10, 23, 51, 0.85) !important;
+}
+.dark-mode .flashcard-page-bg .flashcard-card,
+.dark-mode-blue .flashcard-page-bg .flashcard-card {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #f1f5f9 !important;
+}
+.dark-mode .flashcard-page-bg .flashcard-card *,
+.dark-mode-blue .flashcard-page-bg .flashcard-card * {
+  color: #f1f5f9 !important;
+}
+.dark-mode .flashcard-page-bg .flashcard-prev,
+.dark-mode-blue .flashcard-page-bg .flashcard-prev {
+  background-color: #1e293b !important;
+  border-color: #475569 !important;
+  color: #cbd5e1 !important;
+}
+.dark-mode .flashcard-page-bg .flashcard-prev:disabled,
+.dark-mode-blue .flashcard-page-bg .flashcard-prev:disabled {
+  background-color: #0f172a !important;
+  color: #475569 !important;
+}
+
 /* Force landscape view for premium slides if required */
 @media screen and (orientation: portrait) {
     .premium-slides-container iframe {

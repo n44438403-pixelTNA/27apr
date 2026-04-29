@@ -28,6 +28,21 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
 - Profile: Settings sheet with Light Mode, Recovery, Data
 - External Apps: Open inside the app via in-app iframe overlay (not new browser tab)
 
+## Recent Changes (Apr 29 — Visibility Bugs, Pro Important Notes, Per-Button Admin Toggles)
+- **`StudentDashboard.tsx`**:
+  - Profile-tab avatar now uses `object-cover` (was `object-contain p-2`) so the admin-uploaded logo fills the whole circle instead of leaving a thick white border.
+  - Top-bar pill buttons (Streak, Credits, Lightning ⚡, Notification 🔔, Sale chip) now respect `settings.hiddenTopBarButtons` and carry the new `keep-light-badge` CSS class so their text stays readable in dark / blue mode (previously the global slate-text override turned them invisible against the off-white pill).
+  - Bottom nav slots (Revision Hub, Important / GK, Video, Profile, App Store) now also respect `settings.hiddenBottomNavButtons` in addition to the existing whole-feature toggles. Cascading slot system preserved.
+  - Important Notes overlay redesigned with a premium amber→orange→rose gradient header, decorative dot pattern, "⭐ Premium" badge, white-card-on-gradient stat pills (My Saved / Community), and bigger gradient tab pills (My Saved / Trending) so the page looks professional. List View / By Book toggle preserved.
+- **`FlashcardMcqView.tsx`**: Outer wrapper, top bar, progress bar, question card, answer reveal card and Back button now carry `flashcard-page-bg / flashcard-topbar / flashcard-progressbar / flashcard-card / flashcard-prev` classes that map to dark and dark-mode-blue overrides in `index.css` — fixes the white background bug in dark / blue themes.
+- **`index.css`**: Added `.keep-light-badge` (forces dark text on the off-white top-bar pills under both dark themes) and a full set of `.flashcard-page-bg` / `.flashcard-topbar` / `.flashcard-card` / `.flashcard-prev` overrides for dark-mode and dark-mode-blue.
+- **`AdminPowerManager.tsx`**: Visibility section expanded into 5 tabs (Pricing & Costs, Modules, Top Bar, Bottom Nav, Home Grid). Each new tab renders a clean toggle list with switch indicators that writes into `settings.hiddenTopBarButtons / hiddenBottomNavButtons / hiddenHomeButtons` (also respects the existing `hiddenFeatures` list).
+- **`types.ts`**: Added `hiddenTopBarButtons?`, `hiddenBottomNavButtons?`, `hiddenHomeButtons?` to `SystemSettings`.
+
+Already wired up before this iteration (verified, no rework needed):
+- Per-class hide/unhide + custom-class add lives in `AdminDashboard.tsx` SubjectSelector → "Visibility Mode" toggle (writes `hiddenClasses` / `customClasses`); `ClassSelection.tsx` already reads them.
+- Loading screen logo system already supports admin upload / removal via `settings.splashLogo` (`AppLoadingScreen.tsx`, admin UI in `AdminDashboard.tsx` ~6866); default ON, falls back to `public/splash-logo.png`.
+
 ## Recent Changes (Apr 29 — MCQ Cleanup, Spaced Repetition v2, English UI, Global By‑Book)
 - **`McqView.tsx`**: Hidden the "Premium Test" card for classes 6–12. Replaced the crash‑prone Q&A/MCQ/Flashcard pill chooser with a simple Practice MCQs + Flashcard launcher; Q&A flips remain inside the interactive list. Wired `recordRevisionAttempt` on list‑exit so wrong answers are auto‑pushed into the spaced repetition tracker. Translated remaining Hinglish alerts and labels to English.
 - **`utils/revisionTrackerV2.ts`**: Added per‑question `wrongCycles` counter, plus `longSpacingNotesAt` / `longSpacingMcqAt` buckets. On 100 % session accuracy the chapter clears its wrong queue and is rescheduled to notes +10 days and MCQ +20 days. `getDueItems`/`getUpcomingItems`/`markNotesReviewed`/`markMcqDone` all honor the long‑spacing buckets even when no wrong questions remain.

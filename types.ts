@@ -614,6 +614,9 @@ export interface SystemSettings {
   hiddenSubjects?: string[];
   hiddenClasses?: string[]; // NEW: Granular Class Hiding
   hiddenChapters?: string[]; // NEW: Granular Chapter Hiding
+  hiddenTopBarButtons?: string[]; // NEW: Per-button top bar hide/unhide (CREDITS, LIGHTNING, NOTIFICATION, SALE, STREAK)
+  hiddenHomeButtons?: string[]; // NEW: Per-button home grid hide/unhide (feature IDs)
+  hiddenBottomNavButtons?: string[]; // NEW: Per-button bottom nav hide/unhide (HOMEWORK, REVISION, IMPORTANT, VIDEO, APPSTORE, etc.)
   contentVisibility?: { // NEW: Global Content Type Toggles
       VIDEO?: boolean;
       PDF?: boolean;

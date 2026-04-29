@@ -158,9 +158,9 @@ export const FlashcardMcqView: React.FC<Props> = ({ questions, title, subtitle, 
   const canShuffleMore = questions.length > total;
 
   return (
-    <div className="fixed inset-0 z-[200] bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex flex-col h-[100dvh]">
+    <div className="flashcard-page-bg fixed inset-0 z-[200] bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex flex-col h-[100dvh]">
       {/* Top Bar */}
-      <div className="sticky top-0 z-10 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 py-3 flex items-center gap-3">
+      <div className="flashcard-topbar sticky top-0 z-10 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 py-3 flex items-center gap-3">
         <button onClick={onBack} className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-full active:scale-95 transition" aria-label="Back">
           <ArrowLeft size={18} />
         </button>
@@ -180,7 +180,7 @@ export const FlashcardMcqView: React.FC<Props> = ({ questions, title, subtitle, 
       </div>
 
       {/* Progress */}
-      <div className="bg-white/70 border-b border-slate-100 px-4 py-2 flex items-center justify-between">
+      <div className="flashcard-progressbar bg-white/70 border-b border-slate-100 px-4 py-2 flex items-center justify-between">
         <div className="text-[11px] font-bold text-slate-600">
           <span className="text-indigo-600 font-black">{pos + 1}</span>
           <span className="text-slate-400"> / {total}</span>
@@ -200,7 +200,7 @@ export const FlashcardMcqView: React.FC<Props> = ({ questions, title, subtitle, 
           <button
             type="button"
             onClick={() => { stopSpeech(); setAutoSpeak(null); setRevealed(r => !r); }}
-            className="w-full text-left bg-white rounded-3xl shadow-xl border-2 border-slate-200 p-5 sm:p-7 active:scale-[0.99] transition-transform min-h-[200px] flex flex-col"
+            className="flashcard-card w-full text-left bg-white rounded-3xl shadow-xl border-2 border-slate-200 p-5 sm:p-7 active:scale-[0.99] transition-transform min-h-[200px] flex flex-col"
             title="Tap karke answer dekhein"
           >
             <div className="flex items-start justify-between gap-3 mb-4">
@@ -236,7 +236,7 @@ export const FlashcardMcqView: React.FC<Props> = ({ questions, title, subtitle, 
             <button
               disabled={pos === 0}
               onClick={goPrev}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl font-bold text-sm transition-all ${
+              className={`flashcard-prev flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl font-bold text-sm transition-all ${
                 pos === 0
                   ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                   : 'bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 active:scale-95'
@@ -260,7 +260,7 @@ export const FlashcardMcqView: React.FC<Props> = ({ questions, title, subtitle, 
 
           {/* Answer reveal — only visible after tapping the question card */}
           {revealed && (
-            <div className="bg-white rounded-3xl shadow-lg border-2 border-emerald-200 p-5 animate-in fade-in slide-in-from-bottom-4 duration-200">
+            <div className="flashcard-card bg-white rounded-3xl shadow-lg border-2 border-emerald-200 p-5 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <div className="flex items-start justify-between gap-3 mb-3">
                 <span className="bg-emerald-100 text-emerald-700 text-[11px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider">
                   Sahi Jawab

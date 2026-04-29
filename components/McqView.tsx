@@ -11,6 +11,7 @@ import { LessonView } from './LessonView';
 import { MarksheetCard } from './MarksheetCard';
 import { AiInterstitial } from './AiInterstitial';
 import { FlashcardMcqView } from './FlashcardMcqView';
+import { McqSpeakButtons } from './McqSpeakButtons';
 import { recordAttempt as recordRevisionAttempt } from '../utils/revisionTrackerV2';
 
 interface Props {
@@ -1268,8 +1269,12 @@ export const McqView: React.FC<Props> = ({
 
            {/* === ADVANCED TEST MODE (collapsible) ===
                 Holds the legacy Free Practice + Premium (Timed) Test cards.
-                Hidden by default — the new 3-mode selector is now the primary
-                entry. Power users can still expand this for the timed flow. */}
+                For class 6–12 we hide this entire section — the new "Practice
+                MCQs" button above is the unified entry point (it already
+                launches the same Lucent-style interactive list as Free
+                Practice, but without daily limits). Higher classes /
+                competition still see the full advanced flow. */}
+           {!['6','7','8','9','10','11','12'].includes(String(classLevel)) && (
            <button
                onClick={() => setShowAdvancedTest(v => !v)}
                className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors"
@@ -1277,9 +1282,10 @@ export const McqView: React.FC<Props> = ({
                <span className="flex items-center gap-2"><Trophy size={14}/> Advanced Test Mode (Timed + Coins)</span>
                {showAdvancedTest ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
            </button>
+           )}
 
-           {/* FREE PRACTICE — gated by advanced disclosure */}
-           {showAdvancedTest && (() => {
+           {/* FREE PRACTICE — gated by advanced disclosure (class 6-12 me hidden) */}
+           {showAdvancedTest && !['6','7','8','9','10','11','12'].includes(String(classLevel)) && (() => {
                const access = checkFeatureAccess('MCQ_FREE', user, settings || {});
                const isLocked = false; // Unlocked for all per user request
 
