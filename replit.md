@@ -28,7 +28,14 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
 - Profile: Settings sheet with Light Mode, Recovery, Data
 - External Apps: Open inside the app via in-app iframe overlay (not new browser tab)
 
-## Recent Changes (Apr 29 — Bottom Nav Cascading Slot System)
+## Recent Changes (Apr 29 — MCQ Cleanup, Spaced Repetition v2, English UI, Global By‑Book)
+- **`McqView.tsx`**: Hidden the "Premium Test" card for classes 6–12. Replaced the crash‑prone Q&A/MCQ/Flashcard pill chooser with a simple Practice MCQs + Flashcard launcher; Q&A flips remain inside the interactive list. Wired `recordRevisionAttempt` on list‑exit so wrong answers are auto‑pushed into the spaced repetition tracker. Translated remaining Hinglish alerts and labels to English.
+- **`utils/revisionTrackerV2.ts`**: Added per‑question `wrongCycles` counter, plus `longSpacingNotesAt` / `longSpacingMcqAt` buckets. On 100 % session accuracy the chapter clears its wrong queue and is rescheduled to notes +10 days and MCQ +20 days. `getDueItems`/`getUpcomingItems`/`markNotesReviewed`/`markMcqDone` all honor the long‑spacing buckets even when no wrong questions remain.
+- **`RevisionHubV2.tsx`**: Full English translation — Today's Tasks, Due Today, Notes To Read Today, MCQ Practice For Today, How It Works (incl. 100 %→10/20 day note), search/loader/empty states, schedule day formatters, self‑rate & reset prompts.
+- **`StudentDashboard.tsx`**: Bulk Hinglish → English pass across alerts, empty states, placeholders, tooltips, swipe hints, search prompts, GK/Trending strings, MCQ creator labels, "Try again" buttons.
+- **Global Important Notes (Saved)**: Added a By‑Book / By‑Page drilldown for the Global tab that mirrors "My Saved" — global entries inherit book/page metadata from the user's local starred copy when available, otherwise bucket into "Untagged".
+
+## Earlier (Apr 29 — Bottom Nav Cascading Slot System)
 - **`types.ts`**: Added `starredPageHidden?: boolean` to SystemSettings.
 - **`AdminDashboard.tsx`**: Added "Important Notes (GK)" toggle in Nav Settings section — when hidden, Video slides into GK's slot.
 - **`StudentDashboard.tsx`**: Rewrote bottom nav with clean cascading slot logic:
@@ -384,3 +391,38 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
   - `types.ts`: added `revisionHubV2Enabled?: boolean` and `profileInMenuForced?: boolean`.
   - `components/AdminDashboard.tsx`: two new General Settings toggles — "Revision Hub V2" (master switch for the new tab) and "Force Profile in Menu Drawer" (moves Profile out of the bottom nav even when V2 is off).
   - `components/StudentDashboard.tsx`: PROFILE bottom tab is suppressed when V2 is enabled OR `profileInMenuForced` is true; in either case a Profile entry is added to the sidebar drawer under the "Account" category so the user can still reach it.
+
+## Recent Changes (Apr 29 — part 5) — Global By-Book bucket fix + MCQ search bar
+- **`services/noteStars.ts`** — added `NoteStarSource` interface and an optional `source?` field on every RTDB `note_stars/$hash` record. `recordNoteStar` now accepts a 4th `source` arg; the merge transaction writes it on first creation only (first contributor wins, never overwritten) so subsequent users can't relabel a community-shared note. `subscribeToTopNoteStars` surfaces `entry.source`.
+- **`components/StudentDashboard.tsx`** —
+  - All three `recordNoteStar` callers (login backfill, toggleStar, "save community note") now forward the local note's source `{ lessonTitle, subject, pageNo, pageIndex }` so future viewers see the correct book/page.
+  - Tapping a community note on the Global tab now copies `entry.source` into the user's local starred entry (so the new note shows under the right book in their own By-Book view too).
+  - Global By-Book grouping rewritten with a 4-tier source resolver: `entry.source` → exact local topicText match → normalised 140-char prefix match (handles RTDB's 160-char label truncation) → "Untagged". Fixes the bug where every global entry used to land under "Untagged" because the truncated label never matched the full local topicText.
+- **`utils/mcqSearcher.ts`** (new) — pure local-storage MCQ word-match finder analogous to `noteSearcher.ts`. Walks every cached `nst_content_*` key, extracts MCQs from `data.mcqs`, `data.competitionMcqs`, `data.allMcqs`, `data.pages[*].mcqs`, and `data.lucentNotes[*].pages[*].mcqs`, scans question + options + explanation, and returns sorted hits with book/page metadata.
+- **Important Notes search bar** — typing in the "Search notes…" / "Search global notes…" input now also runs `searchMcqsByWords` (250ms debounce) and renders a "Matching MCQs" emerald-bordered card below the notes list with up to 25 hits. Each row shows book · page, the question (2-line clamp), and the correct answer; tapping stashes the query into `pendingReadQuery` and dismisses the page so the active chapter view can auto-jump to its MCQ tab.
+
+## Recent Changes (Apr 29 — part 6) — PdfView header always visible + Important Notes keeps bottom nav
+- **`components/PdfView.tsx`** — removed the auto-hide-header behaviour that fired when a student tapped the **Resources (Extended Resources)** or **Teaching Strategy** tab (was line 1367-1371). Tapping those tabs used to set `showHeader=false`, which translated the entire sticky header off-screen — leaving the user with a huge blank area at the top of the page **and no Back button**. Now `setShowHeader(true)` is called for every tab switch; the existing scroll-down auto-hide still works as a normal reading affordance once the user actually scrolls past 50px.
+- **`components/StudentDashboard.tsx`** — Important Notes (saved/starred) page overlay z-index lowered from `z-[9000]` → `z-[200]` so the dashboard's fixed bottom navigation bar (`z-[300]`) remains visible **and** tappable while the page is open. The inner scroller gained `pb-24` so list items don't get hidden behind the nav bar. The notification page overlay (also `z-[9000]`) was left alone — only the Important Notes page was changed per the user's request.
+
+## Recent Changes (Apr 29 — part 8) — Splash screen logo image (admin-controlled)
+- **`public/splash-logo.png`** (new, copied from attached IIC mark) — default loading-screen logo, served as a static asset by Vite.
+- **`types.ts`** — added three new `systemSettings` fields: `splashLogoEnabled` (bool, default `true`), `splashLogoUrl` (string, default `'/splash-logo.png'`, accepts public path **or** `data:` URL), `splashLogoSize` (number 60-260, default 140).
+- **`components/AppLoadingScreen.tsx`** — splash now renders an `<img>` (clamped to 70vw, fall-back to `/splash-logo.png` on error) instead of the gradient `<h1>` short-name text whenever `splashLogoEnabled !== false`. The tap-to-grow micro-interaction (`scale-[2.2]`) and the existing "Loading your experience..." subline are preserved. When admin disables the logo, the app gracefully falls back to the original branded gradient text + Splash Font picker pipeline.
+- **`components/AdminDashboard.tsx`** — General Settings → "🖼️ Loading Screen Logo" panel (placed right below the Splash Font picker). Includes:
+  - Live 80×80 dark-tile preview that flips between the image and the short-name text based on the toggle.
+  - **Show Logo Image** master toggle (`splashLogoEnabled`).
+  - **Logo Size** slider (60-260 px, only visible when logo enabled).
+  - **⬆️ Upload New Logo** file input — accepts PNG/JPEG/WebP/SVG up to 1 MB, encodes to a `data:` URL via `FileReader`, writes to `splashLogoUrl`, logs `SPLASH_LOGO_UPLOADED`.
+  - **↺ Reset to Default** — restores `/splash-logo.png` + 140 px size after a `confirm()` prompt, logs `SPLASH_LOGO_RESET`.
+
+## Recent Changes (Apr 29 — part 7) — Admin-controlled Home page button visibility (granular)
+- **`utils/homeSections.ts`** (new) — single source of truth for every toggleable element on the student Home tab. Exports `HOME_SECTION_REGISTRY` (10 entries: notice bar, daily-challenge banners, Continue Reading card, Subject Progress card, Main Actions wrapper, CBSE/BSEB toggle, Search button, "Open Lesson As" picker, Class picker grid, Govt. Exams CTA) plus a tiny `isHomeSectionVisible(id, settings)` helper that defaults to **visible** when the admin hasn't touched it (so existing installs render exactly as before).
+- **`components/StudentDashboard.tsx`** — every Home tab section/sub-button is now gated by `isHomeSectionVisible(...)` against `settings.dashboardLayout[id].visible`:
+  - Continue Reading (`order-1`) → `home_continue_reading`
+  - Subject Progress (`order-3`) → `home_subject_progress`
+  - Main Actions wrapper (`order-2`, existing `DashboardSectionWrapper`) → `section_main_actions`
+  - Notice bar (`activeTab === "HOME" && noticeText`) → `home_notice_bar`
+  - Daily-challenge banners block → `home_promo_banners`
+  - Inside the Select Class card: CBSE/BSEB → `home_board_toggle`; Search icon → `home_search_button`; "Open Lesson As" 4-button picker → `home_content_type_pref`; Junior/Secondary/Senior class grid → `home_class_picker`; orange Govt. Exams CTA → `home_govt_exams`.
+- **`components/AdminDashboard.tsx`** — General Settings now ends with a new "🏠 Home Page Buttons / Sections" panel that renders one colored toggle row per registry entry (with emoji, label, description, Visible/Hidden chip and a checkbox). Two bulk buttons — **Show All** and **Hide All** — write `{ id, visible, label }` for every registry id at once. Toggling persists through the existing `setLocalSettings` → `localStorage.nst_system_settings` → `handleSaveSettings` chain and logs `HOME_SECTION_TOGGLED` / `HOME_SECTIONS_BULK` activity. Tile colours use a static Tailwind COLOR_MAP (template-literal class names get stripped by the JIT, so the dynamic mapping must stay explicit).

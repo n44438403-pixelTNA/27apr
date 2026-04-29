@@ -111,7 +111,7 @@ export const McqView: React.FC<Props> = ({
           if (stored) data = JSON.parse(stored);
       }
       if (!data || !data.manualMcqData || data.manualMcqData.length === 0) {
-          setAlertConfig({ isOpen: true, title: 'Coming Soon', message: 'Is chapter ke MCQs abhi tak available nahi hain.' });
+          setAlertConfig({ isOpen: true, title: 'Coming Soon', message: "MCQs for this chapter aren't available yet." });
           setLoading(false);
           return;
       }
@@ -119,7 +119,7 @@ export const McqView: React.FC<Props> = ({
       const activeFilter = topicFilter || selectedTopic;
       if (activeFilter) qs = qs.filter((q: any) => q.topic === activeFilter);
       if (qs.length === 0) {
-          setAlertConfig({ isOpen: true, title: 'No Questions', message: `Topic "${activeFilter}" ke liye koi MCQ nahi mila.` });
+          setAlertConfig({ isOpen: true, title: 'No Questions', message: `No MCQs found for the topic "${activeFilter}".` });
           setLoading(false);
           return;
       }
@@ -153,7 +153,7 @@ export const McqView: React.FC<Props> = ({
           if (stored) data = JSON.parse(stored);
       }
       if (!data || !data.manualMcqData || data.manualMcqData.length === 0) {
-          setAlertConfig({ isOpen: true, title: 'Coming Soon', message: 'Is chapter ke MCQs abhi tak available nahi hain.' });
+          setAlertConfig({ isOpen: true, title: 'Coming Soon', message: "MCQs for this chapter aren't available yet." });
           setLoading(false);
           return;
       }
@@ -166,7 +166,7 @@ export const McqView: React.FC<Props> = ({
           [qs[i], qs[j]] = [qs[j], qs[i]];
       }
       if (qs.length === 0) {
-          setAlertConfig({ isOpen: true, title: 'No Questions', message: `Topic "${activeFilter}" ke liye koi MCQ nahi mila.` });
+          setAlertConfig({ isOpen: true, title: 'No Questions', message: `No MCQs found for the topic "${activeFilter}".` });
           setLoading(false);
           return;
       }
@@ -913,7 +913,32 @@ export const McqView: React.FC<Props> = ({
                       <div className="sticky top-0 z-20 bg-white border-b border-slate-100 shadow-sm">
                           <div className="p-3 flex items-center gap-2">
                               <button
-                                  onClick={() => { setViewMode('SELECTION'); setListData(null); }}
+                                  onClick={() => {
+                                      // Auto-record this attempt so wrong questions
+                                      // flow into the Schedule page (Revision Hub V2).
+                                      // We pass user answers as a parallel array; if a
+                                      // question wasn't attempted we record it as null
+                                      // (treated as "not correct" → goes to wrongQuestions).
+                                      try {
+                                          const answersArr = norm.map((_, i) =>
+                                              listAnswers[i] === undefined ? null : listAnswers[i]
+                                          );
+                                          recordRevisionAttempt({
+                                              subjectId: subject.id || subject.name,
+                                              subjectName: subject.name,
+                                              chapterId: chapter.id,
+                                              chapterTitle: chapter.title,
+                                              pageKey: chapter.id, // chapter-level bucket
+                                              pageLabel: chapter.title,
+                                              questions: norm as any,
+                                              userAnswers: answersArr as any,
+                                          });
+                                      } catch {}
+                                      setViewMode('SELECTION');
+                                      setListData(null);
+                                      setListAnswers({});
+                                      setListRevealed({});
+                                  }}
                                   className="p-2 hover:bg-slate-100 rounded-full text-slate-600"
                               >
                                   <ArrowLeft size={20} />
@@ -989,7 +1014,7 @@ export const McqView: React.FC<Props> = ({
                       {listMode === 'mcq' && !allAnswered && (
                           <div className="px-4 pt-3">
                               <div className="bg-blue-50 border border-blue-200 rounded-2xl px-3 py-2 text-[11px] font-bold text-blue-700 text-center">
-                                  👆 Har question ka apna jawab choose karein. Sab answer hone par speaker me jawab bhi chalu ho jayega.
+                                  👆 Pick an answer for every question. Once you finish, the speaker will read out the answers too.
                               </div>
                           </div>
                       )}
@@ -1088,7 +1113,7 @@ export const McqView: React.FC<Props> = ({
 
                                       {/* MCQ mode: hint when not yet answered */}
                                       {isMcq && selected === undefined && (
-                                          <p className="text-[10px] font-bold text-slate-400 text-center py-1">👆 Apna answer chuno</p>
+                                          <p className="text-[10px] font-bold text-slate-400 text-center py-1">👆 Pick an answer</p>
                                       )}
 
                                       {/* Reset (MCQ mode only) */}
@@ -1097,7 +1122,7 @@ export const McqView: React.FC<Props> = ({
                                               onClick={() => setListAnswers(prev => { const n = { ...prev }; delete n[qi]; return n; })}
                                               className="w-full mt-1 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[11px] active:scale-95 transition flex items-center justify-center gap-1"
                                           >
-                                              <RefreshCw size={11}/> Phir try karein
+                                              <RefreshCw size={11}/> Try again
                                           </button>
                                       )}
 
@@ -1194,29 +1219,25 @@ export const McqView: React.FC<Props> = ({
            </div>
        )}
 
-       {/* === LUCENT-STYLE 3-MODE SELECTOR (📝 MCQ · 💬 Q&A · 🃏 Flashcard)
-            Each pill is a 1-tap launcher into the appropriate mode. */}
+       {/* === LUCENT-STYLE PRIMARY ENTRY (Start Practice + Flashcard) ===
+            The previous 3-pill chooser (MCQ / Q&A / Flashcard) was removed
+            because Q&A and the standalone MCQ pill were causing a crash for
+            class 6–12. Free Practice from "Advanced Test Mode" still launches
+            the same Lucent-style interactive list — and you can flip to Q&A
+            mode from inside that list using the in-view pills. */}
        <div className="px-4 pt-3">
-           <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-2 ml-1">Choose Mode</label>
-           <div className="grid grid-cols-3 gap-2">
+           <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-2 ml-1">Start Practice</label>
+           <div className="grid grid-cols-2 gap-2">
                <button
-                   onClick={() => { setSelectionMode('MCQ'); handleStartList('mcq'); }}
+                   onClick={() => handleStartList('mcq')}
                    disabled={loading}
                    className="py-4 px-2 rounded-2xl text-xs font-black flex flex-col items-center gap-1 transition-all border-2 bg-gradient-to-br from-blue-500 to-indigo-600 text-white border-blue-600 shadow-lg shadow-blue-200 hover:scale-[1.02] active:scale-95 disabled:opacity-60"
                >
                    <span className="text-2xl leading-none">📝</span>
-                   <span>MCQ</span>
+                   <span>Practice MCQs</span>
                </button>
                <button
-                   onClick={() => { setSelectionMode('QA'); handleStartList('qa'); }}
-                   disabled={loading}
-                   className="py-4 px-2 rounded-2xl text-xs font-black flex flex-col items-center gap-1 transition-all border-2 bg-gradient-to-br from-purple-500 to-pink-500 text-white border-purple-600 shadow-lg shadow-purple-200 hover:scale-[1.02] active:scale-95 disabled:opacity-60"
-               >
-                   <span className="text-2xl leading-none">💬</span>
-                   <span>Q&A</span>
-               </button>
-               <button
-                   onClick={() => { setSelectionMode('CARD'); handleStartFlashcard(); }}
+                   onClick={() => handleStartFlashcard()}
                    disabled={loading}
                    className="py-4 px-2 rounded-2xl text-xs font-black flex flex-col items-center gap-1 transition-all border-2 bg-gradient-to-br from-amber-500 to-orange-500 text-white border-amber-600 shadow-lg shadow-amber-200 hover:scale-[1.02] active:scale-95 disabled:opacity-60"
                >
@@ -1224,7 +1245,7 @@ export const McqView: React.FC<Props> = ({
                    <span>Flashcard</span>
                </button>
            </div>
-           <p className="text-[10px] text-slate-500 text-center mt-2">Tap any mode to start instantly</p>
+           <p className="text-[10px] text-slate-500 text-center mt-2">Tap to start. You can switch to Q&amp;A view inside the practice screen.</p>
        </div>
 
        <div className="p-6 space-y-4">
@@ -1298,8 +1319,10 @@ export const McqView: React.FC<Props> = ({
                );
            })()}
 
-           {/* PREMIUM TEST — gated by advanced disclosure */}
-           {showAdvancedTest && (() => {
+           {/* PREMIUM TEST — gated by advanced disclosure
+                User request: hide Premium Test entirely for class 6–12.
+                We still keep the card for higher classes / non-school streams. */}
+           {showAdvancedTest && !['6','7','8','9','10','11','12'].includes(String(classLevel)) && (() => {
                const access = checkFeatureAccess('MCQ_PREMIUM', user, settings || {});
                // If strict feed lock, hide or lock visually. If pay-per-view, show cost.
                const isLocked = false; // Unlocked for all per user request

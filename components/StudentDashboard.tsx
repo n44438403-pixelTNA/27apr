@@ -33,6 +33,7 @@ import {
   APP_VERSION,
 } from "../constants";
 import { ALL_FEATURES } from "../utils/featureRegistry";
+import { isHomeSectionVisible } from "../utils/homeSections";
 import { checkFeatureAccess } from "../utils/permissionUtils";
 import { downloadAsMHTML } from "../utils/downloadUtils";
 import { saveRecentHomework, getRecentHomeworks, removeRecentHomework, getRecentChapters, removeRecentChapter, saveRecentLucent, getRecentLucent, removeRecentLucent, markNoteFullyRead, getFullyReadMap, markReadToday, getReadingStreak, getReadDates, getBestReadingDay, getTodayItemCount, type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type StreakInfo, type BestDay } from "../utils/recentReads";
@@ -1105,6 +1106,11 @@ export const StudentDashboard: React.FC<Props> = ({
   } | null>(null);
   // -- Profile Starred Notes: search + TTS state (mirrors HistoryPage STARRED tab) --
   const [profileStarSearch, setProfileStarSearch] = useState('');
+  // MCQ matches that ALSO contain the search term — surfaced below the
+  // notes list so users can find a question they remember by a single word
+  // even if it's not in any starred note.
+  const [profileStarMcqHits, setProfileStarMcqHits] = useState<import('../utils/mcqSearcher').McqSearchHit[]>([]);
+  const [profileStarMcqLoading, setProfileStarMcqLoading] = useState(false);
   const [isReadingProfileStars, setIsReadingProfileStars] = useState(false);
   const [readingProfileStarIdx, setReadingProfileStarIdx] = useState<number | null>(null);
   const isReadingProfileStarsRef = useRef(false);
@@ -1182,6 +1188,33 @@ export const StudentDashboard: React.FC<Props> = ({
     return () => clearTimeout(t);
   }, [pendingReadQuery]);
 
+  // Run an MCQ search whenever the Important Notes search input changes.
+  // 250ms debounce to avoid hammering storage on every keystroke; tokenises
+  // on whitespace so multi-word queries ("yamuna river") work.
+  useEffect(() => {
+    const q = profileStarSearch.trim();
+    if (!q || q.length < 2) {
+      setProfileStarMcqHits([]);
+      setProfileStarMcqLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProfileStarMcqLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const { searchMcqsByWords } = await import('../utils/mcqSearcher');
+        const words = q.split(/\s+/).filter(w => w.length >= 2);
+        const hits = await searchMcqsByWords(words, 25);
+        if (!cancelled) setProfileStarMcqHits(hits);
+      } catch {
+        if (!cancelled) setProfileStarMcqHits([]);
+      } finally {
+        if (!cancelled) setProfileStarMcqLoading(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [profileStarSearch]);
+
   // Global "social proof" counts for Important Notes — top 200 most-saved
   // topics across all students. Backed by Firebase Realtime DB at
   // `note_stars/{topicHash}`. Used to show "⭐ N students saved this" badges
@@ -1208,7 +1241,12 @@ export const StudentDashboard: React.FC<Props> = ({
       for (const n of starredNotes) {
         if (!n?.topicText) continue;
         try {
-          await recordNoteStar(user.id, n.noteKey || `local_${n.id}`, n.topicText);
+          await recordNoteStar(user.id, n.noteKey || `local_${n.id}`, n.topicText, n.source ? {
+            lessonTitle: n.source.lessonTitle,
+            subject: n.source.subject,
+            pageNo: n.source.pageNo as any,
+            pageIndex: n.source.pageIndex as any,
+          } : undefined);
         } catch {}
       }
     })();
@@ -1323,7 +1361,7 @@ export const StudentDashboard: React.FC<Props> = ({
     const allLucent = (settings?.lucentNotes || []) as any[];
     const found = allLucent.find(l => l.id === entry.lucentId);
     if (!found) {
-      showAlert('Yeh Lucent page ab uplabdh nahi hai.', 'ERROR');
+      showAlert('This Lucent page is no longer available.', 'ERROR');
       return;
     }
     setLucentNoteViewer(found);
@@ -1548,7 +1586,12 @@ export const StudentDashboard: React.FC<Props> = ({
     // Fire-and-forget global count sync so other students see it.
     try {
       if (user?.id) {
-        if (didStar) recordNoteStar(user.id, noteKey, topicText);
+        if (didStar) recordNoteStar(user.id, noteKey, topicText, source ? {
+          lessonTitle: source.lessonTitle,
+          subject: source.subject,
+          pageNo: source.pageNo as any,
+          pageIndex: source.pageIndex as any,
+        } : undefined);
         else recordNoteUnstar(user.id, topicText);
       }
     } catch {}
@@ -1576,7 +1619,7 @@ export const StudentDashboard: React.FC<Props> = ({
         const allLucent = (settings?.lucentNotes || []) as any[];
         const found = allLucent.find(l => l.id === source.lucentId);
         if (!found) {
-          showAlert('Yeh Lucent book ab uplabdh nahi hai.', 'ERROR');
+          showAlert('This Lucent book is no longer available.', 'ERROR');
           return false;
         }
         // Close the Important-Notes overlays first so the reader is visible.
@@ -2829,8 +2872,8 @@ export const StudentDashboard: React.FC<Props> = ({
               {!showLucentSection && (
                 <div className="text-center py-16 text-slate-400">
                   <BookOpen size={48} className="mx-auto mb-3 opacity-30" />
-                  <p className="font-bold text-slate-500">Koi content nahi mila</p>
-                  <p className="text-sm text-slate-400 mt-1">Admin ne abhi tak koi content nahi dala hai</p>
+                  <p className="font-bold text-slate-500">No content found</p>
+                  <p className="text-sm text-slate-400 mt-1">The admin hasn't added any content yet.</p>
                 </div>
               )}
             </div>
@@ -2925,9 +2968,9 @@ export const StudentDashboard: React.FC<Props> = ({
                   try {
                     const safeTitle = (activeHw.title || 'Homework').replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
                     await downloadAsMHTML('hw-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
-                    showAlert('📥 Offline save ho gaya!', 'SUCCESS');
+                    showAlert('📥 Saved offline!', 'SUCCESS');
                   } catch (e) {
-                    showAlert('Download fail ho gaya. Phir try karein.', 'ERROR');
+                    showAlert('Download failed. Please try again.', 'ERROR');
                   }
                 }}
                 className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors"
@@ -3341,7 +3384,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         </div>
                         {!allDone && (
                           <div className="px-4 py-2 bg-slate-50 border-t border-slate-100">
-                            <p className="text-[11px] font-bold text-slate-500 text-center">{total - attempted} question{total - attempted === 1 ? '' : 's'} baaki — sab try karo!</p>
+                            <p className="text-[11px] font-bold text-slate-500 text-center">{total - attempted} question{total - attempted === 1 ? '' : 's'} left — try them all!</p>
                           </div>
                         )}
                         {allDone && (
@@ -3375,7 +3418,7 @@ export const StudentDashboard: React.FC<Props> = ({
               )}
 
               {!nextHw && (
-                <p className="text-center text-xs text-slate-400 font-bold py-6">🎉 Saare notes complete!</p>
+                <p className="text-center text-xs text-slate-400 font-bold py-6">🎉 All notes complete!</p>
               )}
             </div>
             )}
@@ -3635,7 +3678,7 @@ export const StudentDashboard: React.FC<Props> = ({
             </button>
             <div>
               <h2 className="text-xl font-black text-slate-800">Lucent Book</h2>
-              <p className="text-xs text-slate-500">Subject choose karein</p>
+              <p className="text-xs text-slate-500">Pick a subject</p>
             </div>
           </div>
           <div className="grid grid-cols-1 gap-3">
@@ -4037,7 +4080,7 @@ export const StudentDashboard: React.FC<Props> = ({
         <div className="flex flex-col gap-4 pb-4">
           {/* RESUME READING — page-wise (chapters + ALL homework notes), sorted by latest activity */}
           <div className="order-1">
-          {(() => {
+          {isHomeSectionVisible('home_continue_reading', settings) && (() => {
             const HW_SUBJECT_META: Record<string, { label: string; chipBg: string; chipText: string; barFrom: string; barTo: string; btnBg: string; btnHover: string }> = {
               sarSangrah:           { label: 'Sar Sangrah',           chipBg: 'bg-rose-100',    chipText: 'text-rose-700',    barFrom: 'from-rose-500',    barTo: 'to-pink-500',     btnBg: 'bg-rose-600',    btnHover: 'hover:bg-rose-700' },
               speedySocialScience:  { label: 'Speedy SST',            chipBg: 'bg-amber-100',   chipText: 'text-amber-700',   barFrom: 'from-amber-500',   barTo: 'to-orange-500',   btnBg: 'bg-amber-600',   btnHover: 'hover:bg-amber-700' },
@@ -4166,7 +4209,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 )}
                 {merged.length === 0 ? (
                   <div className="bg-white border border-dashed border-indigo-200 rounded-2xl p-4 text-center">
-                    <p className="text-xs font-bold text-slate-500">Is filter me kuch nahi hai abhi.</p>
+                    <p className="text-xs font-bold text-slate-500">Nothing matches this filter yet.</p>
                     <button
                       onClick={() => setHomeResumeFilter('all')}
                       className="mt-2 text-[11px] font-black text-indigo-600 underline"
@@ -4341,7 +4384,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
           {/* SUBJECT-WISE PROGRESS */}
           <div className="order-3">
-          {(() => {
+          {isHomeSectionVisible('home_subject_progress', settings) && (() => {
             // Group recentChapters by subject
             type SubjectStat = {
               subjectId: string;
@@ -4449,29 +4492,33 @@ export const StudentDashboard: React.FC<Props> = ({
 
                   <div className="flex items-center gap-1.5 shrink-0 -mr-1">
                     {/* BOARD SELECTION TOGGLE - shifted slightly left, more compact */}
-                    <div className="flex items-center p-0.5 bg-slate-100 rounded-lg">
-                      <button
-                        onClick={() => setActiveSessionBoard("CBSE")}
-                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${activeSessionBoard !== "BSEB" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        CBSE
-                      </button>
-                      <button
-                        onClick={() => setActiveSessionBoard("BSEB")}
-                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${activeSessionBoard === "BSEB" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-                      >
-                        BSEB
-                      </button>
-                    </div>
+                    {isHomeSectionVisible('home_board_toggle', settings) && (
+                      <div className="flex items-center p-0.5 bg-slate-100 rounded-lg">
+                        <button
+                          onClick={() => setActiveSessionBoard("CBSE")}
+                          className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${activeSessionBoard !== "BSEB" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                        >
+                          CBSE
+                        </button>
+                        <button
+                          onClick={() => setActiveSessionBoard("BSEB")}
+                          className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${activeSessionBoard === "BSEB" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                        >
+                          BSEB
+                        </button>
+                      </div>
+                    )}
                     {/* SEARCH ICON — more prominent, distinct from toggle */}
-                    <button
-                      onClick={() => { setShowHomeSearch(s => !s); setHomeSearchQuery(''); }}
-                      className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 border ${showHomeSearch ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300 shadow-sm'}`}
-                      title="Subject ya Chapter search karo"
-                      aria-label="Search"
-                    >
-                      <Search size={16} />
-                    </button>
+                    {isHomeSectionVisible('home_search_button', settings) && (
+                      <button
+                        onClick={() => { setShowHomeSearch(s => !s); setHomeSearchQuery(''); }}
+                        className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all active:scale-90 border ${showHomeSearch ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300 shadow-sm'}`}
+                        title="Search chapters or subjects"
+                        aria-label="Search"
+                      >
+                        <Search size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -4485,7 +4532,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         type="text"
                         value={homeSearchQuery}
                         onChange={e => setHomeSearchQuery(e.target.value)}
-                        placeholder="Chapter ya Subject search karo..."
+                        placeholder="Search chapters or subjects..."
                         className="w-full pl-8 pr-8 py-2.5 text-xs font-semibold bg-blue-50 border border-blue-200 rounded-xl text-slate-700 placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-all"
                       />
                       {homeSearchQuery && (
@@ -4569,7 +4616,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       const hwResults = hwHits.slice(0, 8);
                       const totalCount = recentResults.length + subjectResults.length + starResults.length + lucentResults.length + hwResults.length;
                       if (totalCount === 0) {
-                        return <p className="text-center text-xs text-slate-400 font-bold py-3">Koi result nahi mila. Notes me bhi search ho raha hai — koi shabd jo notes me ho try karein.</p>;
+                        return <p className="text-center text-xs text-slate-400 font-bold py-3">No matches found. The search also looks inside notes — try a word that appears in your notes.</p>;
                       }
                       return (
                         <div className="space-y-2.5 max-h-72 overflow-y-auto pr-0.5">
@@ -4711,6 +4758,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 )}
 
                 {/* CONTENT TYPE PREFERENCE */}
+                {isHomeSectionVisible('home_content_type_pref', settings) && (
                 <div className="mb-4">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Open Lesson As</span>
@@ -4745,9 +4793,10 @@ export const StudentDashboard: React.FC<Props> = ({
                     })}
                   </div>
                 </div>
+                )}
 
                 {/* CLASS SELECTION — grouped categories */}
-                {(() => {
+                {isHomeSectionVisible('home_class_picker', settings) && (() => {
                   type ClassTheme = {
                     label: string;
                     accent: string;
@@ -4866,6 +4915,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       })}
 
                       {/* GOVT EXAMS + AI SHORTCUT */}
+                      {isHomeSectionVisible('home_govt_exams', settings) && (
                       <div>
                         <div className="flex items-center gap-2 mb-2">
                           <span className="inline-block h-2 w-2 rounded-full bg-gradient-to-r from-orange-500 to-amber-600" />
@@ -4893,6 +4943,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           </button>
                         </div>
                       </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -6133,10 +6184,10 @@ export const StudentDashboard: React.FC<Props> = ({
                 </div>
                 <p className="text-[11px] font-medium opacity-90 mt-2">
                   {readingStreak.readToday
-                    ? `Aaj ${todayCount > 0 ? todayCount : ''} ${todayCount > 0 ? 'note' + (todayCount === 1 ? '' : 's') + ' padh liye' : 'padh liya'} — keep it up!`
+                    ? `Today you've read ${todayCount > 0 ? todayCount : ''} ${todayCount > 0 ? 'note' + (todayCount === 1 ? '' : 's') : ''} — keep it up!`
                     : readingStreak.current > 0
-                      ? "Aaj bhi padho streak banaye rakhne ke liye"
-                      : "Aaj koi note kholo aur naya streak start karo"}
+                      ? "Read today to keep your streak alive"
+                      : "Open a note today to start a fresh streak"}
                 </p>
               </div>
               {/* TODAY + BEST DAY stats */}
@@ -6160,7 +6211,7 @@ export const StudentDashboard: React.FC<Props> = ({
                   ) : (
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
                       <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">🏆 Best Day</p>
-                      <p className="text-xs text-slate-500 font-bold leading-tight mt-1">Padhna shuru karo!</p>
+                      <p className="text-xs text-slate-500 font-bold leading-tight mt-1">Start reading!</p>
                     </div>
                   )}
                 </div>
@@ -6218,7 +6269,7 @@ export const StudentDashboard: React.FC<Props> = ({
       })()}
 
       {/* NOTIFICATION BAR (Only on Home) (COMPACT VERSION) */}
-      {activeTab === "HOME" && settings?.noticeText && (
+      {activeTab === "HOME" && settings?.noticeText && isHomeSectionVisible('home_notice_bar', settings) && (
         <div className="bg-slate-900 text-white p-3 mb-4 rounded-xl shadow-md border border-slate-700 animate-in slide-in-from-top-4 relative mx-2 mt-2">
           <div className="flex items-center gap-3">
             <Megaphone size={16} className="text-yellow-400 shrink-0" />
@@ -6237,7 +6288,7 @@ export const StudentDashboard: React.FC<Props> = ({
       )}
 
       {/* DAILY GK & GLOBAL CHALLENGE (Only on Home) */}
-      {activeTab === "HOME" && (() => {
+      {activeTab === "HOME" && isHomeSectionVisible('home_promo_banners', settings) && (() => {
         const banners: React.ReactNode[] = [];
 
         // 1. GLOBAL CHALLENGE MCQ
@@ -6912,7 +6963,7 @@ export const StudentDashboard: React.FC<Props> = ({
                             <h3 className="text-base font-black leading-tight">Daily GK Corner</h3>
                             <p className="text-[11px] font-bold text-white/85">
                               {todaysGksForCard.length > 0
-                                ? `Aaj ${todaysGksForCard.length} naye GK question hai`
+                                ? `${todaysGksForCard.length} new GK question${todaysGksForCard.length === 1 ? '' : 's'} today`
                                 : `${allGksForCard.length} GK questions ka archive`}
                             </p>
                           </div>
@@ -6928,7 +6979,7 @@ export const StudentDashboard: React.FC<Props> = ({
                             className="bg-white/95 hover:bg-white text-emerald-700 rounded-xl py-2.5 px-3 font-black text-xs active:scale-95 transition-all shadow-sm flex items-center justify-center gap-1.5"
                             aria-label="Open Today's GK"
                           >
-                            <Sparkles size={13} /> Aaj ka GK
+                            <Sparkles size={13} /> Today's GK
                           </button>
                           <button
                             onClick={() => setShowDailyGkHistory(true)}
@@ -7008,8 +7059,8 @@ export const StudentDashboard: React.FC<Props> = ({
                 {todaysHw.length === 0 && (
                   <div className="text-center py-10 text-slate-500">
                     <GraduationCap size={40} className="mx-auto mb-3 opacity-40" />
-                    <p className="font-bold text-sm">Aaj koi homework nahi hai</p>
-                    <p className="text-xs mt-1">Admin ke add karne ka intezaar karein</p>
+                    <p className="font-bold text-sm">No homework today</p>
+                    <p className="text-xs mt-1">Wait for the admin to add some</p>
                   </div>
                 )}
 
@@ -7026,7 +7077,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           </div>
                           <div className="min-w-0">
                             <p className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Class 6–12 · Continue Reading</p>
-                            <p className="text-xs text-slate-500 font-medium truncate">Class notes wahan se shuru karo jahan choda tha</p>
+                            <p className="text-xs text-slate-500 font-medium truncate">Pick up your class notes right where you left off</p>
                           </div>
                         </div>
                         <span className="text-[10px] font-bold text-indigo-600 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
@@ -7158,7 +7209,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         );
                       })}
                       <p className="text-[10px] text-slate-400 font-semibold text-center pt-1 italic">
-                        Tip: Card ko bayein swipe karo to hatane ke liye
+                        Tip: Swipe a card left to remove it
                       </p>
                     </div>
                   </div>
@@ -7177,7 +7228,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           </div>
                           <div className="min-w-0">
                             <p className="text-[10px] font-black text-teal-700 uppercase tracking-widest">Lucent — Continue Reading</p>
-                            <p className="text-xs text-slate-500 font-medium truncate">Wahan se shuru karo jahan choda tha</p>
+                            <p className="text-xs text-slate-500 font-medium truncate">Pick up where you left off</p>
                           </div>
                         </div>
                         <span className="text-[10px] font-bold text-teal-600 bg-white px-2 py-0.5 rounded-full border border-teal-200">
@@ -7231,7 +7282,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           </SwipeToDismiss>
                         ))}
                         <p className="text-[10px] text-slate-400 font-semibold text-center pt-1 italic">
-                          Tip: Card ko bayein swipe karo to hatane ke liye
+                          Tip: Swipe a card left to remove it
                         </p>
                       </div>
                     </div>
@@ -7358,7 +7409,7 @@ export const StudentDashboard: React.FC<Props> = ({
           }
           const filledOpts = compMcqDraft.options.map(o => o.trim());
           if (filledOpts.some(o => !o)) {
-            showAlert('Saare 4 options bharein.', 'ERROR');
+            showAlert('Please fill in all 4 options.', 'ERROR');
             return;
           }
           const newMcq: any = {
@@ -7398,7 +7449,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-base font-black text-slate-800">Practice MCQ Maker</h3>
-                  <p className="text-[11px] text-slate-500 font-medium">Competition ke liye apna MCQ banaye + practice karein</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Build and practise your own MCQs for competitive exams</p>
                 </div>
                 {allMcqs.length > 0 && (
                   <button
@@ -7407,7 +7458,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         await downloadAsMHTML('comp-mcq-printable', `Competition_MCQs_${new Date().toISOString().slice(0,10)}`);
                         showAlert(`📥 ${allMcqs.length} MCQs offline save ho gaye!`, 'SUCCESS');
                       } catch (e) {
-                        showAlert('Download fail ho gaya. Phir try karein.', 'ERROR');
+                        showAlert('Download failed. Please try again.', 'ERROR');
                       }
                     }}
                     className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md active:scale-95 transition-all"
@@ -7445,8 +7496,8 @@ export const StudentDashboard: React.FC<Props> = ({
                     {allMcqs.length === 0 ? (
                       <div className="text-center py-16 text-slate-400">
                         <CheckSquare size={48} className="mx-auto mb-3 opacity-30" />
-                        <p className="font-bold text-slate-500">Abhi koi MCQ nahi hai</p>
-                        <p className="text-sm text-slate-400 mt-1 mb-4">"+ Create New" tab se apna pehla MCQ banayein</p>
+                        <p className="font-bold text-slate-500">No MCQs yet</p>
+                        <p className="text-sm text-slate-400 mt-1 mb-4">Use the "+ Create New" tab to add your first MCQ</p>
                         <button
                           onClick={() => setCompMcqTab('CREATE')}
                           className="px-5 py-2.5 bg-orange-600 text-white rounded-xl font-bold text-sm shadow-md active:scale-95 transition-transform"
@@ -7638,7 +7689,7 @@ export const StudentDashboard: React.FC<Props> = ({
                             <button
                               onClick={() => {
                                 const userIdx = safeIdx - adminMcqs.length;
-                                if (userIdx >= 0 && confirm('Yeh MCQ delete karein?')) deleteUserMcq(userIdx);
+                                if (userIdx >= 0 && confirm('Delete this MCQ?')) deleteUserMcq(userIdx);
                               }}
                               className="px-4 py-3 rounded-xl bg-rose-50 border border-rose-200 font-bold text-sm text-rose-700 active:scale-95 transition-transform"
                               aria-label="Delete"
@@ -7665,7 +7716,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 {compMcqTab === 'CREATE' && (
                   <div className="space-y-4">
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[12px] text-amber-800 font-medium">
-                      📝 Apna question + 4 options bhare. Sahi option select karein. Save ke baad Practice tab me dikhega.
+                      📝 Type your question and four options, mark the correct one, and after you save it appears in the Practice tab.
                     </div>
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-4">
                       <div>
@@ -7673,12 +7724,12 @@ export const StudentDashboard: React.FC<Props> = ({
                         <textarea
                           value={compMcqDraft.question}
                           onChange={e => setCompMcqDraft({ ...compMcqDraft, question: e.target.value })}
-                          placeholder="Apna question yahan likhein..."
+                          placeholder="Type your question here..."
                           className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-orange-500 h-24 resize-none"
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">Options (Sahi option ka radio select karein)</label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">Options (use the radio to mark the correct one)</label>
                         <div className="space-y-2">
                           {compMcqDraft.options.map((opt, oi) => (
                             <div key={oi} className="flex items-center gap-2">
@@ -8251,7 +8302,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           </span>
                         </div>
                         <p className="font-black text-slate-800 text-sm truncate">
-                          Aaj ka GK · {todaysGks.length} {todaysGks.length === 1 ? "question" : "questions"}
+                          Today's GK · {todaysGks.length} {todaysGks.length === 1 ? "question" : "questions"}
                         </p>
                         <p className="text-[11px] text-slate-500 font-medium">
                           {gkTodayExpanded ? "Tap to hide" : "Tap to view"}
@@ -8783,6 +8834,80 @@ export const StudentDashboard: React.FC<Props> = ({
               <div style={{ fontSize: '14px', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
                 {pg.content || ''}
               </div>
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Hidden printable container for the currently-open Lucent page MCQs —
+          used by the new "Save" button on the MCQs tab so class 6-12 students
+          can take the same MHTML snapshot Competition mode already supports. */}
+      <div
+        id="lucent-mcq-printable"
+        style={{ position: 'fixed', left: '-99999px', top: 0, width: '1100px', background: '#ffffff', padding: '32px', color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif' }}
+        aria-hidden="true"
+      >
+        {(() => {
+          const lv = lucentNoteViewer;
+          if (!lv) return null;
+          const idx = Math.min(Math.max(0, lucentPageIndex), Math.max(0, (lv.pages?.length || 1) - 1));
+          const pg = lv.pages?.[idx];
+          if (!pg) return null;
+          const pageKey = `${lv.id}_${idx}`;
+          const adminMcqs = (pg.mcqs || []) as MCQItem[];
+          const mcqs: MCQItem[] = adminMcqs.length > 0 ? adminMcqs : (lucentMcqsByPage[pageKey] || []);
+          return (
+            <>
+              <h1 style={{ fontSize: '28px', fontWeight: 900, marginBottom: '4px' }}>
+                {lv.lessonTitle} — Page {pg.pageNo} · MCQs
+              </h1>
+              <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '24px' }}>
+                {lv.subject} · Page {idx + 1} of {lv.pages.length} · {mcqs.length} question{mcqs.length === 1 ? '' : 's'} · {settings?.appName || 'IIC'} · Saved {new Date().toLocaleString()}
+              </p>
+              {mcqs.length === 0 ? (
+                <p style={{ fontSize: '14px', color: '#64748b' }}>No MCQs available for this page.</p>
+              ) : (
+                mcqs.map((m, qi) => (
+                  <div key={qi} style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px', marginBottom: '12px', background: '#f8fafc' }}>
+                    <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>
+                      Q{qi + 1}{(m as any).topic ? ` · ${(m as any).topic}` : ''}
+                    </div>
+                    <div style={{ fontSize: '15px', fontWeight: 700, marginBottom: '10px', whiteSpace: 'pre-wrap' }}>
+                      {m.question}
+                    </div>
+                    <div>
+                      {(m.options || []).map((opt, oi) => (
+                        <div
+                          key={oi}
+                          style={{
+                            fontSize: '13px',
+                            padding: '8px 12px',
+                            marginBottom: '6px',
+                            borderRadius: '8px',
+                            background: oi === m.correctAnswer ? '#d1fae5' : '#ffffff',
+                            border: oi === m.correctAnswer ? '1px solid #34d399' : '1px solid #e2e8f0',
+                            fontWeight: oi === m.correctAnswer ? 700 : 500,
+                          }}
+                        >
+                          <span style={{ fontWeight: 800, marginRight: '8px' }}>{String.fromCharCode(65 + oi)}.</span>
+                          {opt}
+                          {oi === m.correctAnswer && <span style={{ marginLeft: '8px', color: '#047857', fontWeight: 700 }}>✓ Answer</span>}
+                        </div>
+                      ))}
+                    </div>
+                    {(m as any).explanation && (
+                      <div style={{ marginTop: '10px', padding: '10px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '8px', fontSize: '12px', color: '#78350f' }}>
+                        <strong>Explanation:</strong> {(m as any).explanation}
+                      </div>
+                    )}
+                    {(m as any).examTip && (
+                      <div style={{ marginTop: '6px', padding: '8px 10px', background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: '6px', fontSize: '12px', color: '#065f46' }}>
+                        <strong>Exam Tip:</strong> {(m as any).examTip}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
             </>
           );
         })()}
@@ -9550,9 +9675,9 @@ export const StudentDashboard: React.FC<Props> = ({
                       const safeTitle = `${entry.lessonTitle || 'Lucent'}_pg${currentPage?.pageNo || safeIndex + 1}`
                         .replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
                       await downloadAsMHTML('lucent-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
-                      showAlert('📥 Offline save ho gaya!', 'SUCCESS');
+                      showAlert('📥 Saved offline!', 'SUCCESS');
                     } catch (e) {
-                      showAlert('Download fail ho gaya. Phir try karein.', 'ERROR');
+                      showAlert('Download failed. Please try again.', 'ERROR');
                     }
                   }}
                   className="bg-white/20 hover:bg-white/30 p-2 rounded-full shrink-0 transition-colors"
@@ -9739,7 +9864,7 @@ RULES:
                   if (m) jsonText = m[0];
                   let parsed: any[] = [];
                   try { parsed = JSON.parse(jsonText); } catch (e) {
-                    showAlert('MCQ parse fail ho gaya, ek baar phir try kariye.', 'ERROR');
+                    showAlert('Could not parse the MCQ. Please try again.', 'ERROR');
                     setLucentMcqLoading(false);
                     return;
                   }
@@ -9790,6 +9915,27 @@ RULES:
                             : `Page ${currentPage?.pageNo} ke points se AI banayega`}
                         </p>
                       </div>
+                      {/* Download all MCQs of this Lucent page as a portable
+                          MHTML/HTML file — same convenience the Competition
+                          MCQ Hub already offers. */}
+                      {mcqs.length > 0 && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const safeTitle = `${entry.lessonTitle || 'Lucent'}_pg${currentPage?.pageNo || safeIndex + 1}_MCQs`
+                                .replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
+                              await downloadAsMHTML('lucent-mcq-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                              showAlert(`📥 ${mcqs.length} MCQs saved offline!`, 'SUCCESS');
+                            } catch (e) {
+                              showAlert('Download failed. Please try again.', 'ERROR');
+                            }
+                          }}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 transition flex items-center gap-1"
+                          title="Save these MCQs offline"
+                        >
+                          <Download size={12} /> Save
+                        </button>
+                      )}
                       {!usingAdminMcqs && mcqs.length > 0 && (
                         <button
                           onClick={generateMcqs}
@@ -9857,7 +10003,7 @@ RULES:
                         ) : (
                           <>
                             <BrainCircuit size={42} className="text-purple-300 mx-auto mb-3" />
-                            <p className="font-black text-sm text-slate-700">MCQ generate karein</p>
+                            <p className="font-black text-sm text-slate-700">Generate MCQs</p>
                             <p className="text-[11px] text-slate-500 mt-1 mb-4">Is page ke important points se 8 MCQs banenge</p>
                             <button
                               onClick={generateMcqs}
@@ -9963,7 +10109,7 @@ RULES:
                             )}
                             {/* Interactive mode hint when not yet answered */}
                             {mode === 'interactive' && selected === undefined && (
-                              <p className="text-[10px] font-bold text-slate-400 text-center py-1">Koi option select karein</p>
+                              <p className="text-[10px] font-bold text-slate-400 text-center py-1">Pick an option</p>
                             )}
                             {/* Reset for interactive */}
                             {mode === 'interactive' && selected !== undefined && (
@@ -9971,7 +10117,7 @@ RULES:
                                 onClick={() => setLucentMcqAnswers(prev => { const n = { ...prev }; delete n[ansKey]; return n; })}
                                 className="w-full mt-1 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[11px] active:scale-95 transition"
                               >
-                                🔄 Phir try karein
+                                🔄 Try again
                               </button>
                             )}
                             {showExplanations && (
@@ -10043,9 +10189,9 @@ RULES:
                 try {
                   const safeTitle = (activePlayerHw.title || 'Homework_MCQ').replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
                   await downloadAsMHTML('hw-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
-                  showAlert('📥 Offline save ho gaya!', 'SUCCESS');
+                  showAlert('📥 Saved offline!', 'SUCCESS');
                 } catch (e) {
-                  showAlert('Download fail ho gaya. Phir try karein.', 'ERROR');
+                  showAlert('Download failed. Please try again.', 'ERROR');
                 }
               }}
               className="shrink-0 bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-full active:scale-95 transition"
@@ -10111,7 +10257,7 @@ RULES:
               <button
                 onClick={() => {
                   if (!activePlayerHw.parsedMcqs || activePlayerHw.parsedMcqs.length === 0) {
-                    showAlert('Is homework mein abhi MCQs nahi hai.', 'WARNING');
+                    showAlert('No MCQs in this homework yet.', 'WARNING');
                     return;
                   }
                   setFlashcardMcqs({
@@ -10162,7 +10308,7 @@ RULES:
               {playerChunks.length === 0 && (
                 <div className="text-center py-16 text-slate-400">
                   <BookOpen size={48} className="mx-auto mb-3 opacity-30" />
-                  <p className="font-bold text-slate-500">Is homework mein abhi kuch nahi hai</p>
+                  <p className="font-bold text-slate-500">Nothing in this homework yet</p>
                 </div>
               )}
               {/* Q&A mode: "Show All Answers" lifted to top — same as Lucent.
@@ -10296,7 +10442,7 @@ RULES:
                             <button
                               onClick={() => { setShowCompMcqHub(true); setCompMcqTab('CREATE'); setCompMcqDraft({ question: chunk.mcq?.question || '', options: chunk.mcq?.options?.length === 4 ? [...chunk.mcq.options] : ['', '', '', ''], correctAnswer: chunk.mcq?.correctAnswer ?? 0 }); }}
                               className="shrink-0 p-2 rounded-full transition bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                              title="Is question ko MCQ bank mein save karo"
+                              title="Save this question to your MCQ bank"
                             >
                               <PlusCircle size={14} />
                             </button>
@@ -10361,7 +10507,7 @@ RULES:
                         {/* MCQ (interactive) mode: helper hint before the student taps */}
                         {isInteractive && !userAnswered && (
                           <p className="text-[11px] font-bold text-indigo-600/80 mb-2 flex items-center gap-1">
-                            👆 Apna answer chuno
+                            👆 Pick an answer
                           </p>
                         )}
                         {/* MCQ (interactive) mode: small "Reset" pill after answering */}
@@ -10484,7 +10630,7 @@ RULES:
                     </div>
                     {!allDone && (
                       <div className="px-4 py-2 bg-slate-50 border-t border-slate-100">
-                        <p className="text-[11px] font-bold text-slate-500 text-center">{total - attempted} question{total - attempted === 1 ? '' : 's'} baaki — sab try karo!</p>
+                        <p className="text-[11px] font-bold text-slate-500 text-center">{total - attempted} question{total - attempted === 1 ? '' : 's'} left — try them all!</p>
                       </div>
                     )}
                     {allDone && (
@@ -10596,7 +10742,7 @@ RULES:
             {allNotifications.length === 0 && (
               <div className="text-center py-16 text-slate-400">
                 <Bell size={40} className="mx-auto mb-3 opacity-30" />
-                <p className="font-bold text-sm">Koi notification nahi hai abhi</p>
+                <p className="font-bold text-sm">No notifications yet</p>
               </div>
             )}
             {allNotifications.map(n => {
@@ -10671,7 +10817,11 @@ RULES:
           .sort((a, b) => b.displayCount - a.displayCount);
         const globalTopCount = globalList[0]?.displayCount || 0;
         return (
-        <div className="fixed inset-0 z-[9000] bg-white flex flex-col animate-in slide-in-from-right-full duration-300">
+        // z-[200] (not z-[9000]) so the dashboard's fixed bottom navigation
+        // (z-[300]) stays visible AND tappable while the Important Notes
+        // page is open. The inner scroller below uses pb-24 so list items
+        // don't get hidden behind the bottom nav bar.
+        <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in slide-in-from-right-full duration-300">
           <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-white sticky top-0 z-10">
             <button onClick={() => { stopProfileStarRead(); setShowStarredPage(false); }} className="p-2 rounded-full hover:bg-slate-100 text-slate-700">
               <ArrowLeft size={20} />
@@ -10690,7 +10840,7 @@ RULES:
             {starredPageTab === 'mine' && starredNotes.length > 0 && (
               <button
                 onClick={() => {
-                  if (!confirm('Saare starred notes delete karne hain?')) return;
+                  if (!confirm('Delete every starred note?')) return;
                   stopProfileStarRead();
                   setStarredNotes([]);
                   try { localStorage.removeItem('nst_starred_notes_v1'); } catch {}
@@ -10759,7 +10909,7 @@ RULES:
               </button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 overflow-y-auto p-4 pb-24 space-y-3">
           {starredPageTab === 'mine' && (<>
             {/* Read All toolbar */}
             {filtered.length > 0 && (
@@ -10786,7 +10936,7 @@ RULES:
                 <Volume2 size={13} className="text-amber-500 animate-pulse shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between mb-1">
-                    <span className="text-[10px] font-black text-amber-700">Padh raha hai...</span>
+                    <span className="text-[10px] font-black text-amber-700">Reading...</span>
                     <span className="text-[10px] font-bold text-amber-600">{readingProfileStarIdx + 1}/{filtered.length}</span>
                   </div>
                   <div className="h-1 bg-amber-100 rounded-full overflow-hidden">
@@ -10807,7 +10957,7 @@ RULES:
                   type="text"
                   value={profileStarSearch}
                   onChange={e => { setProfileStarSearch(e.target.value); stopProfileStarRead(); }}
-                  placeholder="Notes mein search karo..."
+                  placeholder="Search notes..."
                   className="w-full pl-8 pr-8 py-2.5 text-xs font-semibold bg-amber-50 border border-amber-200 rounded-xl text-slate-700 placeholder-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-300 transition-all"
                 />
                 {profileStarSearch && (
@@ -10824,14 +10974,14 @@ RULES:
             {starredNotes.length === 0 ? (
               <div className="text-center py-14 bg-amber-50 rounded-2xl border border-amber-100">
                 <Star size={40} className="text-amber-300 mx-auto mb-3" />
-                <p className="font-bold text-slate-600 text-sm">Koi important note nahi mili.</p>
-                <p className="text-xs text-slate-400 mt-1">Note padhte waqt ⭐ dabao — yahan dikhega.</p>
+                <p className="font-bold text-slate-600 text-sm">No important notes yet.</p>
+                <p className="text-xs text-slate-400 mt-1">While reading a note tap the ⭐ — it will show up here.</p>
               </div>
             ) : filtered.length === 0 ? (
               <div className="text-center py-10 bg-amber-50 rounded-2xl border border-amber-100">
                 <Search size={32} className="text-amber-300 mx-auto mb-3" />
-                <p className="font-bold text-slate-600 text-sm">Koi match nahi mila.</p>
-                <p className="text-xs text-slate-400 mt-1">Doosra word try karo.</p>
+                <p className="font-bold text-slate-600 text-sm">No match found.</p>
+                <p className="text-xs text-slate-400 mt-1">Try a different keyword.</p>
               </div>
             ) : importantNotesView === 'list' ? (
               filtered.map((note, idx) => {
@@ -10919,7 +11069,7 @@ RULES:
                   return (
                     <>
                       <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wider px-1">
-                        📚 Apni book chuno — uski top important notes dikhenge
+                        📚 Pick a book to see its top important notes
                       </div>
                       {grouped.map(book => (
                         <button
@@ -11061,7 +11211,7 @@ RULES:
                 type="text"
                 value={profileStarSearch}
                 onChange={e => setProfileStarSearch(e.target.value)}
-                placeholder="Global notes mein search karo..."
+                placeholder="Search global notes..."
                 className="w-full pl-8 pr-8 py-2.5 text-xs font-semibold bg-amber-50 border border-amber-200 rounded-xl text-slate-700 placeholder-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-300 transition-all"
               />
               {profileStarSearch && (
@@ -11077,7 +11227,7 @@ RULES:
             <div className="flex items-center gap-2">
               <div className="text-[11px] font-bold text-slate-500 px-1 flex items-center gap-1.5 flex-1 min-w-0">
                 <Users size={11} className="text-amber-500 shrink-0" />
-                <span className="truncate">Sare students kya save kar rahe hain</span>
+                <span className="truncate">What every student is saving</span>
               </div>
               {/* Read All TTS — reads every visible global note. We map
                   each entry.label → { topicText } so the existing
@@ -11111,7 +11261,7 @@ RULES:
                 <Volume2 size={13} className="text-amber-500 animate-pulse shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between mb-1">
-                    <span className="text-[10px] font-black text-amber-700">Padh raha hai...</span>
+                    <span className="text-[10px] font-black text-amber-700">Reading...</span>
                     <span className="text-[10px] font-bold text-amber-600">{readingProfileStarIdx + 1}/{globalList.length}</span>
                   </div>
                   <div className="h-1 bg-amber-100 rounded-full overflow-hidden">
@@ -11127,9 +11277,181 @@ RULES:
             {globalList.length === 0 ? (
               <div className="text-center py-14 bg-amber-50 rounded-2xl border border-amber-100">
                 <Users size={40} className="text-amber-300 mx-auto mb-3" />
-                <p className="font-bold text-slate-600 text-sm">Abhi koi global note nahi.</p>
-                <p className="text-xs text-slate-400 mt-1">Pehla student ban ke ⭐ daba ke trend shuru karo.</p>
+                <p className="font-bold text-slate-600 text-sm">No global notes yet.</p>
+                <p className="text-xs text-slate-400 mt-1">Be the first to tap ⭐ and start the trend.</p>
               </div>
+            ) : importantNotesView === 'bybook' ? (
+              // === BY BOOK / PAGE — Global notes ===
+              // Source priority for each global entry:
+              //   1. entry.source — written into RTDB by the first user who
+              //      starred this topic. Best signal because it works even
+              //      when the current user has zero local notes of this kind.
+              //   2. Local starred-note match (full equality on topicText).
+              //   3. Local starred-note match using a normalised prefix (the
+              //      RTDB label is truncated at 160 chars, so a long topic
+              //      never matches a full topicText with `===`).
+              //   4. Otherwise "Untagged".
+              (() => {
+                const norm = (s: string) =>
+                  (s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+                const localByText = new Map<string, StarredNote>();
+                const localByPrefix = new Map<string, StarredNote>();
+                for (const n of starredNotes) {
+                  const k = norm(n.topicText || '');
+                  if (!k) continue;
+                  if (!localByText.has(k)) localByText.set(k, n);
+                  const pre = k.slice(0, 140);
+                  if (!localByPrefix.has(pre)) localByPrefix.set(pre, n);
+                }
+                const synthetic: StarredNote[] = globalList.map((entry) => {
+                  const labelNorm = norm(entry.label);
+                  const mine = localByText.get(labelNorm)
+                    || localByPrefix.get(labelNorm.slice(0, 140));
+                  const src = entry.source || mine?.source;
+                  return {
+                    id: `global_${entry.hash || entry.label}`,
+                    topicText: entry.label,
+                    savedAt: mine?.savedAt || 0,
+                    source: src,
+                  } as StarredNote;
+                });
+                const grouped = groupStarredByBook(synthetic);
+                const activeBook = drillBookKey ? grouped.find(b => b.lessonTitle === drillBookKey) : null;
+                const activePage = activeBook && drillPageKey
+                  ? activeBook.pageList.find(p => `${p.pageNo ?? p.pageIndex ?? 'n'}` === drillPageKey)
+                  : null;
+
+                if (!activeBook) {
+                  return (
+                    <>
+                      <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wider px-1">
+                        📚 Pick a book to see its global notes
+                      </div>
+                      {grouped.map(book => (
+                        <button
+                          key={book.lessonTitle}
+                          type="button"
+                          onClick={() => { setDrillBookKey(book.lessonTitle); setDrillPageKey(null); }}
+                          className="w-full text-left rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-sm hover:border-indigo-400 hover:shadow-md active:scale-[0.99] transition-all flex items-center gap-3 px-4 py-3"
+                        >
+                          <div className="w-11 h-11 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                            <BookOpen size={18} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-sm text-indigo-900 leading-tight truncate">{book.lessonTitle}</p>
+                            <p className="text-[10px] text-indigo-600 font-bold tracking-wide mt-0.5">
+                              {book.subject ? `${book.subject} · ` : ''}{book.total} note{book.total !== 1 ? 's' : ''} · {book.pageList.length} page{book.pageList.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                          <ChevronRight size={16} className="text-indigo-400 shrink-0" />
+                        </button>
+                      ))}
+                    </>
+                  );
+                }
+
+                if (!activePage) {
+                  return (
+                    <>
+                      <div className="flex items-center gap-2 text-[11px] font-black text-indigo-700 px-1">
+                        <button
+                          onClick={() => { setDrillBookKey(null); setDrillPageKey(null); }}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200"
+                        >
+                          <ChevronLeft size={12} /> Books
+                        </button>
+                        <span className="text-indigo-300">/</span>
+                        <span className="truncate">{activeBook.lessonTitle}</span>
+                      </div>
+                      <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-sm overflow-hidden">
+                        <div className="px-4 py-3 bg-indigo-100/60 border-b border-indigo-200 flex items-center gap-2">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                            <BookOpen size={16} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-sm text-indigo-900 leading-tight truncate">{activeBook.lessonTitle}</p>
+                            <p className="text-[10px] text-indigo-600 font-bold tracking-wide">
+                              {activeBook.subject ? `${activeBook.subject} · ` : ''}{activeBook.total} global note{activeBook.total !== 1 ? 's' : ''} · {activeBook.pageList.length} page{activeBook.pageList.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="p-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {activeBook.pageList.map(pg => {
+                            const pgKey = `${pg.pageNo ?? pg.pageIndex ?? 'n'}`;
+                            const pgLabel = pg.pageNo != null ? `Page ${pg.pageNo}` :
+                              pg.pageIndex != null ? `Page ${pg.pageIndex + 1}` : 'Untagged';
+                            return (
+                              <button
+                                key={pgKey}
+                                type="button"
+                                onClick={() => setDrillPageKey(pgKey)}
+                                className="rounded-xl border-2 border-indigo-100 bg-white hover:border-indigo-400 hover:bg-indigo-50 active:scale-95 transition-all p-3 text-center"
+                              >
+                                <div className="text-[10px] font-black text-indigo-500 uppercase tracking-wider">📄</div>
+                                <div className="font-black text-sm text-indigo-900 mt-0.5 truncate">{pgLabel}</div>
+                                <div className="text-[10px] font-bold text-amber-600 mt-0.5">
+                                  {pg.notes.length} ⭐ note{pg.notes.length !== 1 ? 's' : ''}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  );
+                }
+
+                const pgLabel = activePage.pageNo != null ? `Page ${activePage.pageNo}` :
+                  activePage.pageIndex != null ? `Page ${activePage.pageIndex + 1}` : 'Untagged';
+                return (
+                  <>
+                    <div className="flex items-center gap-1.5 text-[11px] font-black text-indigo-700 px-1 flex-wrap">
+                      <button
+                        onClick={() => { setDrillBookKey(null); setDrillPageKey(null); }}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200"
+                      >
+                        <ChevronLeft size={12} /> Books
+                      </button>
+                      <span className="text-indigo-300">/</span>
+                      <button
+                        onClick={() => setDrillPageKey(null)}
+                        className="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 truncate max-w-[40%]"
+                      >
+                        {activeBook.lessonTitle}
+                      </button>
+                      <span className="text-indigo-300">/</span>
+                      <span className="truncate">{pgLabel}</span>
+                    </div>
+                    <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-sm overflow-hidden">
+                      <div className="px-4 py-3 bg-indigo-100/60 border-b border-indigo-200 flex items-center gap-2">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-sm font-black text-xs">
+                          📄
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-sm text-indigo-900 leading-tight truncate">{pgLabel}</p>
+                          <p className="text-[10px] text-indigo-600 font-bold tracking-wide truncate">
+                            {activeBook.lessonTitle} · {activePage.notes.length} note{activePage.notes.length !== 1 ? 's' : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="p-3 space-y-1.5">
+                        {activePage.notes.map(note => (
+                          <button
+                            key={note.id}
+                            type="button"
+                            onClick={() => note.source ? setOpenNotePrompt({ topicText: note.topicText, source: note.source }) : undefined}
+                            className="w-full text-left px-3 py-2.5 rounded-xl bg-white border border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/50 active:scale-[0.99] transition-all flex items-start gap-2"
+                          >
+                            <Star size={12} className="fill-amber-500 text-amber-500 shrink-0 mt-0.5" />
+                            <span className="font-semibold text-[12px] text-slate-700 leading-snug flex-1">{note.topicText}</span>
+                            {note.source ? <ChevronRight size={12} className="text-indigo-400 shrink-0 mt-1" /> : null}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()
             ) : (
               globalList.map((entry, idx) => {
                 const minePulled = starredNotes.find(n => n.topicText === entry.label);
@@ -11157,7 +11479,7 @@ RULES:
                             startProfileStarRead(globalList.slice(idx).map(e => ({ topicText: e.label })));
                           }
                         }}
-                        title={isCurrentlyReading ? 'Stop padhna' : 'Yahan se sune'}
+                        title={isCurrentlyReading ? 'Stop reading' : 'Read from here'}
                         aria-label={isCurrentlyReading ? 'Stop reading' : 'Read this note'}
                         className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all ${
                           isCurrentlyReading
@@ -11209,11 +11531,15 @@ RULES:
                             } catch {}
                           } else {
                             // Tap to save → add to My Saved + increment global
-                            const newEntry = {
+                            const newEntry: any = {
                               id: `global_${entry.hash || Date.now()}_${Math.random().toString(36).slice(2,7)}`,
                               noteKey: `community_${entry.hash || ''}`,
                               topicText: entry.label,
                               savedAt: Date.now(),
+                              // Inherit community-recorded source so this note
+                              // shows up under the right book/page in the
+                              // user's own By-Book view too.
+                              ...(entry.source ? { source: entry.source } : {}),
                             };
                             setStarredNotes(prev => {
                               if (prev.some(n => n.topicText === entry.label)) return prev;
@@ -11224,8 +11550,8 @@ RULES:
                             try {
                               if (user?.id) {
                                 // Argument order MUST match service signature:
-                                //   recordNoteStar(userId, noteKey, topicText)
-                                import('../services/noteStars').then(m => m.recordNoteStar(user.id, newEntry.noteKey, entry.label)).catch(()=>{});
+                                //   recordNoteStar(userId, noteKey, topicText, source?)
+                                import('../services/noteStars').then(m => m.recordNoteStar(user.id, newEntry.noteKey, entry.label, entry.source)).catch(()=>{});
                               }
                             } catch {}
                           }
@@ -11246,6 +11572,70 @@ RULES:
               })
             )}
           </>)}
+
+          {/* === MCQ MATCHES — shared across both tabs ===
+              Whenever the user types in the search bar, also surface MCQs
+              from any cached chapter whose question/options/explanation
+              contain the typed word. Tapping opens the chapter and triggers
+              the MCQs tab via pendingReadQuery. */}
+          {profileStarSearch.trim().length >= 2 && (
+            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50/60 to-white shadow-sm overflow-hidden">
+              <div className="px-4 py-2.5 bg-emerald-100/70 border-b border-emerald-200 flex items-center gap-2">
+                <BrainCircuit size={14} className="text-emerald-600" />
+                <p className="text-[11px] font-black text-emerald-800 uppercase tracking-wider">
+                  Matching MCQs
+                </p>
+                <span className="ml-auto text-[10px] font-black bg-emerald-500 text-white rounded-full px-2 py-0.5">
+                  {profileStarMcqLoading ? '…' : profileStarMcqHits.length}
+                </span>
+              </div>
+              {profileStarMcqLoading ? (
+                <div className="p-6 text-center text-[11px] font-bold text-emerald-600">
+                  Searching MCQs…
+                </div>
+              ) : profileStarMcqHits.length === 0 ? (
+                <div className="p-6 text-center text-[11px] font-semibold text-slate-500">
+                  No MCQs contain "{profileStarSearch.trim()}".
+                </div>
+              ) : (
+                <div className="p-2 space-y-1.5 max-h-[60vh] overflow-y-auto">
+                  {profileStarMcqHits.map((h, i) => (
+                    <button
+                      key={`${h.storageKey}_${i}`}
+                      type="button"
+                      onClick={() => {
+                        // Stash query so the chapter view can auto-jump to MCQ
+                        // tab and highlight matches via pendingReadQuery flow.
+                        setPendingReadQuery(profileStarSearch.trim());
+                        setShowStarredPage(false);
+                      }}
+                      className="w-full text-left px-3 py-2.5 rounded-xl bg-white border border-emerald-100 hover:border-emerald-300 hover:bg-emerald-50/50 active:scale-[0.99] transition-all"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 rounded px-1.5 py-0.5 uppercase tracking-wider">
+                          MCQ
+                        </span>
+                        <span className="text-[10px] font-black text-indigo-600 truncate flex-1">
+                          {h.bookName}{h.pageNo ? ` · Page ${h.pageNo}` : ''}
+                        </span>
+                        <span className="text-[9px] font-bold text-amber-600 shrink-0">
+                          {h.matchCount} match{h.matchCount !== 1 ? 'es' : ''}
+                        </span>
+                      </div>
+                      <p className="text-[12px] font-bold text-slate-800 leading-snug line-clamp-2">
+                        {h.question}
+                      </p>
+                      {h.options[h.correctAnswer] && (
+                        <p className="mt-1 text-[10px] font-bold text-emerald-700 leading-snug truncate">
+                          ✓ {h.options[h.correctAnswer]}
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           </div>
         </div>
         );
@@ -11267,8 +11657,8 @@ RULES:
           .sort((a, b) => b.displayCount - a.displayCount);
         const topCount = ranked[0]?.displayCount || 0;
         const rangeLabel =
-          globalNotesRange === 'weekly' ? 'is hafte' :
-          globalNotesRange === 'monthly' ? 'is mahine' :
+          globalNotesRange === 'weekly' ? 'this week' :
+          globalNotesRange === 'monthly' ? 'this month' :
           'all-time';
         return (
           <div className="fixed inset-0 z-[9100] bg-gradient-to-b from-amber-50 to-white flex flex-col animate-in slide-in-from-right-full duration-300">
@@ -11344,13 +11734,13 @@ RULES:
                     {globalNotesRange === 'all'
                       ? 'Abhi koi trending note nahi.'
                       : globalNotesRange === 'weekly'
-                        ? 'Is hafte koi trending note nahi.'
-                        : 'Is mahine koi trending note nahi.'}
+                        ? 'No trending notes this week.'
+                        : 'No trending notes this month.'}
                   </p>
                   <p className="text-xs text-slate-400 mt-1">
                     {globalNotesRange === 'all'
                       ? <>Jaise hi students notes ko ⭐ karna shuru karenge,<br/>yahan top saved notes dikhne lagengi.</>
-                      : <>"All Time" tab pe try karein —<br/>shayad purane trending notes mil jaaye.</>}
+                      : <>"All Time" tab might have older trending notes —<br/>shayad purane trending notes mil jaaye.</>}
                   </p>
                 </div>
               ) : (
@@ -11376,7 +11766,7 @@ RULES:
                             startProfileStarRead(ranked.slice(idx).map(e => ({ topicText: e.label })));
                           }
                         }}
-                        title={isCurrentlyReading ? 'Stop padhna' : 'Yahan se sune'}
+                        title={isCurrentlyReading ? 'Stop reading' : 'Read from here'}
                         aria-label={isCurrentlyReading ? 'Stop reading' : 'Read this note'}
                         className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-all ${
                           isCurrentlyReading

@@ -107,6 +107,26 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
   });
   const activeFont = getSplashFontById(splashFontId);
 
+  // === Splash LOGO (admin-controlled) ===
+  // When enabled (default), the splash shows an <img> instead of the gradient
+  // short-name text. Admin can upload a custom logo (stored as data: URL) or
+  // remove it (which falls back to the text rendering).
+  const [splashLogo] = useState<{ enabled: boolean; url: string; size: number }>(() => {
+    try {
+      const settingsRaw = localStorage.getItem('nst_system_settings');
+      const s = settingsRaw ? JSON.parse(settingsRaw) : null;
+      const enabled = s?.splashLogoEnabled !== false; // default ON
+      const url = (s?.splashLogoUrl as string) || '/splash-logo.png';
+      const rawSize = Number(s?.splashLogoSize);
+      const size = Number.isFinite(rawSize) && rawSize > 0
+        ? Math.min(260, Math.max(60, rawSize))
+        : 140;
+      return { enabled, url, size };
+    } catch {
+      return { enabled: true, url: '/splash-logo.png', size: 140 };
+    }
+  });
+
   // Lazy-load the chosen Google Font on mount AND whenever it changes.
   useEffect(() => {
     if (activeFont.gfontParam) ensureGoogleFontLoaded(activeFont.gfontParam);
@@ -201,23 +221,47 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
           className="mb-12 text-center animate-in slide-in-from-bottom-4 duration-700 fade-in focus:outline-none select-none"
           style={{ WebkitTapHighlightColor: 'transparent' }}
         >
-          <h1
-            className={`font-black tracking-tight mb-2 uppercase text-center leading-tight transition-transform duration-300 ease-out ${
-              logoTapped ? 'scale-[2.2]' : 'scale-100'
-            } ${
-              themeVariant === 'light'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent'
-                : 'bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent'
-            }`}
-            style={{
-              fontSize: `${appNameSize}px`,
-              // Apply the user-chosen branded font (if any).
-              ...(activeFont.family ? { fontFamily: activeFont.family } : {}),
-              ...(activeFont.letterSpacing ? { letterSpacing: activeFont.letterSpacing } : {}),
-            }}
-          >
-            {appName}
-          </h1>
+          {splashLogo.enabled && splashLogo.url ? (
+            // === Image LOGO (admin-controlled, default ON) ===
+            <img
+              src={splashLogo.url}
+              alt={appName}
+              draggable={false}
+              onError={(e) => {
+                // Agar uploaded logo load nahi hua to default pe wapas chala jaye.
+                const img = e.currentTarget as HTMLImageElement;
+                if (img.src.indexOf('/splash-logo.png') === -1) {
+                  img.src = '/splash-logo.png';
+                }
+              }}
+              className={`mb-2 mx-auto object-contain transition-transform duration-300 ease-out drop-shadow-xl ${
+                logoTapped ? 'scale-[2.2]' : 'scale-100'
+              }`}
+              style={{
+                width: `${splashLogo.size}px`,
+                height: `${splashLogo.size}px`,
+                maxWidth: '70vw',
+              }}
+            />
+          ) : (
+            // === Fallback: gradient short-name text (when admin disables logo) ===
+            <h1
+              className={`font-black tracking-tight mb-2 uppercase text-center leading-tight transition-transform duration-300 ease-out ${
+                logoTapped ? 'scale-[2.2]' : 'scale-100'
+              } ${
+                themeVariant === 'light'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent'
+                  : 'bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent'
+              }`}
+              style={{
+                fontSize: `${appNameSize}px`,
+                ...(activeFont.family ? { fontFamily: activeFont.family } : {}),
+                ...(activeFont.letterSpacing ? { letterSpacing: activeFont.letterSpacing } : {}),
+              }}
+            >
+              {appName}
+            </h1>
+          )}
           <p className={`text-xs font-bold tracking-widest ${t.subtext} uppercase mt-2 transition-opacity duration-300 ${logoTapped ? 'opacity-0' : 'opacity-100'}`}>
             Loading your experience...
           </p>

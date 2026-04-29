@@ -23,6 +23,7 @@ import { AdminTrendingNotes } from './AdminTrendingNotes';
 import { SyllabusManager } from './SyllabusManager';
 import { FeatureGroupList } from './admin/FeatureGroupList';
 import { ALL_FEATURES } from '../utils/featureRegistry';
+import { HOME_SECTION_REGISTRY } from '../utils/homeSections';
 import { SPLASH_FONTS, getSplashFontById, ensureGoogleFontLoaded } from '../utils/splashFonts';
 import { NstaFeatureManager } from './admin/NstaFeatureManager';
 // @ts-ignore
@@ -6860,6 +6861,140 @@ Statement 2"
                               </div>
                           </div>
 
+                          {/* ============================================ */}
+                          {/* SPLASH LOGO — admin can replace short name with an image */}
+                          {/* Stored in: localSettings.splashLogoEnabled / splashLogoUrl / splashLogoSize */}
+                          {/* ============================================ */}
+                          <div className="bg-gradient-to-br from-cyan-50 to-blue-50 border border-cyan-200 rounded-xl p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                  <label className="text-xs font-bold uppercase text-cyan-700">🖼️ Loading Screen Logo</label>
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
+                                      localSettings.splashLogoEnabled !== false
+                                          ? 'text-cyan-900 bg-white border-cyan-200'
+                                          : 'text-slate-500 bg-slate-100 border-slate-200'
+                                  }`}>
+                                      {localSettings.splashLogoEnabled !== false ? 'Logo ON' : 'Text Mode'}
+                                  </span>
+                              </div>
+                              <p className="text-[10px] font-bold text-cyan-600 mb-3">
+                                  Splash screen pe app short name ki jagah ek logo image dikhayi jayegi. Aap apna khud ka logo upload bhi kar sakte hain ya hatakar wapas text mode mein ja sakte hain.
+                              </p>
+
+                              {/* PREVIEW + ON/OFF TOGGLE */}
+                              <div className="flex items-center gap-3 bg-white rounded-xl p-3 border border-cyan-100 mb-3">
+                                  <div className="w-20 h-20 rounded-lg bg-gradient-to-br from-slate-900 to-slate-700 flex items-center justify-center shrink-0 overflow-hidden border border-slate-300">
+                                      {localSettings.splashLogoEnabled !== false ? (
+                                          <img
+                                              src={localSettings.splashLogoUrl || '/splash-logo.png'}
+                                              alt="Splash logo preview"
+                                              className="w-full h-full object-contain"
+                                              onError={(e) => {
+                                                  const img = e.currentTarget as HTMLImageElement;
+                                                  if (img.src.indexOf('/splash-logo.png') === -1) img.src = '/splash-logo.png';
+                                              }}
+                                          />
+                                      ) : (
+                                          <span className="text-white text-xl font-black tracking-tight">
+                                              {localSettings.appShortName || 'IIC'}
+                                          </span>
+                                      )}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                      <p className="font-bold text-slate-800 text-sm">Show Logo Image</p>
+                                      <p className="text-[10px] text-slate-500 leading-snug">Off karne par splash pe text dikhega.</p>
+                                  </div>
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.splashLogoEnabled !== false}
+                                      onChange={() => {
+                                          const cur = localSettings.splashLogoEnabled !== false;
+                                          setLocalSettings({ ...localSettings, splashLogoEnabled: !cur });
+                                      }}
+                                      className="w-6 h-6 accent-cyan-600 cursor-pointer shrink-0"
+                                  />
+                              </div>
+
+                              {/* SIZE SLIDER (only when logo enabled) */}
+                              {localSettings.splashLogoEnabled !== false && (
+                                  <div className="bg-white rounded-xl p-3 border border-cyan-100 mb-3">
+                                      <div className="flex items-center justify-between mb-1.5">
+                                          <label className="text-[11px] font-bold uppercase text-cyan-700">Logo Size</label>
+                                          <span className="text-[10px] font-black text-cyan-900 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200">
+                                              {localSettings.splashLogoSize || 140}px
+                                          </span>
+                                      </div>
+                                      <input
+                                          type="range"
+                                          min="60"
+                                          max="260"
+                                          step="2"
+                                          value={localSettings.splashLogoSize || 140}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, splashLogoSize: parseInt(e.target.value, 10) })}
+                                          className="w-full accent-cyan-600 cursor-pointer"
+                                      />
+                                  </div>
+                              )}
+
+                              {/* UPLOAD + RESET BUTTONS */}
+                              <div className="grid grid-cols-2 gap-2">
+                                  <label className="cursor-pointer">
+                                      <input
+                                          type="file"
+                                          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                              const file = e.target.files?.[0];
+                                              if (!file) return;
+                                              if (file.size > 1024 * 1024) {
+                                                  alert('Logo file 1 MB se chhoti honi chahiye. Please ek smaller image choose karein.');
+                                                  e.target.value = '';
+                                                  return;
+                                              }
+                                              const reader = new FileReader();
+                                              reader.onload = () => {
+                                                  const dataUrl = String(reader.result || '');
+                                                  if (!dataUrl.startsWith('data:image/')) {
+                                                      alert('Yeh file image nahi hai. Please ek valid image upload karein.');
+                                                      return;
+                                                  }
+                                                  setLocalSettings({
+                                                      ...localSettings,
+                                                      splashLogoEnabled: true,
+                                                      splashLogoUrl: dataUrl,
+                                                  });
+                                                  logActivity('SPLASH_LOGO_UPLOADED', `New splash logo uploaded (${Math.round(file.size / 1024)} KB)`);
+                                              };
+                                              reader.readAsDataURL(file);
+                                              e.target.value = '';
+                                          }}
+                                      />
+                                      <div className="text-center text-[11px] font-black px-3 py-2.5 rounded-xl bg-cyan-600 text-white hover:bg-cyan-700 active:scale-[0.98] transition-all">
+                                          ⬆️ Upload New Logo
+                                      </div>
+                                  </label>
+                                  <button
+                                      type="button"
+                                      onClick={() => {
+                                          if (!confirm('Splash logo ko default IIC logo pe reset karein?')) return;
+                                          setLocalSettings({
+                                              ...localSettings,
+                                              splashLogoEnabled: true,
+                                              splashLogoUrl: '/splash-logo.png',
+                                              splashLogoSize: 140,
+                                          });
+                                          logActivity('SPLASH_LOGO_RESET', 'Splash logo reset to default');
+                                      }}
+                                      className="text-[11px] font-black px-3 py-2.5 rounded-xl bg-white text-cyan-700 border-2 border-cyan-300 hover:bg-cyan-50 active:scale-[0.98] transition-all"
+                                  >
+                                      ↺ Reset to Default
+                                  </button>
+                              </div>
+
+                              <p className="text-[10px] text-cyan-700 mt-2 leading-snug">
+                                  💡 Tip: PNG transparent background ke saath best dikhta hai. Max 1 MB. Changes "Save Settings" press karne ke baad apply honge.
+                              </p>
+                          </div>
+
                       {/* AI Model Control */}
                       <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800 mb-4">
                         <div className="flex items-center gap-2 mb-4 text-blue-700 dark:text-blue-400 font-bold">
@@ -7250,6 +7385,108 @@ Statement 2"
                                           className="w-5 h-5 accent-indigo-600"
                                       />
                                   </div>
+                              </div>
+                          </div>
+
+                          {/* ============================================ */}
+                          {/* HOME PAGE BUTTONS / SECTIONS — granular show/hide */}
+                          {/* Driven by HOME_SECTION_REGISTRY from utils/homeSections.ts */}
+                          {/* Visibility persists in localSettings.dashboardLayout[id].visible */}
+                          {/* ============================================ */}
+                          <div className="my-6">
+                              <div className="flex items-center justify-between gap-3 mb-3">
+                                  <div>
+                                      <h3 className="font-black text-slate-800 text-base flex items-center gap-2">🏠 Home Page Buttons / Sections</h3>
+                                      <p className="text-xs text-slate-500">Decide which buttons and cards appear on the student Home tab. Each row is a separate toggle.</p>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                      <button
+                                          onClick={() => {
+                                              const layout = { ...(localSettings.dashboardLayout || {}) };
+                                              HOME_SECTION_REGISTRY.forEach(s => {
+                                                  layout[s.id] = { id: s.id, visible: true, label: s.label };
+                                              });
+                                              const updated = { ...localSettings, dashboardLayout: layout };
+                                              setLocalSettings(updated);
+                                              if (onUpdateSettings) onUpdateSettings(updated);
+                                              localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                                              logActivity('HOME_SECTIONS_BULK', 'Show All Home Sections');
+                                              handleSaveSettings(updated);
+                                          }}
+                                          className="text-[10px] font-black px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 transition-all"
+                                      >
+                                          Show All
+                                      </button>
+                                      <button
+                                          onClick={() => {
+                                              const layout = { ...(localSettings.dashboardLayout || {}) };
+                                              HOME_SECTION_REGISTRY.forEach(s => {
+                                                  layout[s.id] = { id: s.id, visible: false, label: s.label };
+                                              });
+                                              const updated = { ...localSettings, dashboardLayout: layout };
+                                              setLocalSettings(updated);
+                                              if (onUpdateSettings) onUpdateSettings(updated);
+                                              localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                                              logActivity('HOME_SECTIONS_BULK', 'Hide All Home Sections');
+                                              handleSaveSettings(updated);
+                                          }}
+                                          className="text-[10px] font-black px-3 py-1.5 rounded-lg bg-rose-600 text-white hover:bg-rose-700 active:scale-95 transition-all"
+                                      >
+                                          Hide All
+                                      </button>
+                                  </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  {HOME_SECTION_REGISTRY.map(sec => {
+                                      const visible = localSettings.dashboardLayout?.[sec.id]?.visible !== false;
+                                      // Static color map — Tailwind's JIT cannot resolve template-literal class names.
+                                      const COLOR_MAP: Record<string, { tile: string; title: string; desc: string; chip: string; accent: string }> = {
+                                          slate:   { tile: 'bg-slate-50 border-slate-200',     title: 'text-slate-900',   desc: 'text-slate-600',   chip: 'text-slate-600',   accent: 'accent-slate-600' },
+                                          blue:    { tile: 'bg-blue-50 border-blue-100',       title: 'text-blue-900',    desc: 'text-blue-700',    chip: 'text-blue-600',    accent: 'accent-blue-600' },
+                                          indigo:  { tile: 'bg-indigo-50 border-indigo-100',   title: 'text-indigo-900',  desc: 'text-indigo-700',  chip: 'text-indigo-600',  accent: 'accent-indigo-600' },
+                                          emerald: { tile: 'bg-emerald-50 border-emerald-100', title: 'text-emerald-900', desc: 'text-emerald-700', chip: 'text-emerald-600', accent: 'accent-emerald-600' },
+                                          amber:   { tile: 'bg-amber-50 border-amber-100',     title: 'text-amber-900',   desc: 'text-amber-700',   chip: 'text-amber-600',   accent: 'accent-amber-600' },
+                                          rose:    { tile: 'bg-rose-50 border-rose-100',       title: 'text-rose-900',    desc: 'text-rose-700',    chip: 'text-rose-600',    accent: 'accent-rose-600' },
+                                          violet:  { tile: 'bg-violet-50 border-violet-100',   title: 'text-violet-900',  desc: 'text-violet-700',  chip: 'text-violet-600',  accent: 'accent-violet-600' },
+                                          cyan:    { tile: 'bg-cyan-50 border-cyan-100',       title: 'text-cyan-900',    desc: 'text-cyan-700',    chip: 'text-cyan-600',    accent: 'accent-cyan-600' },
+                                      };
+                                      const cm = COLOR_MAP[sec.color] || COLOR_MAP.slate;
+                                      return (
+                                          <div
+                                              key={sec.id}
+                                              className={`flex items-center justify-between p-3.5 rounded-xl border ${cm.tile}`}
+                                          >
+                                              <div className="min-w-0 pr-2">
+                                                  <p className={`font-bold flex items-center gap-2 text-sm ${cm.title}`}>
+                                                      <span className="text-base">{sec.emoji}</span>
+                                                      <span className="truncate">{sec.label}</span>
+                                                  </p>
+                                                  <p className={`text-[11px] mt-0.5 leading-snug ${cm.desc}`}>{sec.description}</p>
+                                              </div>
+                                              <div className="flex items-center gap-1.5 shrink-0">
+                                                  <span className={`text-[9px] font-black uppercase ${visible ? cm.chip : 'text-slate-400'}`}>
+                                                      {visible ? 'Visible' : 'Hidden'}
+                                                  </span>
+                                                  <input
+                                                      type="checkbox"
+                                                      checked={visible}
+                                                      onChange={() => {
+                                                          const layout = { ...(localSettings.dashboardLayout || {}) };
+                                                          const cur = layout[sec.id]?.visible !== false;
+                                                          layout[sec.id] = { id: sec.id, visible: !cur, label: sec.label };
+                                                          const updated = { ...localSettings, dashboardLayout: layout };
+                                                          setLocalSettings(updated);
+                                                          if (onUpdateSettings) onUpdateSettings(updated);
+                                                          localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                                                          logActivity('HOME_SECTION_TOGGLED', `${sec.id} → ${!cur ? 'visible' : 'hidden'}`);
+                                                          handleSaveSettings(updated);
+                                                      }}
+                                                      className={`w-5 h-5 ${cm.accent}`}
+                                                  />
+                                              </div>
+                                          </div>
+                                      );
+                                  })}
                               </div>
                           </div>
                       </>

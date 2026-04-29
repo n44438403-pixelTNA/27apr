@@ -38,9 +38,9 @@ type ActiveTab = 'daily' | 'schedule';
 function daysUntil(ts: number): string {
   const diff = ts - Date.now();
   const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-  if (days <= 0) return 'Aaj';
-  if (days === 1) return 'Kal';
-  return `${days} din mein`;
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  return `In ${days} days`;
 }
 
 function accuracyColor(acc: number): string {
@@ -223,13 +223,13 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
             disabled={loading}
           >
             {loading ? <RefreshCw size={13} className="animate-spin" /> : <Search size={13} />}
-            {isSearched ? 'Searched' : 'Notes Dhundo'}
+            {isSearched ? 'Searched' : 'Find Notes'}
           </button>
         </div>
 
         {loading && (
           <div className="px-4 pb-3 flex items-center gap-2 text-xs text-slate-500">
-            <RefreshCw size={12} className="animate-spin" /> Cached notes mein dhundh raha hai…
+            <RefreshCw size={12} className="animate-spin" /> Searching cached notes…
           </div>
         )}
 
@@ -238,7 +238,7 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
             {results.length === 0 && (
               <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-700 flex gap-2">
                 <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                <span>Is topic se related koi cached notes nahi mila. Pehle us chapter ke notes padhein taaki woh cache ho jayein, phir dobara try karein.</span>
+                <span>No cached notes match this topic yet. Open the chapter notes once so they get cached, then try again.</span>
               </div>
             )}
             {results.map((r, i) => (
@@ -339,10 +339,10 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
 
         {isSelfRating && (
           <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3">
-            <p className="text-xs font-bold text-slate-600 mb-2">MCQ practice ke baad apna performance rate karo:</p>
+            <p className="text-xs font-bold text-slate-600 mb-2">After MCQ practice, rate your performance:</p>
             <div className="flex gap-2">
               <button onClick={() => handleSelfRate(k, 'weak')}     className="flex-1 py-2 rounded-xl bg-rose-100    text-rose-700    text-xs font-bold border border-rose-200">😕 Weak</button>
-              <button onClick={() => handleSelfRate(k, 'average')}  className="flex-1 py-2 rounded-xl bg-amber-100   text-amber-700   text-xs font-bold border border-amber-200">🙂 Theek</button>
+              <button onClick={() => handleSelfRate(k, 'average')}  className="flex-1 py-2 rounded-xl bg-amber-100   text-amber-700   text-xs font-bold border border-amber-200">🙂 Okay</button>
               <button onClick={() => handleSelfRate(k, 'strong')}   className="flex-1 py-2 rounded-xl bg-emerald-100 text-emerald-700 text-xs font-bold border border-emerald-200">💪 Strong</button>
             </div>
           </div>
@@ -424,25 +424,25 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
         <div className="px-4 pb-4 space-y-2 border-t border-indigo-100">
           <div className="flex gap-3 pt-2">
             <span className="w-6 h-6 rounded-full bg-rose-100 text-rose-700 text-xs font-black flex items-center justify-center shrink-0 mt-0.5">①</span>
-            <p className="text-sm text-indigo-700">MCQ mein <strong>galat jawab</strong> dete ho → woh topic yahan track hota hai</p>
+            <p className="text-sm text-indigo-700">When you answer an MCQ <strong>incorrectly</strong>, that topic gets tracked here.</p>
           </div>
           <div className="flex gap-3">
             <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-black flex items-center justify-center shrink-0 mt-0.5">②</span>
-            <p className="text-sm text-indigo-700"><strong>Agla din:</strong> "Notes Dhundo" tap karo → app apne saare cached notes scan karta hai (AI nahi, sirf word-match) → best matching notes dikhata hai</p>
+            <p className="text-sm text-indigo-700"><strong>Day 2:</strong> Tap "Find Notes" — the app scans every cached chapter (no AI, plain word-match) and shows the best matching notes.</p>
           </div>
           <div className="flex gap-3">
             <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-black flex items-center justify-center shrink-0 mt-0.5">③</span>
-            <p className="text-sm text-indigo-700">Notes padh lene ke baad → <strong>MCQ Practice</strong> schedule hoti hai. Practice ke baad self-rate karo (Weak/Theek/Strong)</p>
+            <p className="text-sm text-indigo-700">After you read the notes, an <strong>MCQ Practice</strong> is scheduled for the next day. Then self-rate (Weak / Okay / Strong).</p>
           </div>
           <div className="flex gap-3">
             <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-black flex items-center justify-center shrink-0 mt-0.5">④</span>
-            <p className="text-sm text-indigo-700">Achha score → interval badhta hai; weak → jaldi wapas aata hai</p>
+            <p className="text-sm text-indigo-700">Good score → the gap grows. Weak → it returns sooner. Score 100% → notes resurface in 10 days, MCQ rerun in 20 days.</p>
           </div>
           <div className="mt-2 rounded-xl bg-white border border-indigo-100 p-2">
             <div className="flex items-center gap-1 text-[11px] flex-wrap">
-              <span className="bg-rose-100 text-rose-700 font-bold px-2 py-0.5 rounded-full">MCQ Galat</span>
+              <span className="bg-rose-100 text-rose-700 font-bold px-2 py-0.5 rounded-full">Wrong MCQ</span>
               <ChevronRight size={10} className="text-slate-400" />
-              <span className="bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-full">Notes (kal)</span>
+              <span className="bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-full">Notes (Day 2)</span>
               <ChevronRight size={10} className="text-slate-400" />
               <span className="bg-emerald-100 text-emerald-700 font-bold px-2 py-0.5 rounded-full">MCQ Practice</span>
               <ChevronRight size={10} className="text-slate-400" />
@@ -488,7 +488,7 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
             }`}
           >
             <ListChecks size={14} />
-            Aaj Ka Kaam
+            Today's Tasks
             {totalDue > 0 && (
               <span className="bg-rose-500 text-white text-[9px] font-black rounded-full w-4 h-4 flex items-center justify-center">
                 {totalDue > 9 ? '9+' : totalDue}
@@ -519,7 +519,7 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl p-5 max-w-xs w-full shadow-2xl">
             <p className="font-black text-slate-800 mb-2">Reset Revision Hub?</p>
-            <p className="text-sm text-slate-500 mb-5">Sab tracking data aur schedule delete ho jayega.</p>
+            <p className="text-sm text-slate-500 mb-5">All tracking data and the revision schedule will be deleted.</p>
             <div className="flex gap-3">
               <button onClick={() => setShowClearConfirm(false)} className="flex-1 py-2 rounded-xl bg-slate-100 text-sm font-bold">Cancel</button>
               <button onClick={handleClear} className="flex-1 py-2 rounded-xl bg-rose-500 text-white text-sm font-bold">Reset</button>
@@ -539,7 +539,7 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm text-center">
                 <p className="text-2xl font-black text-indigo-600">{totalDue}</p>
-                <p className="text-[10px] font-bold text-slate-500 uppercase">Due Aaj</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase">Due Today</p>
               </div>
               <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm text-center">
                 <p className="text-2xl font-black text-blue-600">{dueNotes.length}</p>
@@ -555,10 +555,10 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
             {totalTracked === 0 && (
               <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50 p-6 text-center">
                 <Sparkles size={30} className="mx-auto text-indigo-400 mb-3" />
-                <p className="font-black text-indigo-800 text-base mb-1">Abhi koi topic track nahi ho raha</p>
-                <p className="text-sm text-indigo-600 mb-4">MCQ mein galat jawab do → woh topic yahan automatically aa jayega</p>
+                <p className="font-black text-indigo-800 text-base mb-1">No topics being tracked yet</p>
+                <p className="text-sm text-indigo-600 mb-4">Get an MCQ wrong and that topic will automatically show up here.</p>
                 <button onClick={() => { setShowHowItWorks(true); setActiveTab('schedule'); }} className="text-xs font-bold text-indigo-600 underline">
-                  Kaise kaam karta hai? →
+                  How does it work? →
                 </button>
               </div>
             )}
@@ -566,9 +566,9 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
             {/* Notes due today */}
             {totalTracked > 0 && (
               <div>
-                <SectionHeader icon={<BookOpen size={14} />} label="Aaj Notes Padhne Hain" count={dueNotes.length} color="indigo" />
+                <SectionHeader icon={<BookOpen size={14} />} label="Notes To Read Today" count={dueNotes.length} color="indigo" />
                 {dueNotes.length === 0
-                  ? <EmptyCard msg="Aaj koi notes pending nahi!" />
+                  ? <EmptyCard msg="No notes pending today!" />
                   : <SubjectChapterList groups={notesGroups} renderBucket={b => <NotesBucketCard b={b} />} />
                 }
               </div>
@@ -577,9 +577,9 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
             {/* MCQ due today */}
             {totalTracked > 0 && (
               <div>
-                <SectionHeader icon={<Target size={14} />} label="Aaj MCQ Practice Karni Hai" count={dueMcq.length} color="emerald" />
+                <SectionHeader icon={<Target size={14} />} label="MCQ Practice For Today" count={dueMcq.length} color="emerald" />
                 {dueMcq.length === 0
-                  ? <EmptyCard msg="Aaj koi MCQ pending nahi!" />
+                  ? <EmptyCard msg="No MCQs pending today!" />
                   : <SubjectChapterList groups={mcqGroups} renderBucket={b => <McqBucketCard b={b} />} />
                 }
               </div>
@@ -599,8 +599,8 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
             {upcomingItems.length === 0 && totalTracked === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-center">
                 <Calendar size={24} className="mx-auto text-slate-300 mb-2" />
-                <p className="text-sm font-bold text-slate-500">Koi scheduled revision nahi hai abhi</p>
-                <p className="text-xs text-slate-400 mt-1">MCQ practice karo → galat jawab yahan track honge</p>
+                <p className="text-sm font-bold text-slate-500">No scheduled revisions yet</p>
+                <p className="text-xs text-slate-400 mt-1">Practice MCQs — wrong answers will be tracked here.</p>
               </div>
             )}
 
@@ -632,7 +632,7 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
                             {b.stage === 'MCQ' ? 'MCQ' : 'Notes'}
                           </p>
                           <p className={`text-[10px] font-bold ${isToday ? 'text-rose-600' : 'text-slate-500'}`}>
-                            {b.nextDueAt ? daysUntil(b.nextDueAt) : 'Aaj'}
+                            {b.nextDueAt ? daysUntil(b.nextDueAt) : 'Today'}
                           </p>
                         </div>
                       </div>

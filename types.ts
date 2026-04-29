@@ -509,6 +509,10 @@ export interface SystemSettings {
   appShortName?: string; // e.g. "IIC"
   appShortNameSize?: number; // Font size in pixels for loading-screen short name (admin slider, 24-120). Default 30.
   splashFontId?: string; // Admin-chosen font family for the loading screen short name. See utils/splashFonts.ts
+  // === Loading-screen LOGO (replaces the short-name text when enabled) ===
+  splashLogoEnabled?: boolean;   // Default true — show image instead of text on splash
+  splashLogoUrl?: string;        // Public path or data: URL. Default '/splash-logo.png'
+  splashLogoSize?: number;       // Rendered width in pixels (clamped 60-260). Default 140.
   // Universal Video — when true, hides the bottom Video tab and shows a Video icon in the top header instead.
   universalVideoInTopBar?: boolean;
   // NEW Revision Hub V2 — auto-finds notes for weak topics tracked from MCQ attempts.

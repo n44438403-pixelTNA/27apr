@@ -1076,10 +1076,37 @@ export const PdfView: React.FC<Props> = ({
       const formattedLink = formatDriveLink(activePdf);
       return (
           <div className="fixed inset-0 z-[9999] bg-black flex flex-col animate-in fade-in zoom-in-95 h-screen w-screen overflow-hidden">
-              {/* Minimal Floating Controls */}
-              <div className="absolute top-4 left-4 z-50">
+              {/* Floating Controls — Back + Save Offline. Save bookmarks the
+                  PDF so the user can re-open it instantly from the History tab
+                  even if they navigate away. (Remote Drive PDFs can't be saved
+                  as a binary blob from the browser due to CORS, so we save the
+                  link entry instead.) */}
+              <div className="absolute top-4 left-4 right-4 z-50 flex flex-wrap gap-3 items-center">
                   <button onClick={() => { setActivePdf(null); stopAllSpeech(); }} className="bg-black/50 backdrop-blur-md text-white p-3 rounded-full hover:bg-black/70 border border-white/20 shadow-lg">
                       <ArrowLeft size={24} />
+                  </button>
+                  <button
+                      onClick={() => {
+                          saveOfflineItem({
+                              id: `pdf_${chapter.id}_${Date.now()}`,
+                              type: 'NOTE',
+                              title: chapter.title || 'Saved PDF',
+                              subtitle: `${subject.name} · PDF Bookmark`,
+                              data: {
+                                  html: `<div style="padding:24px;font-family:system-ui;text-align:center;">
+                                      <h2 style="font-size:20px;font-weight:900;margin-bottom:12px;">${chapter.title || 'PDF'}</h2>
+                                      <p style="color:#64748b;margin-bottom:20px;">Bookmarked PDF resource</p>
+                                      <a href="${activePdf}" target="_blank" rel="noopener" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:700;">Open PDF</a>
+                                  </div>`,
+                                  pdfLink: activePdf,
+                              }
+                          });
+                          setAlertConfig({isOpen: true, message: 'PDF Bookmark Saved! Open it any time from the History tab.'});
+                      }}
+                      className="ml-auto flex items-center gap-2 bg-slate-800 backdrop-blur-md text-white px-4 py-2 rounded-full hover:bg-slate-900 border border-slate-700 shadow-xl font-bold text-sm"
+                      title="Save bookmark for offline access"
+                  >
+                      <Download size={16} /> <span>Save</span>
                   </button>
               </div>
 
@@ -1103,49 +1130,95 @@ export const PdfView: React.FC<Props> = ({
       const hasPdf = !!activeNoteContent.pdfUrl;
       const formattedLink = hasPdf ? formatDriveLink(activeNoteContent.pdfUrl!) : '';
 
-      return (
-          <div className="fixed inset-0 z-[9999] bg-black flex flex-col animate-in fade-in zoom-in-95 h-screen w-screen overflow-hidden">
-              {/* Minimal Floating Controls */}
-              <div className="absolute top-4 left-4 z-50 flex gap-4">
-                  <button onClick={() => { setActiveNoteContent(null); stopAllSpeech(); }} className="bg-black/50 backdrop-blur-md text-white p-3 rounded-full hover:bg-black/70 border border-white/20 shadow-lg">
-                      <ArrowLeft size={24} />
-                  </button>
-
-                  {/* CUSTOM AUDIO PLAY (IF AVAILABLE) */}
-                  {activeNoteContent.audioUrl && (
-                      <button
-                          onClick={() => playCustomAudio(activeNoteContent.audioUrl!)}
-                          className="bg-gradient-to-r from-amber-400 to-orange-500 text-white px-4 py-2 rounded-full hover:from-amber-500 hover:to-orange-600 shadow-lg flex items-center gap-2 font-bold text-sm transition-transform hover:scale-105"
-                          title="Play Premium Audio"
-                      >
-                          <Music size={20} /> Premium Audio
+      // PDF view stays as the existing fullscreen iframe overlay — only the
+      // text-only Additional Notes reader is restructured to match the
+      // Teaching Strategy layout (sticky editorial header with always-visible
+      // Save + Audio controls, ChunkedNotesReader inside an article card).
+      if (hasPdf) {
+          return (
+              <div className="fixed inset-0 z-[9999] bg-black flex flex-col animate-in fade-in zoom-in-95 h-screen w-screen overflow-hidden">
+                  <div className="absolute top-4 left-4 z-50 flex flex-wrap gap-3 max-w-[calc(100%-2rem)]">
+                      <button onClick={() => { setActiveNoteContent(null); stopAllSpeech(); }} className="bg-black/50 backdrop-blur-md text-white p-3 rounded-full hover:bg-black/70 border border-white/20 shadow-lg">
+                          <ArrowLeft size={24} />
                       </button>
-                  )}
-
-                  {/* "Read All" button — PDF mode me jab side-text bhi ho to wahi
-                      content ko sequentially padhne ke liye. Text-only mode me niche
-                      ChunkedNotesReader apna khud ka "Read All" button render karta
-                      hai (Deep Dive / Teaching Strategy ke jaisa), to yahaan duplicate
-                      ki zaroorat nahi hai. Pehle yeh sirf headphones icon button tha
-                      jo confusing tha — ab clearly "Read All" / "Stop" labelled. */}
-                  {hasPdf && activeNoteContent.content && activeNoteContent.content.length > 10 && (
+                      {activeNoteContent.audioUrl && (
+                          <button
+                              onClick={() => playCustomAudio(activeNoteContent.audioUrl!)}
+                              className="bg-gradient-to-r from-amber-400 to-orange-500 text-white px-4 py-2 rounded-full hover:from-amber-500 hover:to-orange-600 shadow-lg flex items-center gap-2 font-bold text-sm transition-transform hover:scale-105"
+                              title="Play Premium Audio"
+                          >
+                              <Music size={20} /> Premium Audio
+                          </button>
+                      )}
+                      {activeNoteContent.content && activeNoteContent.content.length > 10 && (
+                          <button
+                              onClick={() => {
+                                  if (isAutoPlaying) {
+                                      stopAllSpeech();
+                                  } else {
+                                      setIsAutoPlaying(true);
+                                      const plainText = activeNoteContent.content.replace(/<[^>]*>?/gm, ' ');
+                                      speakText(plainText, null, speechRate, 'hi-IN', undefined, () => setIsAutoPlaying(false));
+                                  }
+                              }}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold text-xs uppercase tracking-wider shadow-lg border transition-all ${isAutoPlaying ? 'bg-red-600 text-white border-red-400 animate-pulse' : 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'}`}
+                              title={isAutoPlaying ? 'Stop reading' : 'Read everything aloud'}
+                          >
+                              {isAutoPlaying ? <><Square size={14} /> Stop</> : <><Volume2 size={14} /> Read All</>}
+                          </button>
+                      )}
                       <button
                           onClick={() => {
-                              if (isAutoPlaying) {
-                                  stopAllSpeech();
-                              } else {
-                                  setIsAutoPlaying(true);
-                                  const plainText = activeNoteContent.content.replace(/<[^>]*>?/gm, ' ');
-                                  speakText(plainText, null, speechRate, 'hi-IN', undefined, () => setIsAutoPlaying(false));
-                              }
+                              saveOfflineItem({
+                                  id: `note_${chapter.id}_${Date.now()}`,
+                                  type: 'NOTE',
+                                  title: activeNoteContent.title || 'Saved Note',
+                                  subtitle: `${subject.name} - ${chapter.title}`,
+                                  data: { html: activeNoteContent.content }
+                              });
+                              setAlertConfig({isOpen: true, message: 'Note Saved Offline!'});
                           }}
-                          className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold text-xs uppercase tracking-wider shadow-lg border transition-all ${isAutoPlaying ? 'bg-red-600 text-white border-red-400 animate-pulse' : 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'}`}
-                          title={isAutoPlaying ? 'Stop reading' : 'Read everything aloud'}
+                          className="flex items-center gap-2 bg-slate-800 backdrop-blur-md text-white px-4 py-2 rounded-full hover:bg-slate-900 border border-slate-700 shadow-xl font-bold text-sm"
+                          title="Save Offline"
                       >
-                          {isAutoPlaying ? <><Square size={14} /> Stop</> : <><Volume2 size={14} /> Read All</>}
+                          <Download size={18} /> <span>Save</span>
                       </button>
-                  )}
+                  </div>
+                  <div className="flex-1 relative w-full h-full">
+                      <iframe
+                          src={formattedLink}
+                          className="w-full h-full border-none"
+                          title="PDF Viewer"
+                          allow="autoplay"
+                          sandbox="allow-scripts allow-same-origin allow-forms allow-popups-to-escape-sandbox"
+                      />
+                      <div className="absolute top-0 left-0 w-full h-16 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
+                  </div>
+              </div>
+          );
+      }
 
+      // TEXT-ONLY ADDITIONAL NOTE — same layout shape as Teaching Strategy:
+      // sticky top app bar (back + Save) so action controls never hide on
+      // scroll, then an editorial article card whose header carries the
+      // Audio chip + title. Content scrolls inside.
+      return (
+          <div className="fixed inset-0 z-[9999] bg-slate-50 flex flex-col animate-in fade-in zoom-in-95 h-screen w-screen overflow-hidden">
+              {/* Sticky app bar — always visible while scrolling */}
+              <div className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 px-3 sm:px-5 py-2.5 flex items-center gap-3 shadow-sm">
+                  <button
+                      onClick={() => { setActiveNoteContent(null); stopAllSpeech(); }}
+                      className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center shrink-0 transition-colors"
+                      title="Back"
+                  >
+                      <ArrowLeft size={18} />
+                  </button>
+                  <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-600">Library</p>
+                      <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight truncate">
+                          {activeNoteContent.title || 'Additional Note'}
+                      </h3>
+                  </div>
                   <button
                       onClick={() => {
                           saveOfflineItem({
@@ -1153,51 +1226,55 @@ export const PdfView: React.FC<Props> = ({
                               type: 'NOTE',
                               title: activeNoteContent.title || 'Saved Note',
                               subtitle: `${subject.name} - ${chapter.title}`,
-                              data: {
-                                  html: activeNoteContent.content
-                              }
+                              data: { html: activeNoteContent.content }
                           });
-                          alert("Note Saved Offline!");
+                          setAlertConfig({isOpen: true, message: 'Note Saved Offline! Access it in the History tab.'});
                       }}
-                      className="flex items-center gap-2 bg-slate-800 backdrop-blur-md text-white px-4 py-2 rounded-full hover:bg-slate-900 border border-slate-700 shadow-xl font-bold text-sm"
-                      title="Save Offline"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-[10px] uppercase tracking-wider transition-all bg-slate-100 text-slate-700 hover:bg-slate-200 whitespace-nowrap shrink-0"
+                      title="Save offline"
                   >
-                      <Download size={18} className="animate-bounce" /> <span>Save</span>
+                      <Download size={11} /> Save
                   </button>
               </div>
 
-              <div className="flex-1 relative flex flex-col w-full h-full">
-                  {hasPdf ? (
-                      // PDF VIEW (Full Screen)
-                      <>
-                          <div className="flex-1 relative w-full h-full">
-                              <iframe
-                                  src={formattedLink}
-                                  className="w-full h-full border-none"
-                                  title="PDF Viewer"
-                                  allow="autoplay"
-                                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups-to-escape-sandbox"
-                              />
-                              <div className="absolute top-0 left-0 w-full h-16 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
-                          </div>
-                      </>
-                  ) : (
-                      // TEXT ONLY VIEW — Competition-style chunked reader (Deep Dive / Lucent
-                      // jaisa). Pehle dark-mode prose HTML wall thi + ek alag broken normal-TTS
-                      // button. Ab ChunkedNotesReader har bullet/Hindi-danda line ko apna
-                      // tappable + Read-All TTS deta hai. Background white kar diya kyunki
-                      // reader white-bg ke liye styled hai.
-                      <div className="flex-1 overflow-y-auto px-2 sm:px-6 py-6 bg-white text-slate-800">
-                          <div className="w-full max-w-3xl mx-auto pt-16">
-                              <h2 className="text-2xl font-black text-slate-900 mb-4 px-2">{activeNoteContent.title}</h2>
+              {/* Scrollable body — editorial article card identical in shape to
+                  Teaching Strategy. */}
+              <div className="flex-1 overflow-y-auto">
+                  <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4">
+                      <article className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
+                          <header className="relative px-5 py-4 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white">
+                              <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-cyan-500 to-teal-600" />
+                              <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                      <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-cyan-600 mb-1">
+                                          <Book size={12} />
+                                          <span>Extended Resource</span>
+                                      </div>
+                                      <h3 className="font-black text-slate-900 text-lg leading-tight">
+                                          {activeNoteContent.title || 'Additional Note'}
+                                      </h3>
+                                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">{subject.name} · {chapter.title}</p>
+                                  </div>
+                                  {activeNoteContent.audioUrl && (
+                                      <button
+                                          onClick={() => playCustomAudio(activeNoteContent.audioUrl!)}
+                                          className="px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 text-white hover:from-amber-500 hover:to-orange-600 shadow-md flex items-center gap-1.5 font-bold text-[10px] uppercase tracking-wider transition-transform hover:scale-105 shrink-0"
+                                          title="Play Premium Audio"
+                                      >
+                                          <Music size={12} /> Audio
+                                      </button>
+                                  )}
+                              </div>
+                          </header>
+                          <div className="p-2 sm:p-4">
                               <ChunkedNotesReader
                                   content={activeNoteContent.content}
-                                  topBarLabel={activeNoteContent.title}
+                                  topBarLabel={activeNoteContent.title || 'Additional Note'}
                                   noteKey={`pdfview_${chapter.id}_addnote_${activeNoteContent.title || 'untitled'}`}
                               />
                           </div>
-                      </div>
-                  )}
+                      </article>
+                  </div>
               </div>
           </div>
       );
@@ -1283,15 +1360,13 @@ export const PdfView: React.FC<Props> = ({
                                            }
                                            setActiveTab(tab.id as any);
                                            stopAllSpeech();
-                                           // Competition-mode-jaisa clean reading: Resources / Teaching
-                                           // Strategy tabs me top header auto-hide karo so the user gets
-                                           // a distraction-free reader (Class 6-12 me bhi). Concept /
-                                           // Retention me header rakhna hai (multiple controls dikhne hain).
-                                           if (tab.id === 'RESOURCES' || tab.id === 'TEACHER') {
-                                               setShowHeader(false);
-                                           } else {
-                                               setShowHeader(true);
-                                           }
+                                           // Always keep the sticky header (back button + tab strip)
+                                           // visible — even on Resources / Teaching Strategy. The
+                                           // earlier "distraction-free" auto-hide left users stranded
+                                           // because there was no way to navigate back, and the
+                                           // collapsed header also created a large empty area at the
+                                           // top of the page on mobile.
+                                           setShowHeader(true);
                                        }}
                                        className={`flex-1 min-w-[85px] py-2 sm:py-3 text-[10px] sm:text-xs font-bold flex flex-col items-center gap-1 border-b-2 transition-all ${activeTab === tab.id ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-slate-600 hover:bg-slate-50'} ${isLocked && cost === 0 ? 'grayscale' : ''}`}
                                    >
