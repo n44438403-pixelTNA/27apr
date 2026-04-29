@@ -116,8 +116,18 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
                 setMsg('Code usage limit reached or collision detected. Please try again.');
                 return;
             }
-            // Sync to Firestore (Best Effort)
-            try { await updateDoc(doc(db, "redeem_codes", cleanCode), result.snapshot.val()); } catch(e){}
+            // Sync to Firestore (Best Effort) — send ONLY the changed fields so it
+            // passes the strict Firestore redeem rule (`affectedKeys().hasOnly(...)`).
+            try {
+                const committed = result.snapshot.val() || {};
+                const patch: Record<string, any> = {
+                    usedCount: committed.usedCount ?? (currentUses + 1),
+                    isRedeemed: !!committed.isRedeemed,
+                    redeemedBy: committed.redeemedBy ?? [...redeemedList, user.id],
+                    lastRedeemedAt: new Date().toISOString(),
+                };
+                await updateDoc(doc(db, "redeem_codes", cleanCode), patch);
+            } catch(e){ /* non-blocking */ }
         } else {
             // Firestore Transaction (Simulated via Pre-check, real transaction is harder here due to mix)
             // Since we prefer RTDB for codes, we will just use update but with a re-check or optimistic locking if possible.

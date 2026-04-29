@@ -948,6 +948,9 @@ export interface Chapter {
   title: string;
   description?: string;
   serialNumber?: string; // Custom display number
+  // For Lucent admin lessons: lowest pageNo across the lesson's pages. When
+  // present, the chapter card renders a "PG X" badge instead of "CH 01".
+  pageNo?: string;
 }
 
 export interface MCQItem {

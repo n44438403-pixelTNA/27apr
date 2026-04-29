@@ -4,7 +4,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { Chapter, User, Subject, SystemSettings, HtmlModule, PremiumNoteSlot, DeepDiveEntry, AdditionalNoteEntry } from '../types';
-import { FileText, Lock, ArrowLeft, Crown, Star, CheckCircle, AlertCircle, Globe, Maximize, Minimize, Layers, HelpCircle, Minus, Plus, Volume2, Square, Zap, Headphones, BookOpen, Music, Play, Pause, SkipForward, SkipBack, Book, List, Layout, ExternalLink, GraduationCap } from 'lucide-react';
+import { FileText, Lock, ArrowLeft, Crown, Star, CheckCircle, AlertCircle, Globe, Maximize, Minimize, Layers, HelpCircle, Minus, Plus, Volume2, Square, Zap, Headphones, BookOpen, Music, Play, Pause, SkipForward, SkipBack, Book, List, Layout, ExternalLink, GraduationCap, ChevronRight, Sparkles } from 'lucide-react';
 import { CustomAlert } from './CustomDialogs';
 import { getChapterData, saveUserToLive } from '../firebase';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
@@ -37,6 +37,8 @@ interface Props {
   settings?: SystemSettings;
   initialSyllabusMode?: 'SCHOOL' | 'COMPETITION';
   directResource?: { url: string, access: string };
+  // NEW: Lucent-style cross-tab switch from Notes (PdfView) → MCQ (McqView).
+  onSwitchToMcq?: () => void;
 }
 
 // Helper to remove leading/trailing artifacts like quotes, HTML entities, emojis, and dashes from Quick Revision points
@@ -157,7 +159,7 @@ const extractTopicsFromHtml = (html: string): { title: string, content: string }
 };
 
 export const PdfView: React.FC<Props> = ({ 
-  chapter, subject, user, board, classLevel, stream, onBack, onUpdateUser, settings, initialSyllabusMode, directResource
+  chapter, subject, user, board, classLevel, stream, onBack, onUpdateUser, settings, initialSyllabusMode, directResource, onSwitchToMcq
 }) => {
   const [contentData, setContentData] = useState<any>({});
   const [loading, setLoading] = useState(true);
@@ -1225,11 +1227,13 @@ export const PdfView: React.FC<Props> = ({
                       </button>
                   )}
 
-                  {/* TTS Toggle — sirf PDF mode me dikhao. Text-only mode me niche
-                      ChunkedNotesReader apna "Read All" button khud render karta hai
-                      (Deep Dive / Teaching Strategy ke jaise), to yahaan duplicate /
-                      broken normal-TTS button ki zaroorat nahi hai. */}
-                  {hasPdf && (
+                  {/* "Read All" button — PDF mode me jab side-text bhi ho to wahi
+                      content ko sequentially padhne ke liye. Text-only mode me niche
+                      ChunkedNotesReader apna khud ka "Read All" button render karta
+                      hai (Deep Dive / Teaching Strategy ke jaisa), to yahaan duplicate
+                      ki zaroorat nahi hai. Pehle yeh sirf headphones icon button tha
+                      jo confusing tha — ab clearly "Read All" / "Stop" labelled. */}
+                  {hasPdf && activeNoteContent.content && activeNoteContent.content.length > 10 && (
                       <button
                           onClick={() => {
                               if (isAutoPlaying) {
@@ -1240,9 +1244,10 @@ export const PdfView: React.FC<Props> = ({
                                   speakText(plainText, null, speechRate, 'hi-IN', undefined, () => setIsAutoPlaying(false));
                               }
                           }}
-                          className={`bg-black/50 backdrop-blur-md text-white p-3 rounded-full hover:bg-black/70 border border-white/20 shadow-lg ${isAutoPlaying ? 'text-red-400 border-red-400 animate-pulse' : ''}`}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold text-xs uppercase tracking-wider shadow-lg border transition-all ${isAutoPlaying ? 'bg-red-600 text-white border-red-400 animate-pulse' : 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700'}`}
+                          title={isAutoPlaying ? 'Stop reading' : 'Read everything aloud'}
                       >
-                          {isAutoPlaying ? <Pause size={24} /> : <Headphones size={24} />}
+                          {isAutoPlaying ? <><Square size={14} /> Stop</> : <><Volume2 size={14} /> Read All</>}
                       </button>
                   )}
 
@@ -1337,6 +1342,26 @@ export const PdfView: React.FC<Props> = ({
                </button>
            </div>
 
+           {/* === LUCENT-STYLE NOTES ↔ MCQ TAB SWITCH === */}
+           {onSwitchToMcq && !isFullscreen && (
+               <div className="px-3 sm:px-4 pb-2 pt-1">
+                   <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                       <button
+                           disabled
+                           className="flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-white text-blue-600 shadow-sm"
+                       >
+                           <BookOpen size={14}/> 📚 Notes
+                       </button>
+                       <button
+                           onClick={onSwitchToMcq}
+                           className="flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 text-slate-600 hover:bg-white/60 transition-all"
+                       >
+                           <HelpCircle size={14}/> 📝 MCQ
+                       </button>
+                   </div>
+               </div>
+           )}
+
            {/* TABS */}
            {!isFullscreen && (
                <div className="flex overflow-x-auto border-t border-slate-100 scrollbar-hide">
@@ -1363,6 +1388,15 @@ export const PdfView: React.FC<Props> = ({
                                            }
                                            setActiveTab(tab.id as any);
                                            stopAllSpeech();
+                                           // Competition-mode-jaisa clean reading: Resources / Teaching
+                                           // Strategy tabs me top header auto-hide karo so the user gets
+                                           // a distraction-free reader (Class 6-12 me bhi). Concept /
+                                           // Retention me header rakhna hai (multiple controls dikhne hain).
+                                           if (tab.id === 'RESOURCES' || tab.id === 'TEACHER') {
+                                               setShowHeader(false);
+                                           } else {
+                                               setShowHeader(true);
+                                           }
                                        }}
                                        className={`flex-1 min-w-[85px] py-2 sm:py-3 text-[10px] sm:text-xs font-bold flex flex-col items-center gap-1 border-b-2 transition-all ${activeTab === tab.id ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-slate-600 hover:bg-slate-50'} ${isLocked && cost === 0 ? 'grayscale' : ''}`}
                                    >
@@ -1761,23 +1795,13 @@ export const PdfView: React.FC<Props> = ({
                        if (!currentNote) return null;
 
                        return (
-                           <div className="flex flex-col h-full max-w-3xl mx-auto">
-                               {/* Topic Navigation Menu */}
-                               <div className="flex justify-between items-center mb-4">
-                                   {allStrategyNotes.length > 1 ? (
-                                       <div className="flex overflow-x-auto gap-2 pb-2 scrollbar-hide px-1 flex-1">
-                                           {allStrategyNotes.map((note, idx) => (
-                                               <button
-                                                   key={idx}
-                                                   onClick={() => { setCurrentStrategyIndex(idx); stopSpeech(); }}
-                                                   className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${currentStrategyIndex === idx ? 'bg-purple-600 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                                               >
-                                                   {note.title || `Topic ${idx + 1}`}
-                                               </button>
-                                           ))}
-                                       </div>
-                                   ) : <div className="flex-1"></div>}
-
+                           <div className="flex flex-col h-full max-w-3xl mx-auto px-3 sm:px-0 pt-3">
+                               {/* Editorial section header — competition-mode-jaisa clean look */}
+                               <div className="flex items-end justify-between border-b border-slate-200 pb-2 mb-4">
+                                   <div>
+                                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-purple-600">Educator's Guide</p>
+                                       <h3 className="text-xl font-black text-slate-900 leading-tight">Teaching Strategy</h3>
+                                   </div>
                                    <button
                                        onClick={() => {
                                            const htmlContent = allStrategyNotes.map(n => `<h2>${n.title || 'Teaching Strategy'}</h2>${n.content}`).join('<hr/>');
@@ -1790,38 +1814,56 @@ export const PdfView: React.FC<Props> = ({
                                            });
                                            setAlertConfig({isOpen: true, message: 'Teaching Strategy Saved Offline! Access them in the History tab.'});
                                        }}
-                                       className="flex items-center gap-2 px-3 py-1.5 rounded-full font-bold text-xs transition-all bg-slate-800 text-white shadow hover:bg-slate-900 ml-2 whitespace-nowrap"
+                                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-[10px] uppercase tracking-wider transition-all bg-slate-100 text-slate-700 hover:bg-slate-200 whitespace-nowrap shrink-0"
+                                       title="Save offline"
                                    >
-                                       <Download size={12} /> Save Offline
+                                       <Download size={11} /> Save
                                    </button>
                                </div>
 
-                               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-6 flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
-                                   <div className="bg-purple-600 p-4 text-white flex justify-between items-start">
-                                       <div>
-                                           <h3 className="font-black text-lg flex items-center gap-2"><GraduationCap size={20} /> {currentNote.title || 'Teaching Strategy'}</h3>
-                                           <p className="text-xs text-purple-200 font-medium">Exclusive Guide for Educators</p>
-                                       </div>
-                                       <div className="flex gap-2 items-center">
+                               {/* Topic chip rail */}
+                               {allStrategyNotes.length > 1 && (
+                                   <div className="flex overflow-x-auto gap-2 pb-3 scrollbar-hide -mx-3 px-3 mb-1">
+                                       {allStrategyNotes.map((note, idx) => (
+                                           <button
+                                               key={idx}
+                                               onClick={() => { setCurrentStrategyIndex(idx); stopSpeech(); }}
+                                               className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all border ${currentStrategyIndex === idx ? 'bg-purple-600 text-white border-purple-600 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:border-purple-300 hover:text-purple-700'}`}
+                                           >
+                                               {note.title || `Topic ${idx + 1}`}
+                                           </button>
+                                       ))}
+                                   </div>
+                               )}
+
+                               {/* Article-style card — premium editorial feel */}
+                               <article className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-6 flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
+                                   {/* Subtle gradient header strip with accent bar */}
+                                   <header className="relative px-5 py-4 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white">
+                                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-purple-500 to-indigo-600" />
+                                       <div className="flex items-start justify-between gap-3">
+                                           <div className="min-w-0">
+                                               <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-purple-600 mb-1">
+                                                   <GraduationCap size={12} />
+                                                   <span>Topic {currentStrategyIndex + 1}{allStrategyNotes.length > 1 ? ` of ${allStrategyNotes.length}` : ''}</span>
+                                               </div>
+                                               <h3 className="font-black text-slate-900 text-lg leading-tight">{currentNote.title || 'Teaching Strategy'}</h3>
+                                               <p className="text-[11px] text-slate-500 font-medium mt-0.5">Exclusive guide for educators</p>
+                                           </div>
                                            {currentNote.audioUrl && (
                                                <button
                                                    onClick={() => playCustomAudio(currentNote.audioUrl)}
-                                                   className="px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 text-white hover:from-amber-500 hover:to-orange-600 shadow-md flex items-center gap-1.5 font-bold text-xs transition-transform hover:scale-105"
+                                                   className="px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 text-white hover:from-amber-500 hover:to-orange-600 shadow-md flex items-center gap-1.5 font-bold text-[10px] uppercase tracking-wider transition-transform hover:scale-105 shrink-0"
                                                    title="Play Premium Audio Strategy"
                                                >
-                                                   <Music size={14} /> Premium Audio
+                                                   <Music size={12} /> Audio
                                                </button>
                                            )}
-                                           {/* Pehle yahaan ek <SpeakButton> tha jo poore HTML ko ek
-                                               saath padhne ki koshish karta tha — wo Class 6-12 ke
-                                               teaching strategy notes me reliably kaam nahi kar raha
-                                               tha. Ab niche ChunkedNotesReader apna "Read All" button
-                                               render karta hai jo har bullet / Hindi-danda line ko
-                                               sequentially padhta hai (Deep Dive jaise hi). */}
                                        </div>
-                                   </div>
-                                   {/* Competition-style chunked reader — Deep Dive ke jaise hi
-                                       teaching strategy bhi ab line-by-line tappable + TTS milti hai. */}
+                                   </header>
+                                   {/* ChunkedNotesReader apna "Read All" / "Stop" button khud render
+                                       karta hai (top bar visible) — har bullet / Hindi-danda line
+                                       tappable hoti hai aur sequentially read hoti hai. */}
                                    <div className="p-2 sm:p-4 overflow-y-auto teacher-guide-container">
                                        <ChunkedNotesReader
                                            content={currentNote.content}
@@ -1829,7 +1871,7 @@ export const PdfView: React.FC<Props> = ({
                                            noteKey={`pdfview_${chapter.id}_strategy_${currentStrategyIndex}`}
                                        />
                                    </div>
-                               </div>
+                               </article>
 
                                {/* Pagination Controls */}
                                {allStrategyNotes.length > 1 && (
@@ -1859,9 +1901,12 @@ export const PdfView: React.FC<Props> = ({
                </div>
            )}
 
-           {/* 4. RESOURCES (ADDITIONAL NOTES) */}
+           {/* 4. RESOURCES (ADDITIONAL NOTES) — REDESIGNED: editorial card grid,
+               competition-mode-jaisa clean look. Class 6-12 (SCHOOL) me bhi
+               COMPETITION wale notes merge karke dikhaye jaate hain taaki
+               student ko same content milta hai. */}
            {activeTab === 'RESOURCES' && (
-               <div className="p-0 sm:p-4 space-y-4 w-full max-w-none mx-auto">
+               <div className="p-0 sm:p-4 w-full max-w-3xl mx-auto">
                    {(() => {
                         const access = getTabAccess('RESOURCES');
 
@@ -1892,67 +1937,131 @@ export const PdfView: React.FC<Props> = ({
                             );
                         }
 
+                        // Merge SCHOOL + COMPETITION resources so Class 6-12 me bhi
+                        // wahi notes dikhe jo Competition mode me dikhte hain.
+                        const schoolFreeLink = contentData?.schoolPdfLink || contentData?.freeLink;
+                        const compFreeLink = contentData?.competitionPdfLink;
+                        const schoolFreeHtml = contentData?.schoolFreeNotesHtml || contentData?.freeNotesHtml;
+                        const compFreeHtml = contentData?.competitionFreeNotesHtml;
+                        // Pick whatever the active mode has, fallback to other mode so
+                        // student kabhi blank na dekhe.
+                        const freeLink = syllabusMode === 'SCHOOL'
+                            ? (schoolFreeLink || compFreeLink)
+                            : (compFreeLink || schoolFreeLink);
+                        const freeHtml = syllabusMode === 'SCHOOL'
+                            ? (schoolFreeHtml || compFreeHtml)
+                            : (compFreeHtml || schoolFreeHtml);
+                        const hasStandard = !!freeLink || (freeHtml && freeHtml.length >= 10);
+
+                        const schoolNotes: AdditionalNoteEntry[] = contentData?.schoolAdditionalNotes || contentData?.additionalNotes || [];
+                        const compNotes: AdditionalNoteEntry[] = contentData?.competitionAdditionalNotes || [];
+                        // Dedupe by title+pdfLink so same resource ek hi baar dikhe.
+                        const seen = new Set<string>();
+                        const mergedNotes: AdditionalNoteEntry[] = [...schoolNotes, ...compNotes].filter(n => {
+                            const k = `${(n.title || '').trim().toLowerCase()}|${(n.pdfLink || '').trim()}|${(n.noteContent || '').slice(0, 40)}`;
+                            if (seen.has(k)) return false;
+                            seen.add(k);
+                            return true;
+                        });
+
+                        if (!hasStandard && mergedNotes.length === 0) {
+                            return (
+                                <div className="flex flex-col items-center justify-center py-20 text-center text-slate-500">
+                                    <Layers size={48} className="mb-4 text-cyan-200" />
+                                    <h3 className="font-bold text-base text-slate-700">No Resources Yet</h3>
+                                    <p className="text-xs max-w-xs mt-2">Admin ne abhi is chapter ke liye extended resources nahi daale hain.</p>
+                                </div>
+                            );
+                        }
+
                         return (
-                           <>
-                               <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2 mb-2">
-                                   <Layers size={16} className="text-cyan-600" /> Additional Resources
-                               </h4>
+                           <div className="px-3 sm:px-0 pt-3 pb-6 space-y-5">
+                               {/* Section header — editorial */}
+                               <div className="flex items-end justify-between border-b border-slate-200 pb-2">
+                                   <div>
+                                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-600">Library</p>
+                                       <h3 className="text-xl font-black text-slate-900 leading-tight">Extended Resources</h3>
+                                   </div>
+                                   <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
+                                       {(hasStandard ? 1 : 0) + mergedNotes.length} item{((hasStandard ? 1 : 0) + mergedNotes.length) === 1 ? '' : 's'}
+                                   </span>
+                               </div>
 
-                               {/* FREE NOTES (LEGACY SUPPORT) - Conditional Render */}
-                               {(() => {
-                                   const freeLink = syllabusMode === 'SCHOOL' ? (contentData?.schoolPdfLink || contentData?.freeLink) : contentData?.competitionPdfLink;
-                                   const freeHtml = syllabusMode === 'SCHOOL' ? (contentData?.schoolFreeNotesHtml || contentData?.freeNotesHtml) : contentData?.competitionFreeNotesHtml;
+                               {/* Standard Notes — featured card */}
+                               {hasStandard && (
+                                   <button
+                                       onClick={() => handlePdfClick('FREE')}
+                                       className="group w-full text-left bg-gradient-to-br from-emerald-50 via-white to-white border border-emerald-100 rounded-2xl p-4 sm:p-5 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all flex items-center gap-4"
+                                   >
+                                       <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-md shrink-0 group-hover:scale-105 transition-transform">
+                                           <FileText size={22} />
+                                       </div>
+                                       <div className="flex-1 min-w-0">
+                                           <p className="text-[10px] font-black uppercase tracking-wider text-emerald-700">Featured</p>
+                                           <h4 className="font-black text-slate-800 text-base leading-tight">Standard Notes</h4>
+                                           <p className="text-[11px] text-slate-500 mt-0.5">Chapter ka core reading material</p>
+                                       </div>
+                                       <ChevronRight size={20} className="text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-1 transition-all shrink-0" />
+                                   </button>
+                               )}
 
-                                   if (!freeLink && (!freeHtml || freeHtml.length < 10)) return null;
-
-                                   return (
-                                       <button onClick={() => handlePdfClick('FREE')} className="w-full p-4 rounded-none sm:rounded-xl border-y sm:border border-slate-200 bg-white hover:bg-slate-50 flex items-center gap-3 transition-all">
-                                           <div className="w-10 h-10 rounded-full bg-green-50 text-green-600 flex items-center justify-center"><FileText size={20} /></div>
-                                           <div className="flex-1 text-left"><h4 className="font-bold text-slate-700 text-sm">Standard Notes</h4><p className="text-[10px] text-slate-500">Basic Reading Material</p></div>
-                                       </button>
-                                   );
-                               })()}
-
-                               {(() => {
-                                   let addNotes: AdditionalNoteEntry[] = [];
-                                   // STRICT MODE: Only use new fields to avoid ghost data
-                                   if (syllabusMode === 'SCHOOL') addNotes = contentData?.schoolAdditionalNotes || contentData?.additionalNotes || [];
-                                   else addNotes = contentData?.competitionAdditionalNotes || [];
-
-                                   if (addNotes.length === 0) return <p className="text-center text-xs text-slate-500 py-4">No additional resources added.</p>;
-
-                                   return addNotes.map((note: AdditionalNoteEntry, idx: number) => (
-                                       <button
-                                           key={idx}
-                                           onClick={() => {
-                                               // Smart Open Logic
-                                               if (note.pdfLink && note.noteContent) {
-                                                   // Hybrid Mode: Show PDF with Persistent Audio Overlay
-                                                   setActiveNoteContent({ title: note.title || `Note ${idx + 1}`, content: note.noteContent, pdfUrl: note.pdfLink, audioUrl: note.audioUrl });
-                                               } else if (note.pdfLink) {
-                                                   // Even if it's just PDF, if it has audioUrl, open via Hybrid Mode to show the audio play button
-                                                   if (note.audioUrl) {
-                                                       setActiveNoteContent({ title: note.title || `Note ${idx + 1}`, content: '', pdfUrl: note.pdfLink, audioUrl: note.audioUrl });
-                                                   } else {
-                                                       setActivePdf(note.pdfLink);
-                                                   }
-                                               } else if (note.noteContent) {
-                                                   setActiveNoteContent({ title: note.title || `Note ${idx + 1}`, content: note.noteContent, audioUrl: note.audioUrl });
-                                               }
-                                           }}
-                                           className="w-full p-4 rounded-none sm:rounded-xl border-y sm:border border-cyan-100 bg-white hover:bg-cyan-50 flex items-center gap-3 transition-all"
-                                       >
-                                           <div className="w-10 h-10 rounded-full bg-cyan-50 text-cyan-600 flex items-center justify-center"><Book size={20} /></div>
-                                           <div className="flex-1 text-left">
-                                               <h4 className="font-bold text-slate-700 text-sm">{note.title || `Resource ${idx + 1}`}</h4>
-                                               <p className="text-[10px] text-slate-500">
-                                                   {note.pdfLink && note.noteContent ? 'PDF + Audio' : note.pdfLink ? 'PDF Document' : 'Reading Material'}
-                                               </p>
-                                           </div>
-                                       </button>
-                                   ));
-                               })()}
-                           </>
+                               {/* Additional Resources grid */}
+                               {mergedNotes.length > 0 && (
+                                   <div>
+                                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-2 px-1">More Reading</p>
+                                       <div className="grid grid-cols-1 gap-2.5">
+                                           {mergedNotes.map((note: AdditionalNoteEntry, idx: number) => {
+                                               const hasPdf = !!note.pdfLink;
+                                               const hasContent = !!note.noteContent;
+                                               const hasAudio = !!note.audioUrl;
+                                               const typeLabel = hasPdf && hasContent ? 'PDF + Reader' : hasPdf ? 'PDF Document' : 'Text Reader';
+                                               const typeBadgeColor = hasPdf && hasContent
+                                                   ? 'bg-violet-50 text-violet-700 border-violet-200'
+                                                   : hasPdf
+                                                       ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                                       : 'bg-cyan-50 text-cyan-700 border-cyan-200';
+                                               return (
+                                                   <button
+                                                       key={idx}
+                                                       onClick={() => {
+                                                           if (note.pdfLink && note.noteContent) {
+                                                               setActiveNoteContent({ title: note.title || `Note ${idx + 1}`, content: note.noteContent, pdfUrl: note.pdfLink, audioUrl: note.audioUrl });
+                                                           } else if (note.pdfLink) {
+                                                               if (note.audioUrl) {
+                                                                   setActiveNoteContent({ title: note.title || `Note ${idx + 1}`, content: '', pdfUrl: note.pdfLink, audioUrl: note.audioUrl });
+                                                               } else {
+                                                                   setActivePdf(note.pdfLink);
+                                                               }
+                                                           } else if (note.noteContent) {
+                                                               setActiveNoteContent({ title: note.title || `Note ${idx + 1}`, content: note.noteContent, audioUrl: note.audioUrl });
+                                                           }
+                                                       }}
+                                                       className="group w-full text-left bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 hover:border-cyan-300 hover:shadow-md transition-all flex items-center gap-3"
+                                                   >
+                                                       <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-slate-50 to-slate-100 text-slate-700 flex items-center justify-center shrink-0 group-hover:from-cyan-50 group-hover:to-cyan-100 group-hover:text-cyan-700 transition-colors border border-slate-200">
+                                                           {hasPdf ? <FileText size={18} /> : <Book size={18} />}
+                                                       </div>
+                                                       <div className="flex-1 min-w-0">
+                                                           <h4 className="font-bold text-slate-800 text-sm leading-tight truncate">{note.title || `Resource ${idx + 1}`}</h4>
+                                                           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                               <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${typeBadgeColor}`}>
+                                                                   {typeLabel}
+                                                               </span>
+                                                               {hasAudio && (
+                                                                   <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-50 text-amber-700 border-amber-200 flex items-center gap-0.5">
+                                                                       <Music size={9} /> Audio
+                                                                   </span>
+                                                               )}
+                                                           </div>
+                                                       </div>
+                                                       <ChevronRight size={18} className="text-slate-400 group-hover:text-cyan-600 group-hover:translate-x-0.5 transition-all shrink-0" />
+                                                   </button>
+                                               );
+                                           })}
+                                       </div>
+                                   </div>
+                               )}
+                           </div>
                         );
                    })()}
                </div>

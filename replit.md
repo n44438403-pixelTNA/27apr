@@ -28,6 +28,25 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
 - Profile: Settings sheet with Light Mode, Recovery, Data
 - External Apps: Open inside the app via in-app iframe overlay (not new browser tab)
 
+## Recent Changes (Apr 29 — Splash Font Picker)
+- **AppLoadingScreen.tsx** ab user ko app short name (e.g. "IIC") ka font choose karne deta hai. 14 stylish/branded/professional font choices: Default, Orbitron (Tech), Audiowide, Russo One, Bebas Neue, Black Ops One, Righteous, Monoton (Neon), Playfair Display (Elegant), Cinzel (Classic), Permanent Marker, Press Start 2P (Retro), Pacifico, Rajdhani.
+- Picker access: bottom footer me "T Aa" button (version ke baad) — tap karke full-screen overlay khulta hai jisme har font ka live preview saath label dikhta hai.
+- **Lazy-loaded Google Fonts**: chosen font on mount inject hota hai (`<link>` to fonts.googleapis.com); jab picker khulta hai tab sab fonts pre-load ho jate hain previews ke liye.
+- **Persistence**: choice `localStorage.nst_splash_font_id` me save hoti hai — har splash pe yahi font dikhega.
+- **Smart pause**: jab picker open hota hai progress timer pause ho jata hai (warna splash auto-complete ho jata aur user kick out ho jata). Picker close hone par timer current progress se resume hota hai (jump-back nahi).
+- New constant `SPLASH_FONTS` array + `ensureGoogleFontLoaded()` helper at top of `AppLoadingScreen.tsx`.
+
+## Recent Changes (Apr 29 — Lucent UX for Class 6-12 MCQ)
+- **Notes ↔ MCQ tab strip** added at top of both `McqView` and `PdfView` (Class 6-12) for instant switching between Notes and MCQ for the same chapter (`onSwitchToNotes` / `onSwitchToMcq` props wired in `StudentDashboard`).
+- **MCQ option re-enabled** for Class 6-12 in `LessonActionModal` (removed `hideMcq={isClass6to12}`).
+- **Unified Lucent-style 3-mode selector** on the MCQ SELECTION view: 📝 MCQ · 💬 Q&A · 🃏 Flashcard. Each pill is a 1-tap launcher.
+- **New `INTERACTIVE_LIST` view** in `McqView.tsx` replaces the old `QA_REVEAL` block. Single screen powers both MCQ mode (tap option → green/red feedback + explanation + score summary) and Q&A mode (tap to reveal answer). Header has a `READ ALL` chain reader plus a 3-pill in-view mode switcher (MCQ/Q&A/Flashcard).
+- **Per-card speaker (compact variant)** added to `McqSpeakButtons.tsx` — single round 🔊 icon with new `revealAnswer` and `compact` props. Both per-card and READ ALL respect the TTS rule:
+  - **MCQ mode**: speaker reads only the *question* until the user has answered ALL questions; once everything is answered, the speaker also reads the correct answer.
+  - **Q&A mode**: speaker always reads question + correct answer.
+- **Save (+ / ✓) button** per card persists bookmarks to `localStorage` key `mcq_saved_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`.
+- **Legacy timed flow** (Free Practice + Premium Test cards) moved into a collapsible "Advanced Test Mode (Timed + Coins)" disclosure on the SELECTION view — hidden by default since the new 3-mode selector is now the primary entry.
+
 ## Recent Changes (Apr 24)
 - Removed MCQ option from per-chapter lesson modal for classes 6-12 (still available in Competition mode and homework)
 - Removed "Revision" bottom-nav tab and Revision Hub rendering from student dashboard
@@ -262,3 +281,24 @@ An AI-driven Educational Platform and Learning Management System (LMS) tailored 
   - **Teaching Strategy** (TEACHER tab, ~line 1789): removed the broken `<SpeakButton text={currentNote.content}>` from the purple header and replaced the `dangerouslySetInnerHTML` HTML wall with `<ChunkedNotesReader content={currentNote.content} topBarLabel={currentNote.title} noteKey="pdfview_${chapter.id}_strategy_${currentStrategyIndex}">`. Each strategy bullet / Hindi-danda line is now its own tappable chunk with the reader's built-in "Read All" / "Stop" button, exactly like Deep Dive.
   - **Additional Notes / Resource overlay** (RESOURCES tab → tap a note, ~line 1287): the dark-mode `prose-invert` HTML block was replaced with a white-bg `<ChunkedNotesReader>` (white because the reader is styled for a light theme). The floating "Headphones / Pause" auto-play TTS button at the top is now hidden in text-only mode (`hasPdf && (...)` guard) — ChunkedNotesReader provides its own Read All. The button is preserved when a PDF is open alongside text content (PDF mode), since the reader can't render inside an iframe.
 - Premium Audio buttons on both surfaces remain untouched.
+
+## Recent Changes (Apr 29) — Lucent-style 3-mode MCQ for Class 6-12 + Notes ↔ MCQ tab switch
+- **Goal**: Class 6-12 MCQ flow ko Lucent jaisa banana — top par **Notes ↔ MCQ** tab switch + Lucent-style **3-mode selector** (📝 MCQ · 💬 Q&A · 🃏 Flashcard).
+- `components/StudentDashboard.tsx`:
+  - Removed `hideMcq={isClass6to12}` from `LessonActionModal` so Class 6-12 students bhi modal me MCQ option dekhein.
+  - Wired `onSwitchToNotes` → McqView and `onSwitchToMcq` → PdfView (both call `handleLessonOption`).
+- `components/McqView.tsx`:
+  - New `onSwitchToNotes?: () => void` prop.
+  - New state: `selectionMode: 'MCQ' | 'QA' | 'CARD'`, plus Q&A reveal state (`qaData`, `qaRevealed`, `qaShowAll`).
+  - New `handleStartQA()` — loads chapter MCQs (same fetch logic as Flashcard), enters new `'QA_REVEAL'` viewMode.
+  - New **Q&A Reveal view** (Lucent-style): per-card "👁️ Tap to Reveal Answer" with green correct-answer card + explanation; top "Show All / Hide All" toggle.
+  - SELECTION view header me added:
+    - Notes/MCQ tab strip (visible only when `onSwitchToNotes` provided).
+    - Lucent-style 3-mode selector strip (gradient pills with emoji icons + scale-up active state).
+    - Q&A and Flashcard modes me 1-tap "Start" gradient button — directly launches.
+    - MCQ mode me existing Free Practice + Premium Test cards conditionally render (`selectionMode === 'MCQ'`).
+  - Removed standalone Flashcard card (now lives in the 3-mode selector).
+- `components/PdfView.tsx`:
+  - New `onSwitchToMcq?: () => void` prop.
+  - Notes/MCQ tab strip inserted in sticky header (above existing School/Competition + Concept/Retention/Extended tabs), only when `onSwitchToMcq` provided and not in fullscreen.
+- Reused `FlashcardMcqView` overlay (no new flashcard component needed).

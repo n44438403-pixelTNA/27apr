@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Chapter, User, Subject, SystemSettings, MCQResult, PerformanceTag } from '../types';
-import { CheckCircle, Lock, ArrowLeft, Crown, PlayCircle, HelpCircle, Trophy, Clock, BrainCircuit, FileText, Layers } from 'lucide-react';
+import { CheckCircle, Lock, ArrowLeft, Crown, PlayCircle, HelpCircle, Trophy, Clock, BrainCircuit, FileText, Layers, BookOpen, Eye, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { checkFeatureAccess } from '../utils/permissionUtils';
 import { CustomAlert, CustomConfirm } from './CustomDialogs';
 import { getChapterData, saveUserToLive, saveUserHistory, savePublicActivity } from '../firebase';
@@ -23,14 +23,34 @@ interface Props {
   onUpdateUser: (user: User) => void;
   settings?: SystemSettings; // New Prop
   topicFilter?: string; // NEW: Filter by Topic
+  // NEW: Lucent-style cross-tab switch back to Notes (PdfView).
+  onSwitchToNotes?: () => void;
 }
 
 export const McqView: React.FC<Props> = ({ 
-  chapter, subject, user, board, classLevel, stream, onBack, onUpdateUser, settings, topicFilter
+  chapter, subject, user, board, classLevel, stream, onBack, onUpdateUser, settings, topicFilter, onSwitchToNotes
 }) => {
   const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'SELECTION' | 'PRACTICE' | 'TEST' | 'FLASHCARD'>('SELECTION');
+  const [viewMode, setViewMode] = useState<'SELECTION' | 'PRACTICE' | 'TEST' | 'FLASHCARD' | 'INTERACTIVE_LIST'>('SELECTION');
   const [flashcardData, setFlashcardData] = useState<any[] | null>(null);
+  // === Unified Lucent-style Interactive List state ===
+  // Single state that powers both MCQ mode (tap option → instant feedback)
+  // and Q&A mode (tap to reveal correct answer). User switches between
+  // the two via the 3-pill strip inside the list view itself.
+  const [listData, setListData] = useState<any[] | null>(null);
+  const [listMode, setListMode] = useState<'mcq' | 'qa'>('mcq');
+  const [listAnswers, setListAnswers] = useState<Record<number, number>>({});
+  const [listRevealed, setListRevealed] = useState<Record<number, boolean>>({});
+  const [savedQuestions, setSavedQuestions] = useState<Record<number, boolean>>({});
+  // Lucent-style 3-mode picker on the SELECTION screen.
+  // 'MCQ'  → opens INTERACTIVE_LIST in 'mcq' mode (interactive, tap-to-answer)
+  // 'QA'   → opens INTERACTIVE_LIST in 'qa' mode (tap-to-reveal)
+  // 'CARD' → existing flashcard overlay (FlashcardMcqView)
+  const [selectionMode, setSelectionMode] = useState<'MCQ' | 'QA' | 'CARD'>('MCQ');
+  // Hide the legacy timed Free Practice / Premium Test cards behind an
+  // "Advanced Test Mode" disclosure — the new 3-mode selector is the
+  // primary entry point.
+  const [showAdvancedTest, setShowAdvancedTest] = useState(false);
   const [lessonContent, setLessonContent] = useState<any>(null); // To pass to LessonView
   const [resultData, setResultData] = useState<MCQResult | null>(null);
   const [completedMcqData, setCompletedMcqData] = useState<any[]>([]); // Store used data for analysis
@@ -71,6 +91,51 @@ export const McqView: React.FC<Props> = ({
           } catch(e) {}
       }
   }, [board, classLevel, stream, subject, chapter]);
+
+  // Lucent-style Interactive MCQ List — load MCQs and open the unified
+  // INTERACTIVE_LIST view in either 'mcq' (tap-to-answer) or 'qa'
+  // (tap-to-reveal) mode. Same dataset, two reading experiences.
+  const handleStartList = async (initialMode: 'mcq' | 'qa') => {
+      setLoading(true);
+      const streamKey = (classLevel === '11' || classLevel === '12') && stream ? `-${stream}` : '';
+      const key = `nst_content_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
+      let data: any = null;
+      try {
+          const fetchWithTimeout = (promise: Promise<any>, ms: number) =>
+              Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject('timeout'), ms))]);
+          data = await fetchWithTimeout(getChapterData(key), 2500);
+      } catch {}
+      if (!data) {
+          const stored = localStorage.getItem(key);
+          if (stored) data = JSON.parse(stored);
+      }
+      if (!data || !data.manualMcqData || data.manualMcqData.length === 0) {
+          setAlertConfig({ isOpen: true, title: 'Coming Soon', message: 'Is chapter ke MCQs abhi tak available nahi hain.' });
+          setLoading(false);
+          return;
+      }
+      let qs = [...data.manualMcqData];
+      const activeFilter = topicFilter || selectedTopic;
+      if (activeFilter) qs = qs.filter((q: any) => q.topic === activeFilter);
+      if (qs.length === 0) {
+          setAlertConfig({ isOpen: true, title: 'No Questions', message: `Topic "${activeFilter}" ke liye koi MCQ nahi mila.` });
+          setLoading(false);
+          return;
+      }
+      // Restore previously saved bookmarks for this chapter (if any).
+      const savedKey = `mcq_saved_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
+      try {
+          const stored = localStorage.getItem(savedKey);
+          if (stored) setSavedQuestions(JSON.parse(stored));
+          else setSavedQuestions({});
+      } catch { setSavedQuestions({}); }
+      setListData(qs);
+      setListMode(initialMode);
+      setListAnswers({});
+      setListRevealed({});
+      setViewMode('INTERACTIVE_LIST');
+      setLoading(false);
+  };
 
   const handleStartFlashcard = async () => {
       setLoading(true);
@@ -789,6 +854,271 @@ export const McqView: React.FC<Props> = ({
               subject={subject.name}
               onBack={() => { setViewMode('SELECTION'); setFlashcardData(null); }}
           />
+       ) : viewMode === 'INTERACTIVE_LIST' && listData ? (
+          /* === LUCENT-STYLE INTERACTIVE LIST (matches the reference screenshot) ===
+             Single view that supports MCQ mode (tap option → instant feedback)
+             and Q&A mode (tap to reveal correct answer). Top has READ ALL +
+             3-pill mode switcher (📝 MCQ · 💬 Q&A · 🃏 Flashcard).
+             TTS rules:
+              • MCQ mode → speakers read ONLY the question until ALL questions
+                are answered. After that, answers also get played.
+              • Q&A mode → speakers always read Question + Correct Answer.
+          */
+          (() => {
+              const norm = listData.map((q: any) => ({
+                  question: q.question || q.q || '',
+                  options: Array.isArray(q.options) ? q.options : [],
+                  correctAnswer: typeof q.correctAnswerIndex === 'number'
+                      ? q.correctAnswerIndex
+                      : (typeof q.answerIndex === 'number'
+                          ? q.answerIndex
+                          : (typeof q.correctAnswer === 'number' ? q.correctAnswer : 0)),
+                  explanation: q.explanation || '',
+                  topic: q.topic || '',
+                  difficulty: q.difficulty || '',
+              }));
+              const totalAnswered = Object.keys(listAnswers).length;
+              const allAnswered = totalAnswered === norm.length && norm.length > 0;
+              // TTS reveal rule (per user spec):
+              //  - MCQ mode: only reveal answer once user answered everything.
+              //  - Q&A mode: always reveal answer in TTS.
+              const ttsRevealAnswer = listMode === 'qa' || allAnswered;
+              const correctCount = norm.reduce((acc, q, i) =>
+                  acc + (listAnswers[i] === q.correctAnswer ? 1 : 0), 0);
+              const wrongCount = totalAnswered - correctCount;
+              const persistSaved = (next: Record<number, boolean>) => {
+                  const streamKey = (classLevel === '11' || classLevel === '12') && stream ? `-${stream}` : '';
+                  const savedKey = `mcq_saved_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
+                  try { localStorage.setItem(savedKey, JSON.stringify(next)); } catch {}
+              };
+
+              return (
+                  <div className="bg-slate-50 min-h-screen pb-24 animate-in fade-in slide-in-from-right-8">
+                      {/* Sticky Header: back · title · READ ALL */}
+                      <div className="sticky top-0 z-20 bg-white border-b border-slate-100 shadow-sm">
+                          <div className="p-3 flex items-center gap-2">
+                              <button
+                                  onClick={() => { setViewMode('SELECTION'); setListData(null); }}
+                                  className="p-2 hover:bg-slate-100 rounded-full text-slate-600"
+                              >
+                                  <ArrowLeft size={20} />
+                              </button>
+                              <div className="flex-1 min-w-0">
+                                  <p className="text-[10px] font-black text-purple-600 uppercase tracking-wider">{listMode === 'qa' ? 'Q&A Mode' : 'MCQ Practice'}</p>
+                                  <h3 className="font-black text-slate-800 leading-tight line-clamp-1 text-base">{chapter.title}</h3>
+                              </div>
+                              {/* READ ALL — chain reader; respects ttsRevealAnswer */}
+                              {norm.length > 0 && (
+                                  <McqSpeakButtons
+                                      question={norm[0].question}
+                                      options={norm[0].options}
+                                      correctAnswer={norm[0].correctAnswer}
+                                      allQuestions={norm as any}
+                                      index={0}
+                                      revealAnswer={ttsRevealAnswer}
+                                      iconSize={14}
+                                      className=""
+                                  />
+                              )}
+                          </div>
+                          {/* Counter row + 3-pill mode switcher */}
+                          <div className="px-3 pb-3 flex items-center gap-2">
+                              <div className="text-[11px] font-bold text-slate-600 shrink-0">
+                                  <span className="text-slate-800 font-black">{Math.min(totalAnswered + 1, norm.length)} / {norm.length}</span>
+                                  <span className="ml-1 text-slate-500">{norm.length} MCQs</span>
+                              </div>
+                              <div className="flex-1 flex bg-slate-100 p-0.5 rounded-full ml-2">
+                                  <button
+                                      onClick={() => setListMode('mcq')}
+                                      className={`flex-1 py-1.5 px-2 rounded-full text-[11px] font-black transition-all flex items-center justify-center gap-1 ${listMode === 'mcq' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}
+                                  >
+                                      📝 MCQ
+                                  </button>
+                                  <button
+                                      onClick={() => setListMode('qa')}
+                                      className={`flex-1 py-1.5 px-2 rounded-full text-[11px] font-black transition-all flex items-center justify-center gap-1 ${listMode === 'qa' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-500'}`}
+                                  >
+                                      💬 Q&A
+                                  </button>
+                                  <button
+                                      onClick={() => {
+                                          // Hand off to the existing Flashcard overlay.
+                                          setFlashcardData(listData);
+                                          setViewMode('FLASHCARD');
+                                      }}
+                                      className="flex-1 py-1.5 px-2 rounded-full text-[11px] font-black text-amber-700 bg-amber-50 hover:bg-amber-100 transition-all flex items-center justify-center gap-1"
+                                  >
+                                      🃏 FLASHCARD
+                                  </button>
+                              </div>
+                          </div>
+                      </div>
+
+                      {/* Q&A mode: top "Show All Answers" button (only when not all revealed) */}
+                      {listMode === 'qa' && Object.keys(listRevealed).length < norm.length && (
+                          <div className="px-4 pt-3">
+                              <button
+                                  onClick={() => {
+                                      const all: Record<number, boolean> = {};
+                                      norm.forEach((_, i) => { all[i] = true; });
+                                      setListRevealed(all);
+                                  }}
+                                  className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-purple-600 to-pink-600 text-white font-black text-xs shadow-md flex items-center justify-center gap-2 active:scale-95"
+                              >
+                                  <Eye size={14}/> Show All Answers
+                              </button>
+                          </div>
+                      )}
+
+                      {/* MCQ mode hint when not all answered */}
+                      {listMode === 'mcq' && !allAnswered && (
+                          <div className="px-4 pt-3">
+                              <div className="bg-blue-50 border border-blue-200 rounded-2xl px-3 py-2 text-[11px] font-bold text-blue-700 text-center">
+                                  👆 Har question ka apna jawab choose karein. Sab answer hone par speaker me jawab bhi chalu ho jayega.
+                              </div>
+                          </div>
+                      )}
+
+                      {/* Cards */}
+                      <div className="p-4 space-y-3">
+                          {norm.map((q, qi) => {
+                              const selected = listAnswers[qi];
+                              const revealed = !!listRevealed[qi];
+                              const isMcq = listMode === 'mcq';
+                              const answeredHere = isMcq ? selected !== undefined : revealed;
+                              const showAnswerColors = answeredHere;
+                              const isSaved = !!savedQuestions[qi];
+
+                              return (
+                                  <div key={qi} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                                      {/* Top row: Q-chip + topic + speaker + save (+) */}
+                                      <div className="flex items-start gap-2 mb-2">
+                                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 shrink-0">Q {qi + 1}</span>
+                                          {q.topic && (
+                                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 truncate min-w-0">{q.topic}</span>
+                                          )}
+                                          <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                                              {/* Per-card speaker — single icon, respects revealAnswer rule */}
+                                              <McqSpeakButtons
+                                                  question={q.question}
+                                                  options={q.options}
+                                                  correctAnswer={q.correctAnswer}
+                                                  revealAnswer={ttsRevealAnswer}
+                                                  compact
+                                              />
+                                              {/* Save / Bookmark "+" toggle */}
+                                              <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                      const next = { ...savedQuestions, [qi]: !isSaved };
+                                                      if (!next[qi]) delete next[qi];
+                                                      setSavedQuestions(next);
+                                                      persistSaved(next);
+                                                  }}
+                                                  title={isSaved ? 'Saved — tap to remove' : 'Save this question for review'}
+                                                  className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors active:scale-95 ${isSaved ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                              >
+                                                  <span className="text-lg leading-none font-black">{isSaved ? '✓' : '+'}</span>
+                                              </button>
+                                          </div>
+                                      </div>
+
+                                      {/* Question text */}
+                                      <p className="font-black text-slate-800 text-sm leading-snug mb-3">{q.question}</p>
+
+                                      {/* Options */}
+                                      <div className="space-y-1.5 mb-2">
+                                          {q.options.map((opt: string, oi: number) => {
+                                              const isCorrect = oi === q.correctAnswer;
+                                              const isSelected = selected === oi;
+                                              let cls = 'w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold border-2 transition-all flex items-center gap-2';
+                                              if (showAnswerColors) {
+                                                  if (isCorrect) cls += ' bg-emerald-50 border-emerald-300 text-emerald-800';
+                                                  else if (isSelected) cls += ' bg-rose-50 border-rose-300 text-rose-800';
+                                                  else cls += ' bg-slate-50 border-slate-200 text-slate-500 opacity-70';
+                                              } else {
+                                                  cls += ' bg-white border-slate-200 text-slate-700' + (isMcq ? ' hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer' : '');
+                                              }
+                                              return (
+                                                  <button
+                                                      type="button"
+                                                      key={oi}
+                                                      onClick={() => {
+                                                          if (!isMcq) return;
+                                                          if (selected !== undefined) return;
+                                                          setListAnswers(prev => ({ ...prev, [qi]: oi }));
+                                                      }}
+                                                      disabled={!isMcq || selected !== undefined}
+                                                      className={cls}
+                                                  >
+                                                      <span className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-[10px] font-black ${showAnswerColors && isCorrect ? 'bg-emerald-500 text-white border-emerald-500' : showAnswerColors && isSelected ? 'bg-rose-500 text-white border-rose-500' : 'border-slate-300 text-slate-500'}`}>
+                                                          {String.fromCharCode(65 + oi)}
+                                                      </span>
+                                                      <span className="flex-1">{opt}</span>
+                                                      {showAnswerColors && isCorrect && <CheckCircle size={16} className="text-emerald-600" />}
+                                                  </button>
+                                              );
+                                          })}
+                                      </div>
+
+                                      {/* Q&A mode: tap-to-reveal trigger when not yet revealed */}
+                                      {!isMcq && !revealed && (
+                                          <button
+                                              onClick={() => setListRevealed(p => ({ ...p, [qi]: true }))}
+                                              className="w-full py-2 rounded-xl bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 text-blue-700 text-xs font-bold flex items-center justify-center gap-1.5 hover:from-blue-100 hover:to-purple-100 transition-all"
+                                          >
+                                              <Eye size={12}/> Tap to Reveal Answer
+                                          </button>
+                                      )}
+
+                                      {/* MCQ mode: hint when not yet answered */}
+                                      {isMcq && selected === undefined && (
+                                          <p className="text-[10px] font-bold text-slate-400 text-center py-1">👆 Apna answer chuno</p>
+                                      )}
+
+                                      {/* Reset (MCQ mode only) */}
+                                      {isMcq && selected !== undefined && (
+                                          <button
+                                              onClick={() => setListAnswers(prev => { const n = { ...prev }; delete n[qi]; return n; })}
+                                              className="w-full mt-1 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[11px] active:scale-95 transition flex items-center justify-center gap-1"
+                                          >
+                                              <RefreshCw size={11}/> Phir try karein
+                                          </button>
+                                      )}
+
+                                      {/* Explanation block (visible after answer/reveal) */}
+                                      {answeredHere && q.explanation && (
+                                          <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200">
+                                              <p className="text-[10px] font-black text-amber-700 uppercase tracking-wider mb-1">Explanation</p>
+                                              <p className="text-xs text-slate-800 leading-relaxed">{q.explanation}</p>
+                                          </div>
+                                      )}
+                                  </div>
+                              );
+                          })}
+
+                          {/* Score Summary (MCQ mode, all answered) */}
+                          {listMode === 'mcq' && allAnswered && (
+                              <div className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-2xl p-5 shadow-lg">
+                                  <p className="text-[10px] font-black uppercase tracking-wider opacity-90 mb-1">Final Score</p>
+                                  <p className="text-3xl font-black mb-3">{Math.round((correctCount / norm.length) * 100)}%</p>
+                                  <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold">
+                                      <div className="bg-white/15 rounded-xl py-2"><div className="text-[10px] opacity-80">Attempted</div><div className="text-base">{totalAnswered}</div></div>
+                                      <div className="bg-white/15 rounded-xl py-2"><div className="text-[10px] opacity-80">Correct</div><div className="text-base">{correctCount}</div></div>
+                                      <div className="bg-white/15 rounded-xl py-2"><div className="text-[10px] opacity-80">Wrong</div><div className="text-base">{wrongCount}</div></div>
+                                  </div>
+                                  <button
+                                      onClick={() => { setListAnswers({}); }}
+                                      className="mt-4 w-full py-2.5 rounded-xl bg-white text-indigo-700 font-black text-xs flex items-center justify-center gap-2 active:scale-95"
+                                  >
+                                      <RefreshCw size={14}/> Phir se Try Karo
+                                  </button>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+              );
+          })()
        ) : viewMode !== 'SELECTION' && lessonContent ? (
           <LessonView
               content={lessonContent}
@@ -829,6 +1159,59 @@ export const McqView: React.FC<Props> = ({
            </div>
        </div>
 
+       {/* === LUCENT-STYLE NOTES ↔ MCQ TAB SWITCH === */}
+       {onSwitchToNotes && (
+           <div className="px-4 pt-3">
+               <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                   <button
+                       onClick={onSwitchToNotes}
+                       className="flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 text-slate-600 hover:bg-white/60 transition-all"
+                   >
+                       <BookOpen size={14}/> 📚 Notes
+                   </button>
+                   <button
+                       disabled
+                       className="flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-white text-blue-600 shadow-sm"
+                   >
+                       <HelpCircle size={14}/> 📝 MCQ
+                   </button>
+               </div>
+           </div>
+       )}
+
+       {/* === LUCENT-STYLE 3-MODE SELECTOR (📝 MCQ · 💬 Q&A · 🃏 Flashcard)
+            Each pill is a 1-tap launcher into the appropriate mode. */}
+       <div className="px-4 pt-3">
+           <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-2 ml-1">Choose Mode</label>
+           <div className="grid grid-cols-3 gap-2">
+               <button
+                   onClick={() => { setSelectionMode('MCQ'); handleStartList('mcq'); }}
+                   disabled={loading}
+                   className="py-4 px-2 rounded-2xl text-xs font-black flex flex-col items-center gap-1 transition-all border-2 bg-gradient-to-br from-blue-500 to-indigo-600 text-white border-blue-600 shadow-lg shadow-blue-200 hover:scale-[1.02] active:scale-95 disabled:opacity-60"
+               >
+                   <span className="text-2xl leading-none">📝</span>
+                   <span>MCQ</span>
+               </button>
+               <button
+                   onClick={() => { setSelectionMode('QA'); handleStartList('qa'); }}
+                   disabled={loading}
+                   className="py-4 px-2 rounded-2xl text-xs font-black flex flex-col items-center gap-1 transition-all border-2 bg-gradient-to-br from-purple-500 to-pink-500 text-white border-purple-600 shadow-lg shadow-purple-200 hover:scale-[1.02] active:scale-95 disabled:opacity-60"
+               >
+                   <span className="text-2xl leading-none">💬</span>
+                   <span>Q&A</span>
+               </button>
+               <button
+                   onClick={() => { setSelectionMode('CARD'); handleStartFlashcard(); }}
+                   disabled={loading}
+                   className="py-4 px-2 rounded-2xl text-xs font-black flex flex-col items-center gap-1 transition-all border-2 bg-gradient-to-br from-amber-500 to-orange-500 text-white border-amber-600 shadow-lg shadow-amber-200 hover:scale-[1.02] active:scale-95 disabled:opacity-60"
+               >
+                   <span className="text-2xl leading-none">🃏</span>
+                   <span>Flashcard</span>
+               </button>
+           </div>
+           <p className="text-[10px] text-slate-500 text-center mt-2">Tap any mode to start instantly</p>
+       </div>
+
        <div className="p-6 space-y-4">
            {/* TOPIC SELECTOR (NEW) */}
            {availableTopics.length > 0 && !topicFilter && (
@@ -847,8 +1230,20 @@ export const McqView: React.FC<Props> = ({
                </div>
            )}
 
-           {/* FREE PRACTICE */}
-           {(() => {
+           {/* === ADVANCED TEST MODE (collapsible) ===
+                Holds the legacy Free Practice + Premium (Timed) Test cards.
+                Hidden by default — the new 3-mode selector is now the primary
+                entry. Power users can still expand this for the timed flow. */}
+           <button
+               onClick={() => setShowAdvancedTest(v => !v)}
+               className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors"
+           >
+               <span className="flex items-center gap-2"><Trophy size={14}/> Advanced Test Mode (Timed + Coins)</span>
+               {showAdvancedTest ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+           </button>
+
+           {/* FREE PRACTICE — gated by advanced disclosure */}
+           {showAdvancedTest && (() => {
                const access = checkFeatureAccess('MCQ_FREE', user, settings || {});
                const isLocked = false; // Unlocked for all per user request
 
@@ -888,8 +1283,8 @@ export const McqView: React.FC<Props> = ({
                );
            })()}
 
-           {/* PREMIUM TEST */}
-           {(() => {
+           {/* PREMIUM TEST — gated by advanced disclosure */}
+           {showAdvancedTest && (() => {
                const access = checkFeatureAccess('MCQ_PREMIUM', user, settings || {});
                // If strict feed lock, hide or lock visually. If pay-per-view, show cost.
                const isLocked = false; // Unlocked for all per user request
@@ -964,32 +1359,8 @@ export const McqView: React.FC<Props> = ({
                );
            })()}
            
-           {/* FLASHCARD MODE — quick study; no scoring */}
-           {(() => {
-               return (
-                   <button
-                       onClick={() => handleStartFlashcard()}
-                       disabled={loading}
-                       className="w-full p-6 rounded-3xl border-2 border-slate-200 hover:border-amber-300 hover:bg-amber-50 transition-all group text-left relative overflow-hidden bg-white"
-                   >
-                       <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                           <Layers size={80} className="text-amber-600" />
-                       </div>
-                       <div className="relative z-10">
-                           <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mb-4">
-                               <Layers size={24} />
-                           </div>
-                           <h4 className="text-xl font-black text-slate-800 mb-1">Flashcard Mode</h4>
-                           <p className="text-sm text-slate-600 mb-4">
-                               MCQ ko flashcard ki tarah dekhein. Tap karke answer flip karein. Prev/Next se navigate.
-                           </p>
-                           <span className="px-4 py-2 rounded-lg text-xs font-bold shadow-lg bg-amber-600 text-white shadow-amber-200">
-                               START FLASHCARDS
-                           </span>
-                       </div>
-                   </button>
-               );
-           })()}
+           {/* Old standalone Flashcard card removed — now lives in the
+               Lucent-style 3-mode selector strip at the top of this view. */}
 
            {loading && <div className="text-center py-4 text-slate-600 font-bold animate-pulse">Loading Questions...</div>}
        </div>

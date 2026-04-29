@@ -123,6 +123,8 @@ import {
   PlusCircle,
   Search,
   Users,
+  List,
+  BookOpen,
 } from "lucide-react";
 import { speakText, stopSpeech } from "../utils/textToSpeech";
 import { hapticLight, hapticMedium, hapticStrong } from "../utils/haptic";
@@ -1027,6 +1029,12 @@ export const StudentDashboard: React.FC<Props> = ({
   });
   const [compMcqIndex, setCompMcqIndex] = useState(0);
   const [compMcqSelected, setCompMcqSelected] = useState<number | null>(null);
+  // Practice MCQ display mode: 'mcq' (interactive single-question) | 'qa' (all
+  // questions Q&A reveal-on-tap, jaisa Homework Q&A mode hota hai). Flashcard
+  // mode FlashcardMcqView overlay launch karta hai (same shared component).
+  const [compMcqMode, setCompMcqMode] = useState<'mcq' | 'qa'>('mcq');
+  // Per-question reveal state for Q&A mode (key = question index).
+  const [compQaRevealed, setCompQaRevealed] = useState<Record<number, boolean>>({});
 
   // ---- PER-TAB STATE PRESERVATION ----
   // Each bottom-nav tab keeps its own snapshot of overlays/positions so the
@@ -1062,10 +1070,37 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showNotifPage, setShowNotifPage] = useState(false);
 
   // --- SAVED/STARRED NOTES STATE ---
-  const [starredNotes, setStarredNotes] = useState<Array<{id:string;noteKey:string;topicText:string;savedAt:string}>>(() => {
+  // Note source metadata — used to power the "By Book" grouping view AND the
+  // tap-to-open-full-notes flow. All fields are optional for backwards-compat
+  // with older starred entries (which won't have any source).
+  type StarredNoteSource = {
+    kind?: 'lucent' | 'homework' | 'community';
+    lucentId?: string;
+    pageIndex?: number;
+    pageNo?: string | number;
+    lessonTitle?: string;
+    subject?: string;
+    hwId?: string;
+  };
+  type StarredNote = {
+    id: string;
+    noteKey: string;
+    topicText: string;
+    savedAt: string;
+    source?: StarredNoteSource;
+  };
+  const [starredNotes, setStarredNotes] = useState<StarredNote[]>(() => {
     try { return JSON.parse(localStorage.getItem('nst_starred_notes_v1') || '[]'); } catch { return []; }
   });
   const [showStarredPage, setShowStarredPage] = useState(false);
+  // 2-category view toggle for the Important Notes pages: 'list' = original
+  // flat list, 'bybook' = grouped by source book / page.
+  const [importantNotesView, setImportantNotesView] = useState<'list' | 'bybook'>('list');
+  // Confirmation popup before opening full notes from an Important-Note tap.
+  const [openNotePrompt, setOpenNotePrompt] = useState<{
+    topicText: string;
+    source?: StarredNoteSource;
+  } | null>(null);
   // -- Profile Starred Notes: search + TTS state (mirrors HistoryPage STARRED tab) --
   const [profileStarSearch, setProfileStarSearch] = useState('');
   const [isReadingProfileStars, setIsReadingProfileStars] = useState(false);
@@ -1247,6 +1282,16 @@ export const StudentDashboard: React.FC<Props> = ({
   const [playerCurrentIndex, setPlayerCurrentIndex] = useState<number>(0);
   const [playerIsReadingAll, setPlayerIsReadingAll] = useState<boolean>(false);
   const [playerRevealAll, setPlayerRevealAll] = useState<boolean>(true);
+  // 3-mode selector for the Homework MCQ Player (📝 MCQ · 💬 Q&A · 🃏 Flashcard).
+  // - 'mcq': all answers visible (current default)
+  // - 'qa':  answers hidden, per-question tap-to-reveal
+  // - 'flashcard' is not a persistent mode — it just launches the FlashcardMcqView overlay.
+  const [playerMode, setPlayerMode] = useState<'mcq' | 'qa'>('mcq');
+  const [playerQaRevealed, setPlayerQaRevealed] = useState<Record<number, boolean>>({});
+  // Tracks the option index a student picked for each MCQ chunk in 'mcq'
+  // (interactive) mode — same UX as Lucent / Speedy / Sar Sangrah MCQ tab.
+  // Key = chunk index (idx) in playerChunks; value = chosen option index.
+  const [playerMcqAnswers, setPlayerMcqAnswers] = useState<Record<number, number>>({});
   const playerScrollRefs = React.useRef<Record<number, HTMLDivElement | null>>({});
   const playerIsReadingAllRef = React.useRef<boolean>(false);
   React.useEffect(() => { playerIsReadingAllRef.current = playerIsReadingAll; }, [playerIsReadingAll]);
@@ -1473,7 +1518,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
   // Star/unstar a note topic. Also syncs to Firebase so we can show
   // global "X students saved this" social-proof counts.
-  const toggleStarNote = (noteKey: string, topicText: string) => {
+  const toggleStarNote = (noteKey: string, topicText: string, source?: StarredNoteSource) => {
     let didStar = false;
     setStarredNotes(prev => {
       const existing = prev.find(n => n.noteKey === noteKey && n.topicText === topicText);
@@ -1482,7 +1527,16 @@ export const StudentDashboard: React.FC<Props> = ({
         updated = prev.filter(n => !(n.noteKey === noteKey && n.topicText === topicText));
         didStar = false;
       } else {
-        updated = [...prev, { id: Date.now().toString(), noteKey, topicText, savedAt: new Date().toISOString() }];
+        updated = [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            noteKey,
+            topicText,
+            savedAt: new Date().toISOString(),
+            ...(source ? { source } : {}),
+          },
+        ];
         didStar = true;
       }
       try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
@@ -1500,6 +1554,96 @@ export const StudentDashboard: React.FC<Props> = ({
 
   const isNoteTopicStarred = (noteKey: string, topicText: string) =>
     starredNotes.some(n => n.noteKey === noteKey && n.topicText === topicText);
+
+  // === Important-Notes-page helpers ============================================
+  // Try to find source metadata for a free-floating topic text — used by the
+  // Global / Trending tabs (their entries only carry `label`, not `source`).
+  // We return the first match from MY local starred notes.
+  const findSourceForTopic = (topicText: string): StarredNoteSource | undefined => {
+    const hit = starredNotes.find(n => n.topicText === topicText);
+    return hit?.source;
+  };
+
+  // Open the full notes for a starred note's source. Currently supports
+  // 'lucent' (jumps into the Lucent Book viewer at the right page) and
+  // 'homework' (opens the homework overlay). Returns true if it opened.
+  const openFullNotesForSource = (source?: StarredNoteSource): boolean => {
+    if (!source) return false;
+    try {
+      if (source.kind === 'lucent' && source.lucentId) {
+        const allLucent = (settings?.lucentNotes || []) as any[];
+        const found = allLucent.find(l => l.id === source.lucentId);
+        if (!found) {
+          showAlert('Yeh Lucent book ab uplabdh nahi hai.', 'ERROR');
+          return false;
+        }
+        // Close the Important-Notes overlays first so the reader is visible.
+        stopProfileStarRead();
+        setShowStarredPage(false);
+        setShowCommunityStarsPage(false);
+        setLucentNoteViewer(found);
+        const totalPages = (found.pages?.length || 1);
+        const idx = Number.isFinite(source.pageIndex) ? Math.min(Math.max(0, source.pageIndex!), totalPages - 1) : 0;
+        setLucentPageIndex(idx);
+        return true;
+      }
+      if (source.kind === 'homework' && source.hwId) {
+        // Homework overlay opens via hwActiveHwId; jump there.
+        stopProfileStarRead();
+        setShowStarredPage(false);
+        setShowCommunityStarsPage(false);
+        setHwActiveHwId(source.hwId);
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  // Group an array of starred notes by book (lessonTitle), then by page.
+  // Notes without source land in an "Untagged" bucket so they aren't lost.
+  const groupStarredByBook = (notes: StarredNote[]) => {
+    const buckets: Record<string, {
+      lessonTitle: string;
+      subject?: string;
+      kind?: string;
+      pages: Record<string, { pageNo?: string|number; pageIndex?: number; notes: StarredNote[] }>;
+      total: number;
+    }> = {};
+    notes.forEach(n => {
+      const s = n.source || {};
+      const bookKey = s.lessonTitle || 'Untagged';
+      if (!buckets[bookKey]) {
+        buckets[bookKey] = {
+          lessonTitle: bookKey,
+          subject: s.subject,
+          kind: s.kind,
+          pages: {},
+          total: 0,
+        };
+      }
+      const pageKey = s.pageNo != null ? `p${s.pageNo}` : (s.pageIndex != null ? `i${s.pageIndex}` : 'nopage');
+      if (!buckets[bookKey].pages[pageKey]) {
+        buckets[bookKey].pages[pageKey] = { pageNo: s.pageNo, pageIndex: s.pageIndex, notes: [] };
+      }
+      buckets[bookKey].pages[pageKey].notes.push(n);
+      buckets[bookKey].total += 1;
+    });
+    // Return as sorted array — Untagged last; pages sorted numerically.
+    return Object.values(buckets)
+      .sort((a, b) => {
+        if (a.lessonTitle === 'Untagged') return 1;
+        if (b.lessonTitle === 'Untagged') return -1;
+        return b.total - a.total;
+      })
+      .map(b => ({
+        ...b,
+        pageList: Object.values(b.pages).sort((p1, p2) => {
+          const n1 = Number(p1.pageNo ?? p1.pageIndex ?? 0);
+          const n2 = Number(p2.pageNo ?? p2.pageIndex ?? 0);
+          return n1 - n2;
+        }),
+      }));
+  };
 
   // Active homework being played
   const activePlayerHw = React.useMemo(() => {
@@ -2410,14 +2554,30 @@ export const StudentDashboard: React.FC<Props> = ({
     const lang =
       (activeSessionBoard || user.board) === "BSEB" ? "Hindi" : "English";
     const currentClass = (activeSessionClass as any) || user.classLevel || "10";
-    // Inject admin-added Lucent books targeted to this class (page-wise notes/MCQ — Competition-style)
+    // Inject admin-added Lucent books targeted to this class (page-wise notes/MCQ — Competition-style).
+    // Lessons ko page number wise sort karte hain — jis lesson ka pehla page number
+    // sabse chhota hai woh sabse upar (e.g. lesson covering Page 1 pehle, Page 5 wala baad me).
+    const lessonMinPageNo = (n: LucentNoteEntry): number => {
+      let min = Infinity;
+      (n.pages || []).forEach(p => {
+        const num = parseInt(p.pageNo || '', 10);
+        if (!isNaN(num) && num < min) min = num;
+      });
+      return min === Infinity ? 99999 : min;
+    };
     const adminLucentForClass: Chapter[] = ((settings?.lucentNotes || []) as LucentNoteEntry[])
       .filter(n => (n.classLevel || 'COMPETITION') === currentClass)
-      .map(n => ({
-        id: `lucent_admin_${n.id}`,
-        title: `📘 ${n.bookName || n.lessonTitle} — ${n.lessonTitle}`,
-        description: `Admin Notes • ${n.pages.length} page${n.pages.length === 1 ? '' : 's'}`,
-      }));
+      .sort((a, b) => lessonMinPageNo(a) - lessonMinPageNo(b))
+      .map(n => {
+        const minPg = lessonMinPageNo(n);
+        return {
+          id: `lucent_admin_${n.id}`,
+          title: `📘 ${n.bookName || n.lessonTitle} — ${n.lessonTitle}`,
+          description: `Admin Notes • ${n.pages.length} page${n.pages.length === 1 ? '' : 's'}`,
+          // Page badge instead of CH — yeh lesson page-wise organize hua hai.
+          pageNo: minPg < 99999 ? String(minPg) : undefined,
+        };
+      });
     fetchChapters(
       activeSessionBoard || user.board || "CBSE",
       currentClass,
@@ -2612,8 +2772,17 @@ export const StudentDashboard: React.FC<Props> = ({
       // (speedyScience / speedySocialScience / sarSangrah). Shown only at the root of the
       // subject view (no year/month/week/active-note drilled in) so it doesn't clash with
       // the year/month hierarchy below.
+      const _subjLucentMinPg = (n: LucentNoteEntry): number => {
+        let m = Infinity;
+        (n.pages || []).forEach(p => {
+          const x = parseInt(p.pageNo || '', 10);
+          if (!isNaN(x) && x < m) m = x;
+        });
+        return m === Infinity ? 99999 : m;
+      };
       const subjectLucentLessons = ((settings?.lucentNotes || []) as LucentNoteEntry[])
-        .filter(n => n.subject === homeworkSubjectView);
+        .filter(n => n.subject === homeworkSubjectView)
+        .sort((a, b) => _subjLucentMinPg(a) - _subjLucentMinPg(b));
       const showLucentSection = subjectLucentLessons.length > 0
         && hwYear === null && hwMonth === null && hwWeek === null && !hwActiveHwId;
       const lucentSectionEl = showLucentSection ? (
@@ -2941,7 +3110,16 @@ export const StudentDashboard: React.FC<Props> = ({
                         }}
                         noteKey={activeHw.id ? `hw_${activeHw.id}` : undefined}
                         isStarred={activeHw.id ? (text) => isNoteTopicStarred(`hw_${activeHw.id}`, text) : undefined}
-                        onStarToggle={activeHw.id ? (text) => toggleStarNote(`hw_${activeHw.id}`, text) : undefined}
+                        onStarToggle={activeHw.id ? (text) => toggleStarNote(
+                          `hw_${activeHw.id}`,
+                          text,
+                          {
+                            kind: 'homework',
+                            hwId: activeHw.id,
+                            lessonTitle: activeHw.title,
+                            subject: activeHw.targetSubject,
+                          }
+                        ) : undefined}
                       />
                     </div>
                   )}
@@ -3471,13 +3649,27 @@ export const StudentDashboard: React.FC<Props> = ({
                 setLoadingChapters(true);
                 const lang = (activeSessionBoard || user.board) === "BSEB" ? "Hindi" : "English";
                 // Inject admin-added Lucent lessons (page-wise notes) at the top of the chapter list
+                // Page-number wise sort: lesson covering lowest page first.
+                const _minPg = (n: LucentNoteEntry): number => {
+                  let m = Infinity;
+                  (n.pages || []).forEach(p => {
+                    const x = parseInt(p.pageNo || '', 10);
+                    if (!isNaN(x) && x < m) m = x;
+                  });
+                  return m === Infinity ? 99999 : m;
+                };
                 const adminLucentLessons: Chapter[] = ((settings?.lucentNotes || []) as LucentNoteEntry[])
                   .filter(n => n.subject === cat.id)
-                  .map(n => ({
-                    id: `lucent_admin_${n.id}`,
-                    title: n.lessonTitle,
-                    description: `📘 Admin Notes • ${n.pages.length} page${n.pages.length === 1 ? '' : 's'}`,
-                  }));
+                  .sort((a, b) => _minPg(a) - _minPg(b))
+                  .map(n => {
+                    const mp = _minPg(n);
+                    return {
+                      id: `lucent_admin_${n.id}`,
+                      title: n.lessonTitle,
+                      description: `📘 Admin Notes • ${n.pages.length} page${n.pages.length === 1 ? '' : 's'}`,
+                      pageNo: mp < 99999 ? String(mp) : undefined,
+                    };
+                  });
                 // Default: hide built-in/AI Lucent syllabus. Admin can re-enable it from the Lucent panel.
                 const hideSyllabus = settings?.hideLucentSyllabus !== false;
                 if (hideSyllabus) {
@@ -3593,6 +3785,9 @@ export const StudentDashboard: React.FC<Props> = ({
             onBack={goBack}
             user={user}
             settings={settings}
+            // Lucent-style cross-tab switching: lets the student jump from
+            // Notes (PdfView) → MCQ (McqView) without going back to the modal.
+            onSwitchToMcq={() => handleLessonOption('MCQ')}
             {...contentProps}
           />
         );
@@ -3603,6 +3798,8 @@ export const StudentDashboard: React.FC<Props> = ({
             onBack={goBack}
             user={user}
             settings={settings}
+            // Lucent-style cross-tab switching: from MCQ → Notes (PdfView).
+            onSwitchToNotes={() => handleLessonOption('PDF')}
             {...contentProps}
           />
         );
@@ -3858,18 +4055,42 @@ export const StudentDashboard: React.FC<Props> = ({
               if (activeFilter === 'mcq') return m.entry.targetSubject === 'mcq';
               return true;
             });
+            // Page-wise grouping: Sar Sangrah / Speedy ke notes hamesha
+            // page number ASC me dikhne chahiye (Page 1 → 2 → 3), date-wise
+            // NAHI. Even if a later-added note has Page 1, it stays at top.
+            // Strategy: compute a "bucket timestamp" for each subject-with-pageNo
+            // group (= latest activity in that group). All items of the same
+            // subject share that bucket-ts so they cluster together; within the
+            // bucket they sort by page ASC. Cross-bucket order = latest activity.
+            const subjectMaxTs = new Map<string, number>();
+            filtered.forEach(item => {
+              if (item.kind === 'hw') {
+                const pn = parseInt(item.entry.hw?.pageNo || '', 10);
+                if (!isNaN(pn)) {
+                  const sub = item.entry.targetSubject || '';
+                  subjectMaxTs.set(sub, Math.max(subjectMaxTs.get(sub) || 0, item.ts));
+                }
+              }
+            });
             const merged: Merged[] = filtered.sort((a, b) => {
-              // Page-line sort: items with pageNo (Sar Sangrah / Speedy) sort by page number ascending,
-              // mixed in by their latest activity timestamp. Items without pageNo fall back to ts desc.
               const pa = a.kind === 'hw' ? parseInt(a.entry.hw?.pageNo || '', 10) : NaN;
               const pb = b.kind === 'hw' ? parseInt(b.entry.hw?.pageNo || '', 10) : NaN;
               const aHasPage = !isNaN(pa);
               const bHasPage = !isNaN(pb);
-              // If both have page numbers AND same target subject, sort by page number ascending
-              if (aHasPage && bHasPage && a.kind === 'hw' && b.kind === 'hw' && a.entry.targetSubject === b.entry.targetSubject) {
+              // Effective bucket-ts: items with pageNo inherit the subject's max ts
+              // so they group together regardless of individual entry timestamps.
+              const aBucketTs = aHasPage && a.kind === 'hw'
+                ? (subjectMaxTs.get(a.entry.targetSubject || '') || a.ts)
+                : a.ts;
+              const bBucketTs = bHasPage && b.kind === 'hw'
+                ? (subjectMaxTs.get(b.entry.targetSubject || '') || b.ts)
+                : b.ts;
+              if (aBucketTs !== bBucketTs) return bBucketTs - aBucketTs;
+              // Same bucket — within same Sar Sangrah/Speedy subject, sort by page ASC
+              if (aHasPage && bHasPage && a.kind === 'hw' && b.kind === 'hw'
+                  && a.entry.targetSubject === b.entry.targetSubject) {
                 return pa - pb;
               }
-              // Otherwise, latest activity first
               return b.ts - a.ts;
             }).slice(0, 8);
             // Hide entire card only if there's nothing at all (filter empty states still show chips)
@@ -6728,6 +6949,72 @@ export const StudentDashboard: React.FC<Props> = ({
                   </div>
                 )}
 
+                {/* CLASS NOTES (Class 6–12) — Continue Reading on Homework page */}
+                {(() => {
+                  if (recentChapters.length === 0) return null;
+                  const items = [...recentChapters].sort((a, b) => b.ts - a.ts).slice(0, 8);
+                  return (
+                    <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 border border-indigo-100 rounded-2xl p-4 shadow-sm">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                            <BookOpen size={16} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Class 6–12 · Continue Reading</p>
+                            <p className="text-xs text-slate-500 font-medium truncate">Class notes wahan se shuru karo jahan choda tha</p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-indigo-600 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
+                          {items.length}
+                        </span>
+                      </div>
+                      <div className="flex gap-3 overflow-x-auto -mx-1 px-1 pb-1 scrollbar-hide snap-x">
+                        {items.map(entry => (
+                          <div
+                            key={`hw_ch_${entry.id}`}
+                            className="relative shrink-0 w-56 snap-start bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-col gap-2 active:scale-[0.98] transition-transform"
+                          >
+                            <button
+                              onClick={(e) => { e.stopPropagation(); dismissRecentChapter(entry.id); }}
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
+                              aria-label="Remove"
+                              title="Remove"
+                            >
+                              <X size={12} />
+                            </button>
+                            <button onClick={() => openRecentChapter(entry)} className="text-left">
+                              <p className="text-[9px] font-black text-indigo-600 uppercase tracking-widest truncate pr-6">
+                                Class {entry.classLevel} · {entry.subject?.name || 'Subject'}
+                              </p>
+                              <p className="text-sm font-black text-slate-800 leading-snug line-clamp-2 mt-1 pr-6">
+                                {entry.chapter?.title || 'Chapter'}
+                              </p>
+                            </button>
+                            <div className="mt-1">
+                              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
+                                  style={{ width: `${Math.max(2, entry.scrollPct)}%` }}
+                                />
+                              </div>
+                              <div className="flex items-center justify-between mt-1.5">
+                                <span className="text-[10px] text-slate-500 font-semibold">{entry.scrollPct}% read</span>
+                                <button
+                                  onClick={() => openRecentChapter(entry)}
+                                  className="text-[10px] font-black text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1 rounded-full flex items-center gap-1 active:scale-95 transition-all"
+                                >
+                                  Resume <ChevronRight size={10} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* RESUME READING — date-wise (all homework notes) */}
                 {(() => {
                   const dateWiseHw = recentHw;
@@ -7103,8 +7390,120 @@ export const StudentDashboard: React.FC<Props> = ({
                           Create First MCQ
                         </button>
                       </div>
-                    ) : current ? (
+                    ) : (
                       <div className="space-y-4">
+                        {/* Mode selector — MCQ · Q&A · Flashcard (same pattern as
+                            Homework MCQs / Lucent MCQs). Flashcard button overlay
+                            launch karta hai, baaki dono inline render hote hain. */}
+                        <div className="bg-white border border-slate-200 rounded-2xl p-1.5 grid grid-cols-3 gap-1 shadow-sm">
+                          <button
+                            onClick={() => setCompMcqMode('mcq')}
+                            className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
+                              compMcqMode === 'mcq'
+                                ? 'bg-orange-600 text-white shadow-sm'
+                                : 'bg-transparent text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            📝 MCQ
+                          </button>
+                          <button
+                            onClick={() => { setCompMcqMode('qa'); setCompQaRevealed({}); }}
+                            className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
+                              compMcqMode === 'qa'
+                                ? 'bg-purple-600 text-white shadow-sm'
+                                : 'bg-transparent text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            💬 Q&amp;A
+                          </button>
+                          <button
+                            onClick={() => {
+                              setFlashcardMcqs({
+                                items: allMcqs.map(m => ({
+                                  question: m.question,
+                                  options: m.options,
+                                  correctAnswer: m.correctAnswer,
+                                  explanation: (m as any).explanation || '',
+                                })),
+                                title: 'Practice MCQs',
+                                subtitle: `Flashcard Mode · ${allMcqs.length} cards`,
+                                subject: 'Competition',
+                              });
+                            }}
+                            className="text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 active:scale-95"
+                          >
+                            🃏 Flashcard
+                          </button>
+                        </div>
+
+                        {/* Q&A REVEAL MODE — saare questions ek scroll me, tap to reveal */}
+                        {compMcqMode === 'qa' && (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                                {allMcqs.length} Questions · Tap to reveal answer
+                              </p>
+                              <button
+                                onClick={() => {
+                                  const allRevealed = allMcqs.every((_, i) => compQaRevealed[i]);
+                                  if (allRevealed) setCompQaRevealed({});
+                                  else {
+                                    const all: Record<number, boolean> = {};
+                                    allMcqs.forEach((_, i) => { all[i] = true; });
+                                    setCompQaRevealed(all);
+                                  }
+                                }}
+                                className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 hover:bg-purple-200 active:scale-95 transition-all"
+                              >
+                                {allMcqs.every((_, i) => compQaRevealed[i]) ? 'Hide All' : 'Reveal All'}
+                              </button>
+                            </div>
+                            {allMcqs.map((mcq, qi) => {
+                              const revealed = !!compQaRevealed[qi];
+                              const correctLetter = String.fromCharCode(65 + mcq.correctAnswer);
+                              const correctText = mcq.options[mcq.correctAnswer] || '';
+                              return (
+                                <div
+                                  key={mcq._key || qi}
+                                  className={`bg-white border-2 rounded-2xl p-4 shadow-sm transition-all ${revealed ? 'border-purple-200' : 'border-slate-200'}`}
+                                >
+                                  <div className="flex items-start gap-2 mb-2">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 mt-1 shrink-0">Q{qi + 1}</span>
+                                    <p className="flex-1 text-sm font-bold text-slate-800 leading-relaxed whitespace-pre-wrap">{mcq.question}</p>
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${mcq._src === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                      {mcq._src === 'admin' ? 'Official' : 'Mine'}
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => setCompQaRevealed(prev => ({ ...prev, [qi]: !prev[qi] }))}
+                                    className={`mt-2 w-full p-3 rounded-xl text-left text-sm font-bold transition-all ${revealed
+                                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                                      : 'bg-slate-50 border border-dashed border-slate-300 text-slate-500 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {revealed ? (
+                                      <span className="flex items-start gap-2">
+                                        <CheckCircle size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                                        <span className="flex-1">
+                                          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 block mb-0.5">Answer</span>
+                                          <span className="font-black">{correctLetter}.</span> <span className="font-semibold whitespace-pre-wrap">{correctText}</span>
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span className="flex items-center justify-center gap-2 text-xs uppercase tracking-wider">
+                                        👁 Tap to reveal answer
+                                      </span>
+                                    )}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* MCQ INTERACTIVE MODE — original single-question flow */}
+                        {compMcqMode === 'mcq' && current && (
+                          <>
                         {/* Progress */}
                         <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-widest">
                           <span>Question {safeIdx + 1} / {allMcqs.length}</span>
@@ -7191,8 +7590,10 @@ export const StudentDashboard: React.FC<Props> = ({
                             Next →
                           </button>
                         </div>
+                          </>
+                        )}
                       </div>
-                    ) : null}
+                    )}
                   </>
                 )}
 
@@ -8969,20 +9370,18 @@ export const StudentDashboard: React.FC<Props> = ({
       )}
 
       {/* LESSON ACTION MODAL */}
-      {showLessonModal && selectedLessonForModal && (() => {
-        const cls = String(activeSessionClass || user.classLevel || "");
-        const isClass6to12 = ["6","7","8","9","10","11","12"].includes(cls);
-        return (
-          <LessonActionModal
-            chapter={selectedLessonForModal}
-            onClose={() => setShowLessonModal(false)}
-            onSelect={handleLessonOption}
-            logoUrl={settings?.appLogo} // Pass logo from settings
-            appName={settings?.appName}
-            hideMcq={isClass6to12}
-          />
-        );
-      })()}
+      {showLessonModal && selectedLessonForModal && (
+        <LessonActionModal
+          chapter={selectedLessonForModal}
+          onClose={() => setShowLessonModal(false)}
+          onSelect={handleLessonOption}
+          logoUrl={settings?.appLogo} // Pass logo from settings
+          appName={settings?.appName}
+          // hideMcq removed: Class 6-12 students now also see the MCQ option
+          // here. Once inside MCQ they get the Lucent-style 3-mode selector
+          // (📝 MCQ · 💬 Q&A · 🃏 Flashcard) and a Notes ↔ MCQ tab switch.
+        />
+      )}
 
       {/* LUCENT PAGE-WISE NOTES VIEWER */}
       {lucentNoteViewer && (() => {
@@ -8992,9 +9391,22 @@ export const StudentDashboard: React.FC<Props> = ({
         const currentPage = entry.pages[safeIndex];
         // Sibling Lucent lessons (same subject) sorted by lessonNumber/title — for
         // cross-lesson Prev/Next when at the very first / last page.
+        const _siblingMinPg = (l: any): number => {
+          let m = Infinity;
+          (l.pages || []).forEach((p: any) => {
+            const x = parseInt(p.pageNo || '', 10);
+            if (!isNaN(x) && x < m) m = x;
+          });
+          return m === Infinity ? 99999 : m;
+        };
         const lucentSiblings = ((settings?.lucentNotes || []) as any[])
           .filter(l => l.subject === entry.subject)
           .sort((a, b) => {
+            // Page number wise sort: lesson covering lowest page first.
+            const pa = _siblingMinPg(a);
+            const pb = _siblingMinPg(b);
+            if (pa !== pb) return pa - pb;
+            // Tie-break: lessonNumber, then title.
             const an = Number(a.lessonNumber ?? 9999);
             const bn = Number(b.lessonNumber ?? 9999);
             if (an !== bn) return an - bn;
@@ -9222,7 +9634,18 @@ export const StudentDashboard: React.FC<Props> = ({
                     }}
                     noteKey={`lucent_${entry.id}_p${safeIndex}`}
                     isStarred={(text) => isNoteTopicStarred(`lucent_${entry.id}_p${safeIndex}`, text)}
-                    onStarToggle={(text) => toggleStarNote(`lucent_${entry.id}_p${safeIndex}`, text)}
+                    onStarToggle={(text) => toggleStarNote(
+                      `lucent_${entry.id}_p${safeIndex}`,
+                      text,
+                      {
+                        kind: 'lucent',
+                        lucentId: entry.id,
+                        pageIndex: safeIndex,
+                        pageNo: currentPage?.pageNo,
+                        lessonTitle: entry.lessonTitle,
+                        subject: entry.subject,
+                      }
+                    )}
                   />
                 </div>
               ) : (
@@ -9620,9 +10043,12 @@ RULES:
             </button>
           </div>
 
-          {/* Progress + Reveal toggle bar */}
-          <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-3">
-            <div className="text-[11px] font-bold text-slate-600">
+          {/* Progress + 3-Mode Selector — same pattern as Practice MCQ Hub /
+              Lucent MCQ / Homework MCQ list (📝 MCQ · 💬 Q&A · 🃏 Flashcard).
+              MCQ mode = answers shown; Q&A mode = per-question tap-to-reveal;
+              Flashcard mode = launches FlashcardMcqView overlay. */}
+          <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-[11px] font-bold text-slate-600 shrink-0">
               {playerChunks.length > 0 ? (
                 <>
                   <span className="text-indigo-600">{Math.min(playerCurrentIndex + 1, playerChunks.length)}</span>
@@ -9635,12 +10061,73 @@ RULES:
                 <span className="text-slate-400">No content</span>
               )}
             </div>
-            <button
-              onClick={() => setPlayerRevealAll(v => !v)}
-              className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-white"
-            >
-              {playerRevealAll ? 'Hide Answers' : 'Show Answers'}
-            </button>
+            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
+              <button
+                onClick={() => { setPlayerMode('mcq'); setPlayerRevealAll(true); }}
+                className={`text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-lg transition-all ${
+                  playerMode === 'mcq'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-transparent text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                📝 MCQ
+              </button>
+              <button
+                onClick={() => { setPlayerMode('qa'); setPlayerRevealAll(false); setPlayerQaRevealed({}); }}
+                className={`text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-lg transition-all ${
+                  playerMode === 'qa'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'bg-transparent text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                💬 Q&amp;A
+              </button>
+              <button
+                onClick={() => {
+                  if (!activePlayerHw.parsedMcqs || activePlayerHw.parsedMcqs.length === 0) {
+                    showAlert('Is homework mein abhi MCQs nahi hai.', 'WARNING');
+                    return;
+                  }
+                  setFlashcardMcqs({
+                    items: (activePlayerHw.parsedMcqs || []).map(m => ({
+                      question: m.question,
+                      options: m.options,
+                      correctAnswer: m.correctAnswer,
+                      explanation: (m as any).explanation || '',
+                    })),
+                    title: activePlayerHw.title || 'Homework MCQs',
+                    subtitle: `Flashcard Mode · ${activePlayerHw.parsedMcqs?.length || 0} cards`,
+                    subject: activePlayerHw.targetSubject || 'mcq',
+                  });
+                }}
+                className="text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-lg transition-all bg-amber-50 text-amber-700 hover:bg-amber-100 active:scale-95"
+              >
+                🃏 Flashcard
+              </button>
+            </div>
+            {/* Q&A mode quick toggle: Reveal All / Hide All */}
+            {playerMode === 'qa' && playerChunks.some(c => c.kind === 'mcq') && (() => {
+              const mcqIndices = playerChunks
+                .map((c, i) => c.kind === 'mcq' ? i : -1)
+                .filter(i => i >= 0);
+              const allRevealed = mcqIndices.length > 0 && mcqIndices.every(i => playerQaRevealed[i]);
+              return (
+                <button
+                  onClick={() => {
+                    if (allRevealed) {
+                      setPlayerQaRevealed({});
+                    } else {
+                      const all: Record<number, boolean> = {};
+                      mcqIndices.forEach(i => { all[i] = true; });
+                      setPlayerQaRevealed(all);
+                    }
+                  }}
+                  className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 active:scale-95 transition-all"
+                >
+                  {allRevealed ? 'Hide All' : 'Reveal All'}
+                </button>
+              );
+            })()}
           </div>
 
           {/* Scrollable content */}
@@ -9652,6 +10139,28 @@ RULES:
                   <p className="font-bold text-slate-500">Is homework mein abhi kuch nahi hai</p>
                 </div>
               )}
+              {/* Q&A mode: "Show All Answers" lifted to top — same as Lucent.
+                  Hidden once every MCQ has already been revealed. */}
+              {playerMode === 'qa' && (() => {
+                const mcqIdx = playerChunks
+                  .map((c, i) => c.kind === 'mcq' ? i : -1)
+                  .filter(i => i >= 0);
+                if (mcqIdx.length === 0) return null;
+                const allRevealed = mcqIdx.every(i => playerQaRevealed[i]);
+                if (allRevealed) return null;
+                return (
+                  <button
+                    onClick={() => {
+                      const all: Record<number, boolean> = {};
+                      mcqIdx.forEach(i => { all[i] = true; });
+                      setPlayerQaRevealed(all);
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black text-xs active:scale-95 transition shadow-md flex items-center justify-center gap-2"
+                  >
+                    <Sparkles size={14} /> Show All Answers
+                  </button>
+                );
+              })()}
               {playerChunks.map((chunk, idx) => {
                 const isActive = idx === playerCurrentIndex && playerIsReadingAll;
 
@@ -9713,7 +10222,17 @@ RULES:
                   );
                 }
 
-                // MCQ chunk
+                // MCQ chunk — Lucent / Speedy / Sar Sangrah-style rendering:
+                //   • mcq mode (interactive): student taps an option → correct/wrong shown,
+                //     explanation revealed. Until tapped, answer hidden.
+                //   • qa mode (reveal): student taps the card to reveal correct answer +
+                //     explanation, OR uses "Show All Answers" at top.
+                const isInteractive = playerMode === 'mcq';
+                const userPicked = playerMcqAnswers[idx];
+                const userAnswered = isInteractive && userPicked !== undefined;
+                const showAnswer = isInteractive
+                  ? userAnswered
+                  : !!playerQaRevealed[idx];
                 return (
                   <div
                     key={`pchunk-${idx}`}
@@ -9763,29 +10282,90 @@ RULES:
                         <div className="space-y-2 mb-4">
                           {(chunk.mcq?.options || []).map((opt: string, oi: number) => {
                             const isCorrect = chunk.mcq?.correctAnswer === oi;
+                            const isPicked = isInteractive && userPicked === oi;
+                            // Lucent-style colour rules:
+                            //   showAnswer + isCorrect      → green
+                            //   showAnswer + isPicked wrong → red
+                            //   showAnswer + neither        → faded slate
+                            //   !showAnswer + interactive   → tappable hover state
+                            //   !showAnswer + qa            → plain
+                            let cls = 'w-full text-left flex items-start gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-all';
+                            if (showAnswer) {
+                              if (isCorrect) cls += ' bg-green-50 border-green-300 text-green-900 font-bold';
+                              else if (isPicked) cls += ' bg-red-50 border-red-300 text-red-800';
+                              else cls += ' bg-slate-50 border-slate-200 text-slate-500 opacity-70';
+                            } else if (isInteractive) {
+                              cls += ' bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-400 hover:bg-indigo-50 cursor-pointer active:scale-[0.99]';
+                            } else {
+                              cls += ' bg-slate-50 border-slate-200 text-slate-700';
+                            }
+                            const handleClick = () => {
+                              if (!isInteractive) return;
+                              if (userAnswered) return;
+                              setPlayerMcqAnswers(prev => ({ ...prev, [idx]: oi }));
+                            };
                             return (
-                              <div
+                              <button
                                 key={oi}
-                                className={`flex items-start gap-2 px-3 py-2 rounded-xl border text-sm ${
-                                  playerRevealAll && isCorrect
-                                    ? 'bg-green-50 border-green-300 text-green-900 font-bold'
-                                    : 'bg-slate-50 border-slate-200 text-slate-700'
-                                }`}
+                                type="button"
+                                onClick={handleClick}
+                                disabled={!isInteractive || userAnswered}
+                                className={cls}
                               >
                                 <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${
-                                  playerRevealAll && isCorrect ? 'bg-green-600 text-white' : 'bg-white border border-slate-300 text-slate-500'
+                                  showAnswer && isCorrect
+                                    ? 'bg-green-600 text-white'
+                                    : showAnswer && isPicked
+                                      ? 'bg-red-600 text-white'
+                                      : 'bg-white border border-slate-300 text-slate-500'
                                 }`}>
                                   {String.fromCharCode(65 + oi)}
                                 </span>
                                 <span className="flex-1">{opt}</span>
-                                {playerRevealAll && isCorrect && (
+                                {showAnswer && isCorrect && (
                                   <CheckSquare size={16} className="text-green-600 shrink-0 mt-0.5" />
                                 )}
-                              </div>
+                                {showAnswer && isPicked && !isCorrect && (
+                                  <span className="shrink-0 text-red-600 text-base leading-none mt-0.5">✗</span>
+                                )}
+                              </button>
                             );
                           })}
                         </div>
-                        {playerRevealAll && (
+                        {/* MCQ (interactive) mode: helper hint before the student taps */}
+                        {isInteractive && !userAnswered && (
+                          <p className="text-[11px] font-bold text-indigo-600/80 mb-2 flex items-center gap-1">
+                            👆 Apna answer chuno
+                          </p>
+                        )}
+                        {/* MCQ (interactive) mode: small "Reset" pill after answering */}
+                        {isInteractive && userAnswered && (
+                          <button
+                            onClick={() => setPlayerMcqAnswers(prev => { const n = { ...prev }; delete n[idx]; return n; })}
+                            className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200 mb-2"
+                          >
+                            🔄 Reset
+                          </button>
+                        )}
+                        {/* Q&A mode: per-card "Tap to Reveal" button when answer hidden */}
+                        {playerMode === 'qa' && !showAnswer && (
+                          <button
+                            onClick={() => setPlayerQaRevealed(prev => ({ ...prev, [idx]: true }))}
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-purple-50 border-2 border-dashed border-purple-300 text-purple-700 font-black text-sm uppercase tracking-wider hover:bg-purple-100 active:scale-[0.98] transition-all"
+                          >
+                            👁️ Tap to Reveal Answer
+                          </button>
+                        )}
+                        {/* Q&A mode: small "Hide" pill once revealed, so user can re-quiz themselves */}
+                        {playerMode === 'qa' && showAnswer && (
+                          <button
+                            onClick={() => setPlayerQaRevealed(prev => { const n = { ...prev }; delete n[idx]; return n; })}
+                            className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200 mb-2"
+                          >
+                            🙈 Hide Answer
+                          </button>
+                        )}
+                        {showAnswer && (
                           <div className="space-y-2">
                             {chunk.mcq?.explanation && (
                               <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3">
@@ -9824,6 +10404,76 @@ RULES:
                   </div>
                 );
               })}
+              {/* Score Summary — only in 'mcq' (interactive) mode, only after
+                  at least one MCQ has been attempted. Mirrors the Lucent /
+                  Homework MCQ list summary card so the experience is identical. */}
+              {playerMode === 'mcq' && (() => {
+                const mcqChunks = playerChunks
+                  .map((c, i) => c.kind === 'mcq' ? { chunk: c, idx: i } : null)
+                  .filter((x): x is { chunk: typeof playerChunks[number]; idx: number } => x !== null);
+                const total = mcqChunks.length;
+                if (total === 0) return null;
+                let attempted = 0, correct = 0;
+                mcqChunks.forEach(({ chunk, idx }) => {
+                  const sel = playerMcqAnswers[idx];
+                  if (sel !== undefined) {
+                    attempted++;
+                    if (sel === (chunk as any).mcq?.correctAnswer) correct++;
+                  }
+                });
+                if (attempted === 0) return null;
+                const wrong = attempted - correct;
+                const pct = Math.round((correct / total) * 100);
+                const allDone = attempted === total;
+                const grade = pct >= 80 ? { label: 'Excellent! 🌟', color: 'from-emerald-500 to-green-500', ring: 'ring-emerald-200' }
+                            : pct >= 60 ? { label: 'Good 👍',       color: 'from-blue-500 to-indigo-500',    ring: 'ring-blue-200' }
+                            : pct >= 40 ? { label: 'Keep practising 💪', color: 'from-amber-500 to-orange-500', ring: 'ring-amber-200' }
+                            :              { label: 'Need more practice 📚', color: 'from-rose-500 to-red-500', ring: 'ring-rose-200' };
+                return (
+                  <div className={`mt-2 bg-white rounded-3xl border-2 ring-4 ${grade.ring} border-slate-200 shadow-lg overflow-hidden`}>
+                    <div className={`bg-gradient-to-r ${grade.color} px-5 py-3 text-white`}>
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-black uppercase tracking-widest opacity-90">📊 Score Summary</p>
+                        {allDone && <span className="text-[10px] font-black bg-white/25 px-2 py-0.5 rounded-full">Complete</span>}
+                      </div>
+                      <div className="flex items-end gap-2 mt-1">
+                        <span className="text-4xl font-black leading-none">{pct}%</span>
+                        <span className="text-sm font-bold opacity-90 mb-1">({correct}/{total})</span>
+                      </div>
+                      <p className="text-xs font-bold opacity-90 mt-1">{grade.label}</p>
+                    </div>
+                    <div className="grid grid-cols-3 divide-x divide-slate-100">
+                      <div className="px-3 py-3 text-center">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Attempted</p>
+                        <p className="text-lg font-black text-slate-800 mt-0.5">{attempted}<span className="text-xs text-slate-400">/{total}</span></p>
+                      </div>
+                      <div className="px-3 py-3 text-center">
+                        <p className="text-[9px] font-black text-emerald-600 uppercase tracking-wider">✓ Sahi</p>
+                        <p className="text-lg font-black text-emerald-700 mt-0.5">{correct}</p>
+                      </div>
+                      <div className="px-3 py-3 text-center">
+                        <p className="text-[9px] font-black text-rose-600 uppercase tracking-wider">✗ Galat</p>
+                        <p className="text-lg font-black text-rose-700 mt-0.5">{wrong}</p>
+                      </div>
+                    </div>
+                    {!allDone && (
+                      <div className="px-4 py-2 bg-slate-50 border-t border-slate-100">
+                        <p className="text-[11px] font-bold text-slate-500 text-center">{total - attempted} question{total - attempted === 1 ? '' : 's'} baaki — sab try karo!</p>
+                      </div>
+                    )}
+                    {allDone && (
+                      <div className="px-4 py-3 bg-slate-50 border-t border-slate-100">
+                        <button
+                          onClick={() => setPlayerMcqAnswers({})}
+                          className="w-full text-[12px] font-black text-indigo-700 bg-indigo-50 hover:bg-indigo-100 py-2 rounded-xl active:scale-95 transition-all"
+                        >
+                          🔄 Phir se Try Karo
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -10058,6 +10708,30 @@ RULES:
                 </span>
               </button>
             </div>
+
+            {/* === SECONDARY VIEW TOGGLE: List View vs Book-wise Grouping === */}
+            <div className="mt-2 grid grid-cols-2 gap-1 p-1 bg-slate-50 rounded-2xl border border-slate-200">
+              <button
+                onClick={() => setImportantNotesView('list')}
+                className={`py-1.5 rounded-xl text-[10px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                  importantNotesView === 'list'
+                    ? 'bg-white text-slate-700 shadow-sm border border-slate-300'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <List size={11} /> List View
+              </button>
+              <button
+                onClick={() => setImportantNotesView('bybook')}
+                className={`py-1.5 rounded-xl text-[10px] font-black flex items-center justify-center gap-1.5 transition-all ${
+                  importantNotesView === 'bybook'
+                    ? 'bg-white text-indigo-700 shadow-sm border border-indigo-200'
+                    : 'text-slate-500 hover:text-indigo-700'
+                }`}
+              >
+                <BookOpen size={11} /> By Book / Page
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {starredPageTab === 'mine' && (<>
@@ -10133,10 +10807,11 @@ RULES:
                 <p className="font-bold text-slate-600 text-sm">Koi match nahi mila.</p>
                 <p className="text-xs text-slate-400 mt-1">Doosra word try karo.</p>
               </div>
-            ) : (
+            ) : importantNotesView === 'list' ? (
               filtered.map((note, idx) => {
                 const isCurrentlyReading = isReadingProfileStars && readingProfileStarIdx === idx;
                 const socialCount = getNoteStarCount(note.topicText);
+                const src = note.source;
                 return (
                   <div
                     key={note.id}
@@ -10159,8 +10834,20 @@ RULES:
                         : <Volume2 size={14} />
                       }
                     </button>
-                    <div className="flex-1 min-w-0">
+                    {/* Tap text area → professional confirm popup → open full notes */}
+                    <button
+                      type="button"
+                      onClick={() => setOpenNotePrompt({ topicText: note.topicText, source: note.source })}
+                      className="flex-1 min-w-0 text-left active:opacity-70"
+                    >
                       <p className={`font-bold text-sm leading-snug ${isCurrentlyReading ? 'text-amber-800' : 'text-slate-800'}`}>{note.topicText}</p>
+                      {src?.lessonTitle && (
+                        <p className="mt-1 text-[10px] font-black text-indigo-600 inline-flex items-center gap-1">
+                          <BookOpen size={10} />
+                          {src.lessonTitle}
+                          {src.pageNo != null && <span className="text-indigo-400">· Page {src.pageNo}</span>}
+                        </p>
+                      )}
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
                         <p className="text-[10px] text-amber-500 font-bold">
                           {note.savedAt ? new Date(note.savedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
@@ -10175,7 +10862,7 @@ RULES:
                           </span>
                         )}
                       </div>
-                    </div>
+                    </button>
                     <button
                       onClick={() => {
                         setStarredNotes(prev => {
@@ -10192,6 +10879,48 @@ RULES:
                   </div>
                 );
               })
+            ) : (
+              // === BY BOOK / PAGE grouped view ===
+              groupStarredByBook(filtered).map(book => (
+                <div key={book.lessonTitle} className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 bg-indigo-100/60 border-b border-indigo-200 flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                      <BookOpen size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-black text-sm text-indigo-900 leading-tight truncate">{book.lessonTitle}</p>
+                      <p className="text-[10px] text-indigo-600 font-bold tracking-wide">
+                        {book.subject ? `${book.subject} · ` : ''}{book.total} important note{book.total !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-indigo-100">
+                    {book.pageList.map(pg => (
+                      <div key={`${book.lessonTitle}_${pg.pageNo ?? pg.pageIndex ?? 'n'}`} className="px-3 py-2.5">
+                        {(pg.pageNo != null || pg.pageIndex != null) && (
+                          <p className="text-[10px] font-black text-indigo-500 uppercase tracking-wider mb-1.5 px-1">
+                            📄 Page {pg.pageNo ?? (pg.pageIndex! + 1)}
+                          </p>
+                        )}
+                        <div className="space-y-1.5">
+                          {pg.notes.map(note => (
+                            <button
+                              key={note.id}
+                              type="button"
+                              onClick={() => setOpenNotePrompt({ topicText: note.topicText, source: note.source })}
+                              className="w-full text-left px-3 py-2 rounded-xl bg-white border border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/50 active:scale-[0.99] transition-all flex items-start gap-2"
+                            >
+                              <Star size={11} className="fill-amber-500 text-amber-500 shrink-0 mt-0.5" />
+                              <span className="font-semibold text-[12px] text-slate-700 leading-snug flex-1">{note.topicText}</span>
+                              <ChevronRight size={12} className="text-indigo-400 shrink-0 mt-1" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
             )}
           </>)}
 
@@ -10216,10 +10945,55 @@ RULES:
               )}
             </div>
 
-            <div className="text-[11px] font-bold text-slate-500 px-1 flex items-center gap-1.5">
-              <Users size={11} className="text-amber-500" />
-              Sare students kya save kar rahe hain — tap to add to your saved
+            <div className="flex items-center gap-2">
+              <div className="text-[11px] font-bold text-slate-500 px-1 flex items-center gap-1.5 flex-1 min-w-0">
+                <Users size={11} className="text-amber-500 shrink-0" />
+                <span className="truncate">Sare students kya save kar rahe hain</span>
+              </div>
+              {/* Read All TTS — reads every visible global note. We map
+                  each entry.label → { topicText } so the existing
+                  startProfileStarRead helper can play them in order. */}
+              {globalList.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (isReadingProfileStars) {
+                      stopProfileStarRead();
+                    } else {
+                      startProfileStarRead(globalList.map(e => ({ topicText: e.label })));
+                    }
+                  }}
+                  className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black transition-all active:scale-95 ${
+                    isReadingProfileStars
+                      ? 'bg-red-100 text-red-600 border border-red-200 hover:bg-red-200'
+                      : 'bg-amber-500 text-white hover:bg-amber-600 shadow-sm'
+                  }`}
+                >
+                  {isReadingProfileStars
+                    ? <><Square size={11} fill="currentColor" /> Stop</>
+                    : <><Volume2 size={12} /> Read All</>
+                  }
+                </button>
+              )}
             </div>
+
+            {/* Reading progress bar — shows "Padh raha hai N / Total" */}
+            {isReadingProfileStars && readingProfileStarIdx !== null && globalList.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                <Volume2 size={13} className="text-amber-500 animate-pulse shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between mb-1">
+                    <span className="text-[10px] font-black text-amber-700">Padh raha hai...</span>
+                    <span className="text-[10px] font-bold text-amber-600">{readingProfileStarIdx + 1}/{globalList.length}</span>
+                  </div>
+                  <div className="h-1 bg-amber-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-amber-400 rounded-full transition-all duration-500"
+                      style={{ width: `${((readingProfileStarIdx + 1) / globalList.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {globalList.length === 0 ? (
               <div className="text-center py-14 bg-amber-50 rounded-2xl border border-amber-100">
@@ -10233,14 +11007,40 @@ RULES:
                 const isMine = !!minePulled;
                 const pct = globalTopCount > 0 ? Math.max(6, Math.round((entry.displayCount / globalTopCount) * 100)) : 0;
                 const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
+                const isCurrentlyReading = isReadingProfileStars && readingProfileStarIdx === idx;
                 return (
                   <div
                     key={entry.hash || idx}
                     className={`rounded-2xl p-3 shadow-sm border transition-all ${
-                      isMine ? 'bg-amber-50 border-amber-300' : 'bg-white border-amber-200'
+                      isCurrentlyReading
+                        ? 'bg-amber-100 border-amber-400 ring-2 ring-amber-200'
+                        : isMine ? 'bg-amber-50 border-amber-300' : 'bg-white border-amber-200'
                     }`}
                   >
                     <div className="flex items-start gap-3">
+                      {/* Per-card speaker — tap to read this note (and continue
+                          chain from here onwards). Tap again to stop. */}
+                      <button
+                        onClick={() => {
+                          if (isCurrentlyReading) {
+                            stopProfileStarRead();
+                          } else {
+                            startProfileStarRead(globalList.slice(idx).map(e => ({ topicText: e.label })));
+                          }
+                        }}
+                        title={isCurrentlyReading ? 'Stop padhna' : 'Yahan se sune'}
+                        aria-label={isCurrentlyReading ? 'Stop reading' : 'Read this note'}
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+                          isCurrentlyReading
+                            ? 'bg-amber-400 text-white animate-pulse'
+                            : 'bg-amber-100 text-amber-600 hover:bg-amber-200'
+                        }`}
+                      >
+                        {isCurrentlyReading
+                          ? <Square size={13} fill="currentColor" />
+                          : <Volume2 size={13} />
+                        }
+                      </button>
                       <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br from-amber-100 to-orange-100 border border-amber-200 text-amber-700 font-black text-xs">
                         {medal || `#${idx + 1}`}
                       </div>
@@ -10343,9 +11143,9 @@ RULES:
           'all-time';
         return (
           <div className="fixed inset-0 z-[9100] bg-gradient-to-b from-amber-50 to-white flex flex-col animate-in slide-in-from-right-full duration-300">
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-amber-100 bg-white/95 backdrop-blur sticky top-0 z-10">
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-amber-100 bg-white sticky top-0 z-10">
               <button
-                onClick={() => setShowCommunityStarsPage(false)}
+                onClick={() => { stopProfileStarRead(); setShowCommunityStarsPage(false); }}
                 className="p-2 rounded-full hover:bg-amber-100 text-amber-700"
               >
                 <ArrowLeft size={20} />
@@ -10359,9 +11159,30 @@ RULES:
                   Sare students kya save kar rahe hain — {rangeLabel}
                 </p>
               </div>
-              <span className="text-[10px] font-black uppercase text-amber-600 bg-amber-100 px-2 py-1 rounded-full border border-amber-200">
-                {ranked.length} notes
-              </span>
+              {/* Read All TTS — reads every ranked note in order. Reuses
+                  the same isReadingProfileStars state shared with the
+                  Important Notes page, so going back stops cleanly. */}
+              {ranked.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (isReadingProfileStars) {
+                      stopProfileStarRead();
+                    } else {
+                      startProfileStarRead(ranked.map(e => ({ topicText: e.label })));
+                    }
+                  }}
+                  className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black transition-all active:scale-95 ${
+                    isReadingProfileStars
+                      ? 'bg-red-100 text-red-600 border border-red-200 hover:bg-red-200'
+                      : 'bg-amber-500 text-white hover:bg-amber-600 shadow-sm'
+                  }`}
+                >
+                  {isReadingProfileStars
+                    ? <><Square size={11} fill="currentColor" /> Stop</>
+                    : <><Volume2 size={12} /> Read All</>
+                  }
+                </button>
+              )}
             </div>
             {/* Time-range filter chips */}
             <div className="px-4 pt-3 pb-2 bg-white/70 backdrop-blur border-b border-amber-100">
@@ -10407,11 +11228,38 @@ RULES:
                 ranked.map((entry, idx) => {
                   const pct = topCount > 0 ? Math.max(8, Math.round((entry.displayCount / topCount) * 100)) : 0;
                   const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+                  const isCurrentlyReading = isReadingProfileStars && readingProfileStarIdx === idx;
                   return (
                     <div
                       key={entry.hash}
-                      className="bg-white rounded-2xl p-3.5 border border-amber-200 shadow-sm flex items-start gap-3"
+                      className={`rounded-2xl p-3.5 border shadow-sm flex items-start gap-3 transition-all ${
+                        isCurrentlyReading
+                          ? 'bg-amber-100 border-amber-400 ring-2 ring-amber-200'
+                          : 'bg-white border-amber-200'
+                      }`}
                     >
+                      {/* Per-card speaker — tap reads from this note onwards */}
+                      <button
+                        onClick={() => {
+                          if (isCurrentlyReading) {
+                            stopProfileStarRead();
+                          } else {
+                            startProfileStarRead(ranked.slice(idx).map(e => ({ topicText: e.label })));
+                          }
+                        }}
+                        title={isCurrentlyReading ? 'Stop padhna' : 'Yahan se sune'}
+                        aria-label={isCurrentlyReading ? 'Stop reading' : 'Read this note'}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-all ${
+                          isCurrentlyReading
+                            ? 'bg-amber-400 text-white animate-pulse'
+                            : 'bg-amber-100 text-amber-600 hover:bg-amber-200'
+                        }`}
+                      >
+                        {isCurrentlyReading
+                          ? <Square size={14} fill="currentColor" />
+                          : <Volume2 size={14} />
+                        }
+                      </button>
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-black text-sm ${
                         idx < 3 ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md' : 'bg-amber-50 text-amber-700 border border-amber-200'
                       }`}>

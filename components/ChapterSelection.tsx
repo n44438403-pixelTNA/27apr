@@ -157,7 +157,15 @@ export const ChapterSelection: React.FC<Props> = ({
                 }`}></div>
 
                 <div className="mr-5 ml-2 min-w-[3.5rem] flex flex-col items-center justify-center">
-                   {chapter.serialNumber ? (
+                   {chapter.pageNo ? (
+                       /* Lucent admin lesson — page-wise organized, show "PG" badge */
+                       <>
+                           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">PG</span>
+                           <span className={`text-2xl font-bold ${isCurrent ? 'text-blue-600' : isLocked ? 'text-slate-500' : 'text-green-600'}`}>
+                               {chapter.pageNo}
+                           </span>
+                       </>
+                   ) : chapter.serialNumber ? (
                        <span className={`text-xl font-bold ${isCurrent ? 'text-blue-600' : isLocked ? 'text-slate-500' : 'text-green-600'}`}>
                            {chapter.serialNumber}
                        </span>

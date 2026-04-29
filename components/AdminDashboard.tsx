@@ -9699,7 +9699,10 @@ Statement 2"
                                                               )}
                                                               {!pageExpanded ? null : (
                                                               <div className="px-3 pb-3 pt-1 space-y-2 border-t border-slate-200">
-                                                              <div className="grid grid-cols-[80px_120px_1fr] gap-2 items-start">
+                                                              {/* Page No + Date ek row me, Note Content apne pooray width par
+                                                                  alag row me — pehle 3-col grid me Note Content squeeze ho jata tha
+                                                                  (mobile par "P a ge ke" jaisa vertical dikhta tha). */}
+                                                              <div className="grid grid-cols-[100px_1fr] gap-2 items-start">
                                                                   <div>
                                                                       <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Page No.</label>
                                                                       <input type="text" value={pg.pageNo} onChange={e => {
@@ -9720,16 +9723,17 @@ Statement 2"
                                                                           setLocalSettings({ ...localSettings, lucentNotes: updated });
                                                                       }} className="w-full p-2 border border-slate-200 rounded text-xs outline-none focus:border-indigo-500" />
                                                                   </div>
-                                                                  <div>
-                                                                      <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Note Content</label>
-                                                                      <textarea value={pg.content} onChange={e => {
-                                                                          const updated = [...(localSettings.lucentNotes || [])];
-                                                                          const pages = [...updated[i].pages];
-                                                                          pages[pgIdx] = { ...pages[pgIdx], content: e.target.value };
-                                                                          updated[i] = { ...updated[i], pages };
-                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                                      }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none h-24 focus:border-indigo-500" placeholder="Page ke notes likhein..." />
-                                                                  </div>
+                                                              </div>
+                                                              <div className="mt-2">
+                                                                  <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">📝 Note Content</label>
+                                                                  <textarea value={pg.content} onChange={e => {
+                                                                      const updated = [...(localSettings.lucentNotes || [])];
+                                                                      const pages = [...updated[i].pages];
+                                                                      pages[pgIdx] = { ...pages[pgIdx], content: e.target.value };
+                                                                      updated[i] = { ...updated[i], pages };
+                                                                      setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                  }} className="w-full p-3 border border-slate-200 rounded-lg text-sm outline-none min-h-[200px] resize-y focus:border-indigo-500 bg-white leading-relaxed" placeholder="Page ke notes yahan likhein... Har bullet `•` ya nayi line par alag topic ban jata hai." />
+                                                                  <p className="text-[9px] text-slate-500 mt-1">💡 Tip: Box ke right-bottom corner se drag karke aur bada bhi kar sakte hain.</p>
                                                               </div>
                                                               {/* Per-page MCQ editor */}
                                                               <div className="border-t border-slate-200 pt-2 mt-1">

@@ -695,11 +695,27 @@ const App: React.FC = () => {
               });
 
               // FORCE REFRESH LOGIC
+              // NOTE: localStorage.setItem always coerces to string, so we MUST
+              // compare as strings — otherwise number vs string mismatch causes
+              // an infinite reload loop on every settings snapshot.
+              // Also rate-limit: never reload more than once every 60 seconds
+              // (this is a hard safety net against any reload-loop bug).
               if (newSettings.forceRefreshTimestamp) {
                   const lastRefresh = localStorage.getItem('nst_last_refresh_ts');
-                  if (lastRefresh !== newSettings.forceRefreshTimestamp) {
-                      localStorage.setItem('nst_last_refresh_ts', newSettings.forceRefreshTimestamp);
-                      window.location.reload();
+                  const incoming = String(newSettings.forceRefreshTimestamp);
+                  if (lastRefresh !== incoming) {
+                      localStorage.setItem('nst_last_refresh_ts', incoming);
+                      // Only actually reload if we had a previous value (i.e. admin
+                      // pushed a new refresh). On very first load there's no prior
+                      // value — just record it and skip the reload to avoid a loop.
+                      if (lastRefresh !== null) {
+                          const lastReloadAt = Number(localStorage.getItem('nst_last_reload_at') || '0');
+                          const nowMs = Date.now();
+                          if (nowMs - lastReloadAt > 60_000) {
+                              localStorage.setItem('nst_last_reload_at', String(nowMs));
+                              window.location.reload();
+                          }
+                      }
                   }
               }
 

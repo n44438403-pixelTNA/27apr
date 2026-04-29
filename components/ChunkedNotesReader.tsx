@@ -225,9 +225,13 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
 
   return (
     <div className={className || ''}>
-      {/* Header with font controls + Read All */}
+      {/* Header with font controls + Read All.
+          NOTE: Must be fully opaque (`bg-white`) — earlier `bg-white/95` +
+          backdrop-blur let the scrolling notes content bleed visibly behind
+          the READ ALL bar, which broke readability. We also bump z-index so
+          this bar always sits above scrolled content. */}
       {!hideTopBar && (
-        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm py-2 mb-3 border-b border-slate-100">
+        <div className="sticky top-0 z-20 bg-white py-2 mb-3 border-b border-slate-200 shadow-sm">
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-bold text-slate-600 truncate min-w-0">
               {topBarLabel || 'Notes'}

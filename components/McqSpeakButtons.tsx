@@ -25,6 +25,18 @@ interface Props {
    */
   allQuestions?: AllQ[];
   index?: number;
+  /**
+   * When false, both buttons skip the answer in their TTS output —
+   * they read ONLY the question (and options for the "All" button).
+   * Used by Class 6-12 MCQ Interactive List in MCQ mode: while the
+   * student hasn't answered every question yet, the speaker should not
+   * spoil the correct answer. Once allAnswered → set to true and the
+   * answer also gets played. In Q&A mode this stays true throughout.
+   * Default: true (preserves existing behaviour for all current callers).
+   */
+  revealAnswer?: boolean;
+  /** Compact single-icon variant — used by Lucent-style MCQ cards. */
+  compact?: boolean;
 }
 
 const stripHtml = (s: string) => (s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -38,6 +50,8 @@ export const McqSpeakButtons: React.FC<Props> = ({
   language = 'hi-IN',
   allQuestions,
   index = 0,
+  revealAnswer = true,
+  compact = false,
 }) => {
   const [active, setActive] = useState<null | 'qa' | 'all'>(null);
   const cancelRef = useRef(false);
@@ -46,10 +60,18 @@ export const McqSpeakButtons: React.FC<Props> = ({
   const cleanOpts = options.map(o => stripHtml(o));
   const correctText = cleanOpts[correctAnswer] ?? '';
 
-  const qaText = `Question: ${cleanQ}. Sahi jawab: ${correctText}.`;
-  const allText = `Question: ${cleanQ}. Options ye hain: ${cleanOpts
-    .map((o, i) => `Option ${String.fromCharCode(65 + i)}: ${o}`)
-    .join('. ')}. Sahi jawab: Option ${String.fromCharCode(65 + correctAnswer)}, ${correctText}.`;
+  // When revealAnswer === false (MCQ mode, not yet fully answered),
+  // both buttons keep the answer hidden in TTS output too.
+  const qaText = revealAnswer
+    ? `Question: ${cleanQ}. Sahi jawab: ${correctText}.`
+    : `Question: ${cleanQ}.`;
+  const allText = revealAnswer
+    ? `Question: ${cleanQ}. Options ye hain: ${cleanOpts
+        .map((o, i) => `Option ${String.fromCharCode(65 + i)}: ${o}`)
+        .join('. ')}. Sahi jawab: Option ${String.fromCharCode(65 + correctAnswer)}, ${correctText}.`
+    : `Question: ${cleanQ}. Options ye hain: ${cleanOpts
+        .map((o, i) => `Option ${String.fromCharCode(65 + i)}: ${o}`)
+        .join('. ')}.`;
 
   const stopAll = () => {
     cancelRef.current = true;
@@ -76,12 +98,19 @@ export const McqSpeakButtons: React.FC<Props> = ({
       const cq = stripHtml(q.question);
       const cOpts = (q.options || []).map((o) => stripHtml(o));
       const cAns = cOpts[q.correctAnswer] ?? '';
+      // revealAnswer === false → strip answer from chain TTS too.
       const text =
         mode === 'qa'
-          ? `Question ${i + 1}: ${cq}. Sahi jawab: ${cAns}.`
-          : `Question ${i + 1}: ${cq}. Options ye hain: ${cOpts
-              .map((o, oi) => `Option ${String.fromCharCode(65 + oi)}: ${o}`)
-              .join('. ')}. Sahi jawab: Option ${String.fromCharCode(65 + q.correctAnswer)}, ${cAns}.`;
+          ? (revealAnswer
+              ? `Question ${i + 1}: ${cq}. Sahi jawab: ${cAns}.`
+              : `Question ${i + 1}: ${cq}.`)
+          : (revealAnswer
+              ? `Question ${i + 1}: ${cq}. Options ye hain: ${cOpts
+                  .map((o, oi) => `Option ${String.fromCharCode(65 + oi)}: ${o}`)
+                  .join('. ')}. Sahi jawab: Option ${String.fromCharCode(65 + q.correctAnswer)}, ${cAns}.`
+              : `Question ${i + 1}: ${cq}. Options ye hain: ${cOpts
+                  .map((o, oi) => `Option ${String.fromCharCode(65 + oi)}: ${o}`)
+                  .join('. ')}.`);
       try {
         await speakOnce(text);
       } catch {
@@ -144,6 +173,30 @@ export const McqSpeakButtons: React.FC<Props> = ({
     'inline-flex items-center gap-1 px-2 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wide transition-colors active:scale-95';
 
   const isChainCapable = !!(allQuestions && allQuestions.length > 1);
+
+  // Lucent-style compact variant: a single round speaker icon button that
+  // reads the question (and the answer iff revealAnswer === true). Used by
+  // the new Class 6-12 MCQ Interactive List per-card speaker.
+  if (compact) {
+    const tip = revealAnswer
+      ? (isChainCapable ? 'Saare questions + sahi jawab sune' : 'Question + sahi jawab sune')
+      : (isChainCapable ? 'Saare questions sune (bina jawab ke)' : 'Question sune (bina jawab ke)');
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); play('qa'); }}
+        title={tip}
+        aria-label={tip}
+        className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors active:scale-95 ${
+          active === 'qa'
+            ? 'bg-red-100 text-red-600 animate-pulse'
+            : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+        } ${className || ''}`}
+      >
+        {active === 'qa' ? <Square size={iconSize + 2} fill="currentColor" /> : <Volume2 size={iconSize + 2} />}
+      </button>
+    );
+  }
 
   return (
     <div className={`flex items-center gap-1.5 shrink-0 ${className || ''}`}>
