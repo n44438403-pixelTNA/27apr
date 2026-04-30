@@ -45,14 +45,15 @@ export const Store: React.FC<Props> = ({ user, settings }) => {
   const event = settings?.specialDiscountEvent;
   const isSubscribed = user.isPremium && user.subscriptionEndDate && new Date(user.subscriptionEndDate) > new Date();
   
-  // NEW: Check if event is actually active (now >= startsAt && now < endsAt)
+  // FIXED: Discount applies ONLY when cooldown is over (now >= startsAt && now < endsAt).
+  // During cooldown phase, store prices stay unchanged and the discount does NOT apply.
   const isEventActive = () => {
     if (!event?.enabled) return false;
     const now = Date.now();
     // If enabled but no dates provided, assume always active
     if (!event.startsAt && !event.endsAt) return true;
 
-    // Strict date checking
+    // Strict date checking — discount is locked until cooldown ends.
     const startsAt = event.startsAt ? new Date(event.startsAt).getTime() : 0;
     const endsAt = event.endsAt ? new Date(event.endsAt).getTime() : Infinity;
 
@@ -63,8 +64,15 @@ export const Store: React.FC<Props> = ({ user, settings }) => {
     return now >= startsAt && now < endsAt;
   };
 
-  const activeEvent = event?.enabled ? true : isEventActive(); // Force active if enabled as requested
-  const showEventBanner = activeEvent && ((isSubscribed && event?.showToPremiumUsers) || (!isSubscribed && event?.showToFreeUsers));
+  // Cooldown phase: discount enabled but startsAt is still in the future.
+  const isCooldownPhase = () => {
+    if (!event?.enabled || !event.startsAt) return false;
+    return Date.now() < new Date(event.startsAt).getTime();
+  };
+
+  const activeEvent = isEventActive(); // No longer force-true on enable; cooldown is respected.
+  const inCooldown = isCooldownPhase();
+  const showEventBanner = (activeEvent || inCooldown) && ((isSubscribed && event?.showToPremiumUsers) || (!isSubscribed && event?.showToFreeUsers));
 
   // Countdown Timer Logic
   const [timeLeft, setTimeLeft] = useState<{days: number, hours: number, minutes: number, seconds: number} | null>(null);

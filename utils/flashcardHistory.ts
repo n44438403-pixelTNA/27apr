@@ -36,11 +36,25 @@ const safeParse = <T>(raw: string | null, fallback: T): T => {
   }
 };
 
+// Defensive: if a caller (or older storage) shoved a Subject object into the
+// `subject` field, coerce it back to a plain string. Otherwise React would
+// crash with "Objects are not valid as a React child" the moment HistoryPage
+// tried to render it.
+const coerceSubject = (val: any): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') {
+    if (typeof val.name === 'string') return val.name;
+    if (typeof val.id === 'string') return val.id;
+  }
+  return '—';
+};
+
 // ---------- FLASHCARD ----------
 
 export const getFlashcardSessions = (): FlashcardSession[] => {
   try {
-    return safeParse<FlashcardSession[]>(localStorage.getItem(FLASHCARD_KEY), []);
+    const list = safeParse<FlashcardSession[]>(localStorage.getItem(FLASHCARD_KEY), []);
+    return list.map(s => ({ ...s, subject: coerceSubject((s as any).subject) }));
   } catch {
     return [];
   }
@@ -52,6 +66,7 @@ export const recordFlashcardSession = (entry: Omit<FlashcardSession, 'id' | 'ts'
     const list = getFlashcardSessions();
     const next: FlashcardSession = {
       ...entry,
+      subject: coerceSubject((entry as any).subject),
       id: `fc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       ts: Date.now(),
     };
@@ -68,7 +83,8 @@ export const clearFlashcardSessions = () => {
 
 export const getNotesReadSessions = (): NotesReadSession[] => {
   try {
-    return safeParse<NotesReadSession[]>(localStorage.getItem(NOTES_READ_KEY), []);
+    const list = safeParse<NotesReadSession[]>(localStorage.getItem(NOTES_READ_KEY), []);
+    return list.map(s => ({ ...s, subject: coerceSubject((s as any).subject) }));
   } catch {
     return [];
   }
@@ -80,6 +96,7 @@ export const recordNotesReadSession = (entry: Omit<NotesReadSession, 'id' | 'ts'
     const list = getNotesReadSessions();
     const next: NotesReadSession = {
       ...entry,
+      subject: coerceSubject((entry as any).subject),
       id: `nr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       ts: Date.now(),
     };

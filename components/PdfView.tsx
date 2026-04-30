@@ -1116,10 +1116,27 @@ export const PdfView: React.FC<Props> = ({
                       className="w-full h-full border-none"
                       title="PDF Viewer"
                       allow="autoplay"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups-to-escape-sandbox"
+                      /* Sandbox tightened: 'allow-popups-to-escape-sandbox' &
+                         'allow-top-navigation' hata diye taaki Google Drive ka
+                         "Open in new window" / pop-out square button user ko
+                         Drive site pe na le ja sake. */
+                      sandbox="allow-scripts allow-same-origin allow-forms"
                   />
-                  {/* Invisible Overlay to block top bar clicks if iframe sandbox isn't enough */}
-                  <div className="absolute top-0 left-0 w-full h-16 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
+                  {/* === TRANSPARENT BLOCKERS ===
+                      Google Drive ka /preview embed top-right corner pe ek
+                      square pop-out icon dikhata hai (aur kabhi kabhi bottom
+                      par toolbar). Iss icon par tap karte hi user Drive site
+                      pe chala jata tha. Inn invisible overlays se ab koi tap
+                      iframe tak nahi pahunchti — pop-out button completely
+                      blocked rahega, lekin baaki PDF body scroll/zoom karne
+                      laayak rahegi (overlays sirf corner areas ko cover karte
+                      hain). */}
+                  {/* Top strip — cover full top toolbar */}
+                  <div className="absolute top-0 left-0 w-full h-20 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
+                  {/* Top-right square — Drive ka pop-out icon yahin sit karta hai */}
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
+                  {/* Bottom-right square — kuch embeds me toolbar yahan dikhata hai */}
+                  <div className="absolute bottom-0 right-0 w-24 h-16 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
               </div>
           </div>
       );
@@ -1190,9 +1207,17 @@ export const PdfView: React.FC<Props> = ({
                           className="w-full h-full border-none"
                           title="PDF Viewer"
                           allow="autoplay"
-                          sandbox="allow-scripts allow-same-origin allow-forms allow-popups-to-escape-sandbox"
+                          /* Sandbox tightened (same reason as activePdf overlay) —
+                             pop-out / new-window escapes blocked. */
+                          sandbox="allow-scripts allow-same-origin allow-forms"
                       />
-                      <div className="absolute top-0 left-0 w-full h-16 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
+                      {/* Transparent blockers covering Drive's pop-out icon
+                          areas (top-right is the main one; top strip + bottom
+                          right are added as belt-and-braces). PDF body scroll
+                          unaffected. */}
+                      <div className="absolute top-0 left-0 w-full h-20 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
+                      <div className="absolute bottom-0 right-0 w-24 h-16 bg-transparent pointer-events-auto" onClick={(e) => e.stopPropagation()} />
                   </div>
               </div>
           );
@@ -1341,9 +1366,11 @@ export const PdfView: React.FC<Props> = ({
            {(
                <div className="flex overflow-x-auto border-t border-slate-100 scrollbar-hide">
                    {[
+                       /* "Extended" tab hata diya — ab Additional Notes Concept tab ke
+                          andar "Read More" button ke through dikhenge taaki student ke liye
+                          sirf 2 main pages rahe (Concept + Retention). */
                        { id: 'DEEP_DIVE', label: 'Concept', icon: BookOpen, show: true },
                        { id: 'PREMIUM', label: 'Retention', icon: Crown, show: true },
-                       { id: 'RESOURCES', label: 'Extended', icon: Layers, show: true },
                        { id: 'TEACHER', label: 'Teaching Strategy', icon: BookOpen, show: user.role === 'TEACHER' || !!user.teacherCode || user.role === 'ADMIN' }
                            ].filter(t => t.show).map(tab => {
                                const { hasAccess, cost } = getTabAccess(tab.id);
@@ -1454,9 +1481,10 @@ export const PdfView: React.FC<Props> = ({
                                               }
                                           }}
                                           className={`flex items-center gap-2 px-3 py-1.5 rounded-full font-bold text-xs transition-all ${isAutoPlaying ? 'bg-red-500 text-white animate-pulse' : 'bg-teal-600 text-white shadow'}`}
+                                          title={isAutoPlaying ? 'Stop reading' : 'Read everything aloud'}
                                       >
-                                          {isAutoPlaying ? <Pause size={12} /> : <Play size={12} />}
-                                          {isAutoPlaying ? 'Stop' : 'Auto Play'}
+                                          {isAutoPlaying ? <Pause size={12} /> : <Volume2 size={12} />}
+                                          {isAutoPlaying ? 'Stop' : 'Read All'}
                                       </button>
                                    </div>
                                </div>
@@ -1468,8 +1496,48 @@ export const PdfView: React.FC<Props> = ({
                                    </div>
                                )}
 
+                               {/* === ADDITIONAL NOTES (PART-WISE PAIRING) ===
+                                   Merge school + competition additional notes once,
+                                   then pair index-wise with each Concept (Deep Dive)
+                                   topic. Concept Part 1 ka "Read More" button →
+                                   Additional Notes Part 1 kholega, Part 2 ka button →
+                                   Part 2 kholega, etc. Pehle ye Additional Notes ek
+                                   alag list me dikhte the — ab har Concept card ke
+                                   andar hi same-index pe attach hain. */}
                                {deepDiveTopics.map((topic, idx) => {
                                   const isActive = topicSpeakingState === idx;
+                                  // Same-index Additional Note compute karo (agar exist
+                                  // kare). Dedup logic original Additional Notes section
+                                  // jaisa hi rakha hai taaki count consistent rahe.
+                                  const _schoolNotes: AdditionalNoteEntry[] = (contentData?.schoolAdditionalNotes || contentData?.additionalNotes || []) as any;
+                                  const _compNotes: AdditionalNoteEntry[] = (contentData?.competitionAdditionalNotes || []) as any;
+                                  const _seen = new Set<string>();
+                                  const _mergedNotes: AdditionalNoteEntry[] = [..._schoolNotes, ..._compNotes].filter(n => {
+                                      const k = `${(n.title || '').trim().toLowerCase()}|${(n.pdfLink || '').trim()}|${((n as any).noteContent || '').slice(0, 40)}`;
+                                      if (_seen.has(k)) return false;
+                                      _seen.add(k);
+                                      return true;
+                                  });
+                                  const pairedNote: AdditionalNoteEntry | null = _mergedNotes[idx] || null;
+                                  const pairedHasPdf = !!(pairedNote && pairedNote.pdfLink);
+                                  const pairedHasContent = !!(pairedNote && (pairedNote as any).noteContent);
+                                  const openPairedNote = () => {
+                                      if (!pairedNote) return;
+                                      const title = pairedNote.title || `Additional Note ${idx + 1}`;
+                                      const audioUrl = (pairedNote as any).audioUrl;
+                                      const noteContent = (pairedNote as any).noteContent;
+                                      if (pairedNote.pdfLink && noteContent) {
+                                          setActiveNoteContent({ title, content: noteContent, pdfUrl: pairedNote.pdfLink, audioUrl });
+                                      } else if (pairedNote.pdfLink) {
+                                          if (audioUrl) {
+                                              setActiveNoteContent({ title, content: '', pdfUrl: pairedNote.pdfLink, audioUrl });
+                                          } else {
+                                              setActivePdf(pairedNote.pdfLink);
+                                          }
+                                      } else if (noteContent) {
+                                          setActiveNoteContent({ title, content: noteContent, audioUrl });
+                                      }
+                                  };
                                   return (
                                       <div
                                           id={`topic-card-${idx}`}
@@ -1533,6 +1601,36 @@ export const PdfView: React.FC<Props> = ({
                                                       topBarLabel={topic.title}
                                                       noteKey={`pdfview_${chapter.id}_topic_${idx}`}
                                                   />
+                                              </div>
+                                          )}
+
+                                          {/* === PAIRED ADDITIONAL NOTE (Read More) ===
+                                              Iss Concept part ke saath jo Additional Note
+                                              same index pe hai (Part 1 ↔ Part 1, Part 2 ↔
+                                              Part 2, ...) uska Read More button yahin
+                                              dikhta hai. Tap karne par PDF / Text Reader
+                                              kholta hai. Agar same-index Additional Note
+                                              available na ho to button hide ho jata hai. */}
+                                          {pairedNote && (
+                                              <div className="mt-4 -mx-4 sm:-mx-6 px-4 sm:px-6 pt-3 border-t border-slate-100">
+                                                  <div className="flex items-center gap-3 bg-cyan-50/60 border border-cyan-200 rounded-xl p-3">
+                                                      <div className="w-9 h-9 rounded-lg bg-white text-cyan-700 flex items-center justify-center shrink-0 border border-cyan-200">
+                                                          {pairedHasPdf ? <FileText size={16} /> : <Book size={16} />}
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                          <p className="text-[10px] font-black uppercase tracking-wider text-cyan-700">Additional Notes · Part {idx + 1}</p>
+                                                          <h5 className="text-sm font-black text-slate-800 leading-tight truncate">
+                                                              {pairedNote.title || `Additional Note ${idx + 1}`}
+                                                          </h5>
+                                                      </div>
+                                                      <button
+                                                          onClick={openPairedNote}
+                                                          className="px-3 py-1.5 rounded-full text-[11px] font-black bg-cyan-600 text-white shadow hover:bg-cyan-700 active:scale-95 transition-all flex items-center gap-1 shrink-0"
+                                                          title={pairedHasPdf && pairedHasContent ? 'PDF + Reader' : pairedHasPdf ? 'PDF Document' : 'Text Reader'}
+                                                      >
+                                                          Read More <ChevronRight size={12} />
+                                                      </button>
+                                                  </div>
                                               </div>
                                           )}
                                       </div>

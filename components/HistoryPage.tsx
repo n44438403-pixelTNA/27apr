@@ -975,7 +975,7 @@ const ReadingProgressSection: React.FC<ReadingSectionProps> = ({
                             </span>
                         )}
                     </div>
-                    {opts.subtitle && <p className="text-xs text-slate-500 truncate">{opts.subtitle}</p>}
+                    {opts.subtitle && <p className="text-xs text-slate-500 truncate">{typeof opts.subtitle === 'string' ? opts.subtitle : ''}</p>}
                     <div className="mt-2">{renderProgressBar(opts.pct, opts.isDone)}</div>
                     <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
                         <span>{opts.isDone ? '100%' : `${Math.max(2, Math.min(100, Math.round(opts.pct || 0)))}%`} read</span>
@@ -1016,15 +1016,37 @@ const ReadingProgressSection: React.FC<ReadingSectionProps> = ({
                         <section>
                             <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2 px-1">Chapters</h4>
                             <div className="space-y-2">
-                                {recentChapters.map(c => renderRow(`ch_${c.id}`, {
-                                    title: c.title,
-                                    subtitle: c.subject,
-                                    pct: c.scrollPct,
-                                    isDone: false,
-                                    emoji: '📖',
-                                    onResume: () => onResumeChapter(c),
-                                    onRemove: () => onRemoveChapter(c.id),
-                                }))}
+                                {recentChapters.map(c => {
+                                    // c.subject can be either a string OR a full
+                                    // Subject object (older RecentChapterEntry
+                                    // stored the whole {id,name,icon,color}).
+                                    // Coerce to a plain string so renderRow's
+                                    // <p>{opts.subtitle}</p> doesn't try to render
+                                    // an object — that was the source of the
+                                    // React #31 crash on this page.
+                                    const subj: any = (c as any).subject;
+                                    const subjectStr = typeof subj === 'string'
+                                        ? subj
+                                        : (subj && typeof subj === 'object' && typeof subj.name === 'string')
+                                            ? subj.name
+                                            : '';
+                                    // c.title may also be missing on legacy
+                                    // entries (the type defines it but the data
+                                    // may have come from an older saver). Fall
+                                    // back to the chapter object's title.
+                                    const titleStr = (c as any).title
+                                        || (c as any).chapter?.title
+                                        || 'Untitled chapter';
+                                    return renderRow(`ch_${c.id}`, {
+                                        title: titleStr,
+                                        subtitle: subjectStr,
+                                        pct: c.scrollPct,
+                                        isDone: false,
+                                        emoji: '📖',
+                                        onResume: () => onResumeChapter(c),
+                                        onRemove: () => onRemoveChapter(c.id),
+                                    });
+                                })}
                             </div>
                         </section>
                     )}
@@ -1202,9 +1224,15 @@ const FlashcardsActivitySection: React.FC<FlashcardsActivitySectionProps> = ({
                     </h4>
                     <div className="space-y-2">
                         {perSubject.map(([subject, s]) => (
-                            <div key={subject} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100">
+                            <div key={typeof subject === 'string' ? subject : JSON.stringify(subject)} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100">
                                 <div className="min-w-0 flex-1">
-                                    <p className="text-sm font-black text-slate-800 truncate">{subject}</p>
+                                    <p className="text-sm font-black text-slate-800 truncate">
+                                      {typeof subject === 'string'
+                                        ? subject
+                                        : (subject && typeof subject === 'object' && (subject as any).name)
+                                          ? String((subject as any).name)
+                                          : '—'}
+                                    </p>
                                     <p className="text-[10px] font-bold text-slate-500 mt-0.5">
                                         {s.flashcards > 0 && <>🃏 {s.flashcards} cards · {s.sessions} sessions</>}
                                         {s.flashcards > 0 && s.readSec > 0 && <> · </>}

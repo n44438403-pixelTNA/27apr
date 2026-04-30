@@ -974,16 +974,20 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               let discountPercentVal = 0;
               const isSubscribed = editingUser.isPremium && editingUser.subscriptionEndDate && new Date(editingUser.subscriptionEndDate) > new Date();
 
-              // 1. Check Event Validity
-              let isEventActive = !!event?.enabled; // Assume true if enabled
-              if (event?.enabled && event.startsAt && event.endsAt) {
+              // 1. Check Event Validity — discount applies ONLY after cooldown ends.
+              let isEventActive = false;
+              if (event?.enabled) {
                   const now = Date.now();
-                  const startTime = new Date(event.startsAt).getTime();
-                  const endTime = new Date(event.endsAt).getTime();
-                  if (startTime === endTime) {
-                      isEventActive = now >= startTime;
+                  if (!event.startsAt && !event.endsAt) {
+                      isEventActive = true;
                   } else {
-                      isEventActive = now >= startTime && now < endTime;
+                      const startTime = event.startsAt ? new Date(event.startsAt).getTime() : 0;
+                      const endTime = event.endsAt ? new Date(event.endsAt).getTime() : Infinity;
+                      if (startTime === endTime) {
+                          isEventActive = now >= startTime;
+                      } else {
+                          isEventActive = now >= startTime && now < endTime;
+                      }
                   }
               }
 
@@ -1686,16 +1690,20 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           let discountPercentVal = 0;
           const isSubscribed = user.isPremium && user.subscriptionEndDate && new Date(user.subscriptionEndDate) > new Date();
 
-          // 1. Check Event Validity
-          let isEventActive = !!event?.enabled; // Assume true if enabled
-          if (event?.enabled && event.startsAt && event.endsAt) {
+          // 1. Check Event Validity — discount applies ONLY after cooldown ends.
+          let isEventActive = false;
+          if (event?.enabled) {
               const now = Date.now();
-              const startTime = new Date(event.startsAt).getTime();
-              const endTime = new Date(event.endsAt).getTime();
-              if (startTime === endTime) {
-                  isEventActive = now >= startTime;
+              if (!event.startsAt && !event.endsAt) {
+                  isEventActive = true;
               } else {
-                  isEventActive = now >= startTime && now < endTime;
+                  const startTime = event.startsAt ? new Date(event.startsAt).getTime() : 0;
+                  const endTime = event.endsAt ? new Date(event.endsAt).getTime() : Infinity;
+                  if (startTime === endTime) {
+                      isEventActive = now >= startTime;
+                  } else {
+                      isEventActive = now >= startTime && now < endTime;
+                  }
               }
           }
 

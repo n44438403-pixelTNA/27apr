@@ -144,6 +144,7 @@ import { McqView } from "./McqView"; // Imported for MCQ Flow
 import { MiniPlayer } from "./MiniPlayer"; // Imported for Audio Flow
 import { HistoryPage } from "./HistoryPage";
 import TeacherStore from "./TeacherStore";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Leaderboard } from "./Leaderboard";
 import { SpinWheel } from "./SpinWheel";
 import { fetchChapters, generateCustomNotes } from "../services/groq"; // Needed for Video Flow
@@ -431,6 +432,38 @@ export const StudentDashboard: React.FC<Props> = ({
     return getFeatureAccess(featureId).hasAccess;
   };
 
+  // === DISCOUNT EVENT LIVE / COOLDOWN STATE ===
+  // Discount sirf "active window" (startsAt → endsAt) ke beech hi LIVE manaa
+  // jayega. Cooldown phase (endsAt → resetAt) me prices wapas normal ho jate
+  // hain aur ek "Coming Soon" banner dikhna chahiye. Ye dono flags hum yahaan
+  // ek hi jagah derive karte hain taaki nav swap, banner, popup sab consistent
+  // rahe.
+  const { isDiscountLive, isDiscountCooldown, discountEvent } = React.useMemo(() => {
+    const event = settings?.specialDiscountEvent;
+    if (!event?.enabled) return { isDiscountLive: false, isDiscountCooldown: false, discountEvent: null };
+    const now = Date.now();
+    const start = event.startsAt ? new Date(event.startsAt).getTime() : 0;
+    const end = event.endsAt ? new Date(event.endsAt).getTime() : 0;
+    const reset = (event as any).resetAt ? new Date((event as any).resetAt).getTime() : 0;
+    let live = false;
+    let cooldown = false;
+    if (start && end) {
+      if (start === end) {
+        live = now >= start;
+      } else {
+        live = now >= start && now < end;
+        if (!live && now >= end && reset && now < reset) cooldown = true;
+      }
+    } else {
+      live = true; // legacy events with no dates → treat as live
+    }
+    return { isDiscountLive: live, isDiscountCooldown: cooldown, discountEvent: event };
+  }, [settings?.specialDiscountEvent]);
+
+  // Auto-swap: jab discount LIVE ho, profile slot ko Universal Video se replace
+  // karna hai, chaahe admin ne `universalVideoInTopBar` set kiya ho ya nahi.
+  const universalVideoInTopBarEffective = isDiscountLive ? true : !!settings?.universalVideoInTopBar;
+
   const [activeSessionClass, setActiveSessionClass] = useState<string | null>(
     null,
   );
@@ -549,9 +582,12 @@ export const StudentDashboard: React.FC<Props> = ({
       }
 
       // 3. Discount Event Notification
+      // Cooldown bug fix: pehle yahaan default `true` tha jisse cooldown phase
+      // me bhi popup chala jaata tha. Ab strictly active window check karte hain
+      // (start <= now < end) so cooldown me promo silent rahega.
       if (settings?.specialDiscountEvent?.enabled) {
         const event = settings.specialDiscountEvent;
-        let isEventActive = true; // Assume true if enabled and dates are missing
+        let isEventActive = false;
         if (event.startsAt && event.endsAt) {
           const startTime = new Date(event.startsAt).getTime();
           const endTime = new Date(event.endsAt).getTime();
@@ -560,6 +596,9 @@ export const StudentDashboard: React.FC<Props> = ({
           } else {
             isEventActive = now >= startTime && now < endTime;
           }
+        } else {
+          // Legacy events with no dates → assume active (old behaviour preserved)
+          isEventActive = true;
         }
 
         if (isEventActive) {
@@ -6424,8 +6463,11 @@ export const StudentDashboard: React.FC<Props> = ({
               </div>
             )}
             <div className="flex flex-col min-w-0">
-              <span className="font-black text-xl leading-tight tracking-tight whitespace-nowrap truncate">
-                {settings?.appName || "NST AI"}
+              {/* App name ab waise hi dikhega jaise loading screen pe — short
+                  uppercase brand mark (`appShortName`), heavy font, tight
+                  tracking. Long name ko truncate hone se bachata hai. */}
+              <span className="font-black text-xl leading-tight tracking-tight uppercase whitespace-nowrap truncate">
+                {settings?.appShortName || settings?.appName || "IIC"}
               </span>
             </div>
           </div>
@@ -6503,17 +6545,26 @@ export const StudentDashboard: React.FC<Props> = ({
               </button>
             )}
 
-            {/* Sale Discount Mini Button */}
-            {!(settings?.hiddenTopBarButtons || []).includes('SALE') && settings?.specialDiscountEvent?.enabled && (
+            {/* Sale Discount Mini Button —
+                LIVE  → "% OFF" pill (active discount)
+                COOL  → "COMING SOON" pill (cooldown phase, prices normal) */}
+            {!(settings?.hiddenTopBarButtons || []).includes('SALE') && settings?.specialDiscountEvent?.enabled && (isDiscountLive || isDiscountCooldown) && (
               <button
                 onClick={() => onTabChange("STORE")}
-                className="keep-light-badge p-1.5 rounded-full transition-colors relative bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100 shrink-0 flex items-center gap-1"
+                className={`keep-light-badge p-1.5 rounded-full transition-colors relative shrink-0 flex items-center gap-1 ${
+                  isDiscountLive
+                    ? 'bg-[#FDFBF7] hover:bg-slate-50 text-slate-800 border border-amber-100'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300'
+                }`}
+                title={isDiscountLive ? 'Sale is LIVE' : 'Sale Coming Soon'}
               >
                 <Ticket size={16} />
                 <span className="text-[10px] font-bold whitespace-nowrap">
-                  {settings?.specialDiscountEvent?.discountPercent
-                    ? `${settings.specialDiscountEvent.discountPercent}% OFF`
-                    : "50% OFF"}
+                  {isDiscountLive
+                    ? (settings?.specialDiscountEvent?.discountPercent
+                        ? `${settings.specialDiscountEvent.discountPercent}% OFF`
+                        : "50% OFF")
+                    : "COMING SOON"}
                 </span>
               </button>
             )}
@@ -9153,7 +9204,12 @@ export const StudentDashboard: React.FC<Props> = ({
           key={activeTab}
           className={`${contentViewStep === "PLAYER" && selectedChapter ? "h-full" : "animate-in fade-in duration-300 ease-out"}`}
         >
-          {renderMainContent()}
+          {/* ErrorBoundary so a render-time crash inside one page (e.g. History
+              or Teacher Store) never blanks the whole dashboard — the user can
+              tap "Go to Home" and recover instead of seeing a white screen. */}
+          <ErrorBoundary key={activeTab + '-eb'}>
+            {renderMainContent()}
+          </ErrorBoundary>
         </div>
       </div>
 
@@ -9631,12 +9687,15 @@ export const StudentDashboard: React.FC<Props> = ({
               // Slot C — Video OR Profile (mutual exclusive)
               //   • Video in bottom nav → Video tab
               //   • Video moved to top bar → Profile takes this exact slot
-              ...(!settings?.universalVideoInTopBar && !(settings?.hiddenBottomNavButtons || []).includes('VIDEO')
+              // Discount LIVE hone par `universalVideoInTopBarEffective` true
+              // ho jata hai → Profile slot Video se replace ho jata hai
+              // (admin setting ke upar override).
+              ...(!universalVideoInTopBarEffective && !(settings?.hiddenBottomNavButtons || []).includes('VIDEO')
                 ? [{ id: "VIDEO" as const, label: "Video", Icon: Video,
                      featureId: "VIDEO_ACCESS",
                      isActive: !showStarredPage && currentLogicalTab === "VIDEO",
                      onClick: () => switchToLogicalTab("VIDEO") }]
-                : (settings?.universalVideoInTopBar && !(settings?.hiddenBottomNavButtons || []).includes('PROFILE')
+                : (universalVideoInTopBarEffective && !(settings?.hiddenBottomNavButtons || []).includes('PROFILE')
                 ? [{ id: "PROFILE" as const, label: "Profile", Icon: UserIconOutline,
                      featureId: "PROFILE_PAGE", filledOnActive: true,
                      isActive: !showStarredPage && currentLogicalTab === "PROFILE",

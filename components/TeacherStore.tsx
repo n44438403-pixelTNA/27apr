@@ -129,10 +129,10 @@ const TeacherStore: React.FC<TeacherStoreProps> = ({ user, settings, onRedeemSuc
                                 </div>
                                 <div className="flex-1">
                                     <ul className="space-y-3 mb-6">
-                                        {plan.benefits.map((benefit, idx) => (
+                                        {(plan.benefits || []).map((benefit, idx) => (
                                             <li key={idx} className="flex items-start gap-2 text-slate-700">
                                                 <CheckCircle size={18} className="text-green-500 shrink-0 mt-0.5" />
-                                                <span className="text-sm font-medium">{benefit}</span>
+                                                <span className="text-sm font-medium">{typeof benefit === 'string' ? benefit : ''}</span>
                                             </li>
                                         ))}
                                     </ul>
