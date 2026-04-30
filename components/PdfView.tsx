@@ -1282,7 +1282,7 @@ export const PdfView: React.FC<Props> = ({
 
   // --- NEW TABBED VIEW ---
   return (
-    <div ref={scrollContainerRef} onScroll={handleScroll} className={`bg-slate-50 h-screen overflow-y-auto pb-6 animate-in fade-in slide-in-from-right-8 ${isFullscreen ? 'm-0 p-0' : ''}`}>
+    <div ref={scrollContainerRef} onScroll={handleScroll} className="bg-slate-50 h-screen overflow-y-auto pb-6 animate-in fade-in slide-in-from-right-8 m-0 p-0">
        {/* Reading progress bar */}
        <div className="fixed top-0 left-0 right-0 h-1 bg-slate-200/60 z-[60] pointer-events-none">
            <div
@@ -1296,26 +1296,28 @@ export const PdfView: React.FC<Props> = ({
            onClose={() => setAlertConfig({...alertConfig, isOpen: false})}
        />
 
-       {/* HEADER */}
-       <div className={`sticky top-0 z-30 bg-white shadow-sm flex flex-col transition-all duration-300 ${!showHeader ? '-translate-y-full absolute opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'} ${isFullscreen ? 'w-full m-0 rounded-none' : 'border-b border-slate-100'}`}>
-           <div className={`flex items-center gap-3 ${isFullscreen ? 'p-2 sm:p-4' : 'p-3 sm:p-4'}`}>
-               <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full text-slate-600">
+       {/* HEADER — Lucent/Sar-Sangrah style: edge-to-edge, no manual fullscreen toggle.
+           Top row keeps only Back + Lesson title (Read All button is rendered by
+           ChunkedNotesReader inside each tab's content). Below: Notes ↔ MCQ pill
+           and the section tab strip (Concept / Retention / Extended / Teaching
+           Strategy) — both ALWAYS visible so the student can switch from anywhere
+           without hunting for a fullscreen toggle. */}
+       <div className={`sticky top-0 z-30 bg-white shadow-sm flex flex-col transition-all duration-300 w-full m-0 rounded-none ${!showHeader ? '-translate-y-full absolute opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
+           <div className="flex items-center gap-2 p-2 sm:p-3">
+               <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full text-slate-600 shrink-0">
                    <ArrowLeft size={20} />
                </button>
-               <div className="flex-1">
-                   <h3 className="font-bold text-slate-800 leading-tight line-clamp-1">{chapter.title}</h3>
-                   <div className="flex gap-2 mt-1">
+               <div className="flex-1 min-w-0">
+                   <h3 className="font-bold text-slate-800 leading-tight line-clamp-1 text-sm sm:text-base">{chapter.title}</h3>
+                   <div className="flex gap-1.5 mt-0.5">
                      <button onClick={() => setSyllabusMode('SCHOOL')} className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all ${syllabusMode === 'SCHOOL' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>School</button>
                      <button onClick={() => setSyllabusMode('COMPETITION')} className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all ${syllabusMode === 'COMPETITION' ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>Competition</button>
                    </div>
                </div>
-               <button onClick={toggleFullScreen} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors" title={isFullscreen ? "Exit Full Screen" : "Full Screen"}>
-                   {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-               </button>
            </div>
 
-           {/* === LUCENT-STYLE NOTES ↔ MCQ TAB SWITCH === */}
-           {onSwitchToMcq && !isFullscreen && (
+           {/* === LUCENT-STYLE NOTES ↔ MCQ TAB SWITCH (always visible) === */}
+           {onSwitchToMcq && (
                <div className="px-3 sm:px-4 pb-2 pt-1">
                    <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
                        <button
@@ -1334,8 +1336,9 @@ export const PdfView: React.FC<Props> = ({
                </div>
            )}
 
-           {/* TABS */}
-           {!isFullscreen && (
+           {/* TABS — always visible (no fullscreen gating) so Additional Notes /
+               Teacher Strategy / Premium Notes / Concept switchers stay reachable. */}
+           {(
                <div className="flex overflow-x-auto border-t border-slate-100 scrollbar-hide">
                    {[
                        { id: 'DEEP_DIVE', label: 'Concept', icon: BookOpen, show: true },

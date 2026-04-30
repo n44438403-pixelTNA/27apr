@@ -196,12 +196,28 @@ export const FlashcardMcqView: React.FC<Props> = ({ questions, title, subtitle, 
       {/* Card area */}
       <div className="flex-1 overflow-y-auto px-4 py-5 flex items-start justify-center">
         <div className="w-full max-w-2xl space-y-3">
-          {/* Question card — tap anywhere on the question to reveal answer */}
+          {/* Question card — tap anywhere on the question to BOTH read it
+              aloud AND reveal the answer. The user requested touch-driven TTS:
+              tap question → reads question; tap answer → reads answer. We
+              keep reveal-on-tap because that's the core flashcard interaction;
+              tapping a second time toggles the answer back to hidden and
+              stops any ongoing speech. */}
           <button
             type="button"
-            onClick={() => { stopSpeech(); setAutoSpeak(null); setRevealed(r => !r); }}
+            onClick={() => {
+              if (revealed) {
+                // Second tap → hide the answer + stop speech.
+                stopSpeech();
+                setAutoSpeak(null);
+                setRevealed(false);
+              } else {
+                // First tap → reveal answer AND read the question aloud.
+                setRevealed(true);
+                playSide('q');
+              }
+            }}
             className="flashcard-card w-full text-left bg-white rounded-3xl shadow-xl border-2 border-slate-200 p-5 sm:p-7 active:scale-[0.99] transition-transform min-h-[200px] flex flex-col"
-            title="Tap karke answer dekhein"
+            title="Tap karke question sune + answer dekhein"
           >
             <div className="flex items-start justify-between gap-3 mb-4">
               <span className="bg-indigo-100 text-indigo-700 text-[11px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider">
@@ -258,21 +274,28 @@ export const FlashcardMcqView: React.FC<Props> = ({ questions, title, subtitle, 
             </button>
           </div>
 
-          {/* Answer reveal — only visible after tapping the question card */}
+          {/* Answer reveal — only visible after tapping the question card.
+              Whole card is now tappable: tap = read the answer aloud (toggle
+              off if it's already speaking). The small speaker icon stays as
+              a visible hint of the touch behaviour. */}
           {revealed && (
-            <div className="flashcard-card bg-white rounded-3xl shadow-lg border-2 border-emerald-200 p-5 animate-in fade-in slide-in-from-bottom-4 duration-200">
+            <button
+              type="button"
+              onClick={() => playSide('a')}
+              className="flashcard-card w-full text-left bg-white rounded-3xl shadow-lg border-2 border-emerald-200 p-5 animate-in fade-in slide-in-from-bottom-4 duration-200 active:scale-[0.99] transition-transform"
+              title="Tap karke answer sune"
+            >
               <div className="flex items-start justify-between gap-3 mb-3">
                 <span className="bg-emerald-100 text-emerald-700 text-[11px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider">
                   Sahi Jawab
                 </span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); playSide('a'); }}
-                  className={`p-2 rounded-full shrink-0 transition ${autoSpeak === 'a' ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                <span
+                  aria-hidden="true"
+                  className={`p-2 rounded-full shrink-0 transition ${autoSpeak === 'a' ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-slate-100 text-slate-600'}`}
                   title="Answer sune"
                 >
                   {autoSpeak === 'a' ? <Square size={14} /> : <Volume2 size={14} />}
-                </button>
+                </span>
               </div>
               <div className="bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-4 mb-3">
                 <div className="flex items-start gap-3">
@@ -308,7 +331,7 @@ export const FlashcardMcqView: React.FC<Props> = ({ questions, title, subtitle, 
                   <p className="text-sm text-pink-900 leading-relaxed whitespace-pre-wrap">{currentQ.mnemonic}</p>
                 </div>
               )}
-            </div>
+            </button>
           )}
         </div>
       </div>

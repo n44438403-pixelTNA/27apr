@@ -37,6 +37,14 @@ interface Props {
   revealAnswer?: boolean;
   /** Compact single-icon variant — used by Lucent-style MCQ cards. */
   compact?: boolean;
+  /**
+   * When provided, the component renders a SINGLE small speaker icon (no
+   * Q+Ans / All pills) and speaks using this mode for the current question
+   * only — i.e. no chain through `allQuestions`. The parent decides the mode
+   * via a top-of-page toggle. Used by the Homework MCQ Practice list so each
+   * question card stays uncluttered.
+   */
+  mode?: 'qa' | 'all';
 }
 
 const stripHtml = (s: string) => (s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -52,6 +60,7 @@ export const McqSpeakButtons: React.FC<Props> = ({
   index = 0,
   revealAnswer = true,
   compact = false,
+  mode: externalMode,
 }) => {
   const [active, setActive] = useState<null | 'qa' | 'all'>(null);
   const cancelRef = useRef(false);
@@ -173,6 +182,51 @@ export const McqSpeakButtons: React.FC<Props> = ({
     'inline-flex items-center gap-1 px-2 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wide transition-colors active:scale-95';
 
   const isChainCapable = !!(allQuestions && allQuestions.length > 1);
+
+  // External-mode variant: parent picks the read mode at the top of the
+  // page (Q+ANS or ALL) and we render a single small speaker icon per
+  // question. Tap = read THIS question only using the chosen mode (no
+  // chain). Tap again to stop. Used by the Homework MCQ Practice list.
+  if (externalMode) {
+    const isPlaying = active === externalMode;
+    const handleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (isPlaying) {
+        stopAll();
+        return;
+      }
+      cancelRef.current = false;
+      stopSpeech();
+      setActive(externalMode);
+      const text = externalMode === 'qa' ? qaText : allText;
+      speakText(
+        text,
+        null,
+        1.0,
+        language,
+        () => setActive(externalMode),
+        () => setActive(null),
+      ).catch(() => setActive(null));
+    };
+    const tip = externalMode === 'qa'
+      ? (revealAnswer ? 'Question + sahi jawab sune' : 'Question sune')
+      : (revealAnswer ? 'Question + saare options + sahi jawab sune' : 'Question + saare options sune');
+    return (
+      <button
+        type="button"
+        onClick={handleClick}
+        title={tip}
+        aria-label={tip}
+        className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors active:scale-95 ${
+          isPlaying
+            ? 'bg-red-100 text-red-600 animate-pulse'
+            : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+        } ${className || ''}`}
+      >
+        {isPlaying ? <Square size={iconSize} fill="currentColor" /> : <Volume2 size={iconSize} />}
+      </button>
+    );
+  }
 
   // Lucent-style compact variant: a single round speaker icon button that
   // reads the question (and the answer iff revealAnswer === true). Used by

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Volume2, Square, BookOpen, Star } from 'lucide-react';
+import { Volume2, Square, BookOpen, Star, Palette, Check } from 'lucide-react';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
 import { splitIntoTopics, NotesTopic as Topic } from '../utils/notesSplitter';
 
@@ -11,6 +11,54 @@ const getStoredFontIdx = (): number => {
     const v = parseInt(localStorage.getItem(FONT_SIZE_KEY) || '1', 10);
     return isNaN(v) || v < 0 || v > 3 ? 1 : v;
   } catch { return 1; }
+};
+
+/* ─────────  Reading-text colour palettes (per app theme)  ─────────
+   For each theme we curate 6 colours that stay readable on that theme's
+   background. The first entry of every palette is the recommended one
+   (marked with a ★ in the picker UI). Selection is persisted per-theme
+   so switching dark↔light keeps a sensible default in each theme.        */
+type ColorSwatch = { hex: string; name: string };
+const READING_PALETTE: Record<'light' | 'dark' | 'blue', ColorSwatch[]> = {
+  light: [
+    { hex: '#1e293b', name: 'Slate' },     // recommended
+    { hex: '#0f172a', name: 'Ink' },
+    { hex: '#1e3a8a', name: 'Navy' },
+    { hex: '#3730a3', name: 'Indigo' },
+    { hex: '#065f46', name: 'Forest' },
+    { hex: '#7c2d12', name: 'Sienna' },
+  ],
+  dark: [
+    { hex: '#f1f5f9', name: 'Soft White' }, // recommended
+    { hex: '#fde68a', name: 'Amber' },
+    { hex: '#a7f3d0', name: 'Mint' },
+    { hex: '#bae6fd', name: 'Sky' },
+    { hex: '#fecaca', name: 'Rose' },
+    { hex: '#ffffff', name: 'Pure White' },
+  ],
+  blue: [
+    { hex: '#e0f2fe', name: 'Ice' },        // recommended
+    { hex: '#ffffff', name: 'White' },
+    { hex: '#fde68a', name: 'Amber' },
+    { hex: '#a7f3d0', name: 'Mint' },
+    { hex: '#fbcfe8', name: 'Pink' },
+    { hex: '#c7d2fe', name: 'Lavender' },
+  ],
+};
+const COLOR_KEY = (mode: 'light' | 'dark' | 'blue') => `nst_text_color_${mode}`;
+const detectMode = (): 'light' | 'dark' | 'blue' => {
+  if (typeof document === 'undefined') return 'light';
+  const cls = document.documentElement.classList;
+  if (cls.contains('dark-mode-blue')) return 'blue';
+  if (cls.contains('dark-mode')) return 'dark';
+  return 'light';
+};
+const getStoredColor = (mode: 'light' | 'dark' | 'blue'): string => {
+  try {
+    const v = localStorage.getItem(COLOR_KEY(mode));
+    if (v && /^#[0-9a-f]{6}$/i.test(v)) return v;
+  } catch {}
+  return READING_PALETTE[mode][0].hex;
 };
 
 interface Props {
@@ -63,6 +111,29 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   const [fontIdx, setFontIdx] = useState<number>(getStoredFontIdx);
   const [showFontMenu, setShowFontMenu] = useState(false);
   const fontSize = FONT_SIZES[fontIdx];
+
+  // Reading text colour — per active theme. We watch the <html> class list so
+  // when the user flips Light/Dark/Blue from the Settings sheet, the picker
+  // and applied colour update instantly without a remount.
+  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'blue'>(detectMode);
+  const [textColor, setTextColor] = useState<string>(() => getStoredColor(detectMode()));
+  const [showColorMenu, setShowColorMenu] = useState(false);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const obs = new MutationObserver(() => {
+      const m = detectMode();
+      setThemeMode(prev => (prev !== m ? m : prev));
+    });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
+  // When theme flips, restore that theme's saved colour (or its default).
+  useEffect(() => { setTextColor(getStoredColor(themeMode)); }, [themeMode]);
+  const pickColor = (hex: string) => {
+    setTextColor(hex);
+    try { localStorage.setItem(COLOR_KEY(themeMode), hex); } catch {}
+    try { if (navigator.vibrate) navigator.vibrate(20); } catch {}
+  };
 
   const changeFontSize = (delta: number) => {
     setFontIdx(prev => {
@@ -268,6 +339,61 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                 </button>
               </div>
 
+              {/* Reading-text colour picker — opens a small palette below the
+                  bar with 6 swatches curated for the active theme. The first
+                  swatch carries a ★ (recommended) badge; the active swatch
+                  shows a ✓. Selection persists per-theme. */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowColorMenu(s => !s)}
+                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 transition flex items-center gap-1"
+                  title="Text rang chunein"
+                  aria-label="Pick text color"
+                  aria-expanded={showColorMenu}
+                >
+                  <Palette size={14} className="text-slate-600" />
+                  <span className="w-3 h-3 rounded-full border border-slate-300" style={{ backgroundColor: textColor }} />
+                </button>
+                {showColorMenu && (
+                  <>
+                    {/* Click-outside backdrop */}
+                    <div className="fixed inset-0 z-30" onClick={() => setShowColorMenu(false)} />
+                    <div className="absolute right-0 top-full mt-2 z-40 bg-white border border-slate-200 rounded-xl shadow-lg p-3 w-56 animate-in fade-in slide-in-from-top-2 duration-150">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-2">
+                        Text Color · {themeMode === 'blue' ? 'Blue' : themeMode === 'dark' ? 'Dark' : 'Light'} mode
+                      </p>
+                      <div className="grid grid-cols-6 gap-2">
+                        {READING_PALETTE[themeMode].map((sw, i) => {
+                          const isSelected = sw.hex.toLowerCase() === textColor.toLowerCase();
+                          const isRecommended = i === 0;
+                          return (
+                            <button
+                              key={sw.hex}
+                              type="button"
+                              onClick={() => { pickColor(sw.hex); }}
+                              title={`${sw.name}${isRecommended ? ' · Recommended' : ''}`}
+                              className={`relative aspect-square rounded-lg border-2 transition-all active:scale-90 ${isSelected ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-slate-200 hover:border-slate-400'}`}
+                              style={{ backgroundColor: sw.hex }}
+                            >
+                              {isSelected && (
+                                <span className="absolute inset-0 flex items-center justify-center">
+                                  <Check size={12} className="text-white drop-shadow" strokeWidth={4} />
+                                </span>
+                              )}
+                              {isRecommended && !isSelected && (
+                                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-400 text-[8px] font-black text-white flex items-center justify-center shadow">★</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-2">★ = recommended for this mode</p>
+                    </div>
+                  </>
+                )}
+              </div>
+
               <button
                 onClick={() => {
                   if (isReading) {
@@ -340,8 +466,14 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                 className="w-full text-left pl-4 pr-10 py-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
               >
                 <p
-                  className={`leading-relaxed ${isActive ? 'text-yellow-900 font-semibold' : 'text-slate-800'}`}
-                  style={{ fontSize: `${fontSize}px` }}
+                  className={`leading-relaxed ${isActive ? 'text-yellow-900 font-semibold' : ''}`}
+                  style={{
+                    fontSize: `${fontSize}px`,
+                    // The active (currently-being-read) line keeps its yellow
+                    // highlight colour for clarity. Other lines use the
+                    // student's chosen palette colour for the active theme.
+                    color: isActive ? undefined : textColor,
+                  }}
                 >
                   <span className={`font-bold mr-1.5 ${starred ? 'text-amber-400' : 'text-indigo-400'}`}>•</span>
                   {topic.text}

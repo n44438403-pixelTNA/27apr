@@ -433,7 +433,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [newHomeworkBulk, setNewHomeworkBulk] = useState<string | undefined>(undefined);
 
   // --- LUCENT NOTES STATE (special form when targetSubject === 'lucent') ---
-  const LUCENT_SUBJECT_OPTIONS: { id: string; name: string }[] = [
+  // Built-in subject categories (always available) plus admin-defined custom books
+  // (settings.customBooks). Custom books appear as page-wise subject options too.
+  const LUCENT_SUBJECT_OPTIONS_BASE: { id: string; name: string }[] = [
     { id: 'biology', name: 'जीव विज्ञान (Biology)' },
     { id: 'chemistry', name: 'रसायन शास्त्र (Chemistry)' },
     { id: 'physics', name: 'भौतिकी (Physics)' },
@@ -445,6 +447,11 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
     { id: 'speedySocialScience', name: 'Speedy Social Science (Page-wise)' },
     { id: 'sarSangrah', name: 'Sar Sangrah (Page-wise)' },
   ];
+  // NOTE: customBooksList / LUCENT_SUBJECT_OPTIONS / PAGE_WISE_SUBJECT_IDS are
+  // derived from `localSettings` and therefore declared *after* the
+  // `useState(localSettings)` line below — referencing them here would hit a
+  // temporal-dead-zone ReferenceError.
+
   // Class targets a Lucent book can be assigned to. COMPETITION = original
   // Competition mode (default). Class 6-12 entries appear in that class's
   // chapter list using the same page-wise viewer (notes + MCQ only — video/
@@ -644,6 +651,18 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       enableTop3Gold: true
     }
   });
+
+  // Derived from localSettings — declared here (after useState) to avoid TDZ.
+  // Custom books appear as additional page-wise subject options across the UI.
+  const customBooksList = (localSettings.customBooks || []).filter(b => b && b.id && b.name);
+  const LUCENT_SUBJECT_OPTIONS: { id: string; name: string }[] = [
+    ...LUCENT_SUBJECT_OPTIONS_BASE,
+    ...customBooksList.map(b => ({ id: b.id, name: `${b.name} (Page-wise)` })),
+  ];
+  const PAGE_WISE_SUBJECT_IDS: string[] = [
+    'sarSangrah', 'speedyScience', 'speedySocialScience',
+    ...customBooksList.map(b => b.id),
+  ];
 
   // SYNC WITH PROP UPDATES (Ensure Admin sees live changes)
   // NOTE: Local edits take precedence over incoming cloud sync so that
@@ -6780,6 +6799,109 @@ Statement 2"
                               <div><label className="text-xs font-bold uppercase text-slate-600">AI Assistant Name</label><input type="text" value={localSettings.aiName || 'IIC AI'} onChange={e => setLocalSettings({...localSettings, aiName: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="IIC AI" /></div>
                           </div>
 
+                          {/* Developer Name — appears as "Developed by …" on the loading screen and student profile page. */}
+                          <div>
+                              <label className="text-xs font-bold uppercase text-slate-600">Developer Name</label>
+                              <input
+                                  type="text"
+                                  value={localSettings.developerName ?? 'Nadim Anwar'}
+                                  onChange={e => setLocalSettings({...localSettings, developerName: e.target.value})}
+                                  className="w-full p-3 border rounded-xl"
+                                  placeholder="Nadim Anwar"
+                              />
+                              <p className="text-[10px] text-slate-500 mt-1">Loading screen aur Profile page par "Developed by …" me dikhta hai.</p>
+                          </div>
+
+                          {/* === Custom Books — admin can add new "Sar Sangrah / Speedy" jaisi books ===
+                              Har book ek subject ban jaata hai jo student dashboard pe page-wise notes/MCQ
+                              dikhata hai (date-wise hierarchy ki jagah). Same notes Homework page pe bhi
+                              date-wise dikhte hain (kyunki har homework item ka apna date hota hai). */}
+                          <div className="bg-gradient-to-br from-rose-50 to-amber-50 border border-rose-200 rounded-xl p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                  <label className="text-xs font-bold uppercase text-rose-700">📚 Custom Books (Sar Sangrah / Speedy ki tarah)</label>
+                                  <span className="text-[10px] font-bold text-rose-700 bg-white px-2 py-0.5 rounded-full border border-rose-200">
+                                      {customBooksList.length}
+                                  </span>
+                              </div>
+                              <p className="text-[10px] text-rose-700 mb-2">
+                                  Naya book add karein (e.g. "Lucent GK 2024", "Ghatna Chakra"). Yeh student ke
+                                  Homework Manager me Target Subject ke andar option ban jaata hai aur student
+                                  dashboard me page-wise list dikhata hai.
+                              </p>
+                              <div className="space-y-2">
+                                  {customBooksList.map((b, idx) => (
+                                      <div key={b.id + '_' + idx} className="flex items-center gap-2 bg-white border border-rose-200 rounded-lg p-2">
+                                          <BookOpen size={16} className="text-rose-500 shrink-0" />
+                                          <input
+                                              type="text"
+                                              value={b.name}
+                                              onChange={e => {
+                                                  const next = [...(localSettings.customBooks || [])];
+                                                  next[idx] = { ...next[idx], name: e.target.value };
+                                                  setLocalSettings({ ...localSettings, customBooks: next });
+                                              }}
+                                              className="flex-1 text-sm font-bold text-slate-700 bg-transparent border-0 outline-none focus:ring-0"
+                                              placeholder="Book name"
+                                          />
+                                          <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{b.id}</span>
+                                          <button
+                                              type="button"
+                                              onClick={() => {
+                                                  if (!confirm(`"${b.name}" book ko hata dein?\n\nHomework items jo isse linked hain woh waise hi rahenge — sirf book option remove hoga.`)) return;
+                                                  const next = (localSettings.customBooks || []).filter((_, i) => i !== idx);
+                                                  setLocalSettings({ ...localSettings, customBooks: next });
+                                              }}
+                                              className="p-1 text-rose-600 hover:bg-rose-50 rounded"
+                                              aria-label="Remove book"
+                                          >
+                                              <Trash2 size={14} />
+                                          </button>
+                                      </div>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-2">
+                                  <input
+                                      type="text"
+                                      id="newCustomBookName"
+                                      placeholder="New book name (e.g. Ghatna Chakra)"
+                                      className="flex-1 p-2 border border-rose-200 rounded-lg text-sm bg-white outline-none focus:border-rose-400"
+                                      onKeyDown={e => {
+                                          if (e.key === 'Enter') {
+                                              e.preventDefault();
+                                              (document.getElementById('addCustomBookBtn') as HTMLButtonElement | null)?.click();
+                                          }
+                                      }}
+                                  />
+                                  <button
+                                      id="addCustomBookBtn"
+                                      type="button"
+                                      onClick={() => {
+                                          const input = document.getElementById('newCustomBookName') as HTMLInputElement | null;
+                                          const raw = (input?.value || '').trim();
+                                          if (!raw) return;
+                                          // Generate stable, unique id from the name. Reserved ids ko block karein.
+                                          const reserved = new Set(['mcq','sarSangrah','speedyScience','speedySocialScience','lucent','none']);
+                                          let baseId = ('book_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'book_' + Date.now();
+                                          let id = baseId;
+                                          let n = 2;
+                                          const existingIds = new Set((localSettings.customBooks || []).map(x => x.id));
+                                          while (existingIds.has(id) || reserved.has(id)) {
+                                              id = `${baseId}_${n++}`;
+                                          }
+                                          const next = [...(localSettings.customBooks || []), { id, name: raw }];
+                                          setLocalSettings({ ...localSettings, customBooks: next });
+                                          if (input) input.value = '';
+                                      }}
+                                      className="bg-rose-600 hover:bg-rose-700 text-white font-black text-xs px-3 py-2 rounded-lg shadow-sm active:scale-95"
+                                  >
+                                      + Add Book
+                                  </button>
+                              </div>
+                              <p className="text-[10px] text-slate-500 mt-2">
+                                  💡 Save Settings dabane ke baad book Homework Manager → Target Subject me dikhta hai.
+                              </p>
+                          </div>
+
                           {/* NEW: Loading-screen short-name font-size slider (24-120px) */}
                           <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-3">
                               <div className="flex items-center justify-between mb-2">
@@ -8887,6 +9009,13 @@ Statement 2"
                                   <option value="speedySocialScience">Speedy Social Science</option>
                                   <option value="speedyScience">Speedy Science</option>
                                   <option value="lucent">Lucent GK (Page-wise Notes)</option>
+                                  {customBooksList.length > 0 && (
+                                      <optgroup label="Custom Books (Page-wise)">
+                                          {customBooksList.map(b => (
+                                              <option key={b.id} value={b.id}>{b.name}</option>
+                                          ))}
+                                      </optgroup>
+                                  )}
                               </select>
                           </div>
                           {newHomework.targetSubject === 'lucent' ? (
@@ -9123,7 +9252,7 @@ Statement 2"
                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Lesson Name / Title</label>
                                       <input type="text" value={newHomework.title} onChange={e => setNewHomework({...newHomework, title: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="e.g. Science Chapter 1 Review" />
                                   </div>
-                                  {(newHomework.targetSubject === 'sarSangrah' || newHomework.targetSubject === 'speedyScience' || newHomework.targetSubject === 'speedySocialScience') && (
+                                  {PAGE_WISE_SUBJECT_IDS.includes(newHomework.targetSubject) && (
                                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                                           <label className="text-[10px] font-bold text-amber-700 uppercase block mb-1 flex items-center gap-1">
                                               📖 Page Number (Optional — for page-wise sorting)
@@ -9241,7 +9370,7 @@ Statement 2"
                                               .filter(m => m.question.trim() && m.options.some(o => o.trim()))
                                               .map(m => ({ question: m.question.trim(), options: m.options, correctAnswer: m.correctAnswer, topic: 'General' }));
                                           parsedMcqs = [...structuredMcqs, ...parsedMcqs];
-                                          const isPageWiseSubject = ['sarSangrah', 'speedyScience', 'speedySocialScience'].includes(newHomework.targetSubject);
+                                          const isPageWiseSubject = PAGE_WISE_SUBJECT_IDS.includes(newHomework.targetSubject);
                                           const hwItem: any = {
                                               id: Date.now().toString(),
                                               date: newHomework.date,

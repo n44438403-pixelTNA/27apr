@@ -135,6 +135,29 @@ export const getSubjectsList = (classLevel: string, stream: string | null, board
           pool.sarSangrah,
           pool.mcq,
       ].filter(Boolean);
+
+      // Admin-defined Custom Books (Sar Sangrah / Speedy ki tarah). Stored under
+      // SystemSettings.customBooks (mirrored to localStorage for fast read).
+      // Each becomes a subject card on the Competition home, opening a flat
+      // page-wise list of notes/MCQs in StudentDashboard.
+      try {
+          const settingsRaw = localStorage.getItem('nst_system_settings');
+          const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
+          const customBooks: Array<{ id: string; name: string }> = Array.isArray(settingsObj?.customBooks)
+              ? settingsObj.customBooks
+              : [];
+          const palette = ['bg-fuchsia-50 text-fuchsia-600', 'bg-emerald-50 text-emerald-600', 'bg-sky-50 text-sky-600', 'bg-yellow-50 text-yellow-600', 'bg-violet-50 text-violet-600'];
+          customBooks.forEach((b, i) => {
+              if (b && b.id && b.name) {
+                  selectedSubjects.push({
+                      id: b.id,
+                      name: b.name,
+                      icon: 'book',
+                      color: palette[i % palette.length],
+                  });
+              }
+          });
+      } catch (e) { /* ignore */ }
   }
   else if (!isSenior) {
       const isClass9or10 = ['9', '10'].includes(classLevel);

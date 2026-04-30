@@ -76,6 +76,19 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
     }
   });
 
+  // Admin-controlled developer name shown in the bottom "Developed by …" badge.
+  // Reads from systemSettings.developerName (stored in localStorage by Admin > General Settings).
+  const [developerName] = useState<string>(() => {
+    try {
+      const settingsRaw = localStorage.getItem('nst_system_settings');
+      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
+      const name = (settingsObj?.developerName ?? '').toString().trim();
+      return name || 'Nadim Anwar';
+    } catch {
+      return 'Nadim Anwar';
+    }
+  });
+
   // Admin-controlled font-size for the splash short name (in pixels).
   // Reads from systemSettings.appShortNameSize. Clamped to [24, 120].
   const [appNameSize] = useState<number>(() => {
@@ -325,7 +338,7 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
           </div>
           <div className="flex items-center justify-center gap-2 mt-1">
             <p className={`text-[11px] font-bold ${t.badge} tracking-wide`}>
-              Developed by Nadim Anwar
+              Developed by {developerName}
             </p>
             <span className={t.badge}>|</span>
             <p className={`text-[11px] ${t.badge} font-mono font-bold tracking-widest`}>

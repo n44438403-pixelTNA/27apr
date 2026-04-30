@@ -33,6 +33,7 @@ import {
   APP_VERSION,
 } from "../constants";
 import { ALL_FEATURES } from "../utils/featureRegistry";
+import { useAppLang, tApp } from "../utils/appLang";
 import { isHomeSectionVisible } from "../utils/homeSections";
 import { checkFeatureAccess } from "../utils/permissionUtils";
 import { downloadAsMHTML } from "../utils/downloadUtils";
@@ -947,8 +948,16 @@ export const StudentDashboard: React.FC<Props> = ({
   }, []);
 
   useEffect(() => {
-    // Reset top bar visibility when navigating
-    setIsTopBarHidden(false);
+    // Auto-hide the global IIC/credits/Hey-Nadim top bar whenever the student
+    // enters the chapter content PLAYER (PDF/MCQ/VIDEO/AUDIO). This gives the
+    // notes view a true edge-to-edge Lucent/Sar-Sangrah feel — back button +
+    // lesson title + Read All sit at the very top of the viewport instead of
+    // being pushed below ~150px of dashboard chrome. Reset to visible the
+    // moment we navigate elsewhere (back to syllabus list, home, etc).
+    const inPlayer =
+      contentViewStep === 'PLAYER' &&
+      (activeTab === 'PDF' || activeTab === 'MCQ' || activeTab === 'VIDEO' || (activeTab as any) === 'AUDIO');
+    setIsTopBarHidden(inPlayer);
   }, [activeTab, contentViewStep]);
 
   useEffect(() => {
@@ -999,6 +1008,7 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showAiModal, setShowAiModal] = useState(false);
   const [showHomeworkHistory, setShowHomeworkHistory] = useState(false);
   const [showSettingsSheet, setShowSettingsSheet] = useState(false);
+  const [appLang, setAppLangState] = useAppLang();
   const [homeworkSubjectView, setHomeworkSubjectView] = useState<string | null>(null);
   const [lucentCategoryView, setLucentCategoryView] = useState(false);
   // Page-wise notes viewer for admin-added Lucent lessons
@@ -1048,6 +1058,13 @@ export const StudentDashboard: React.FC<Props> = ({
   const [hwYear, setHwYear] = useState<number | null>(null);
   const [hwMonth, setHwMonth] = useState<number | null>(null);
   const [hwWeek, setHwWeek] = useState<number | null>(null);
+  // For page-wise book subjects (Sar Sangrah / Speedy / Custom Books) student
+  // can toggle between flat page-number list ("page") and date-based hierarchy
+  // ("date"). Default = page (because home subject card opens the book view).
+  const [hwBookViewMode, setHwBookViewMode] = useState<'page' | 'date'>('page');
+  // Optional Year / Month filter on the page-wise list. null = show all.
+  const [bookFilterYear, setBookFilterYear] = useState<number | null>(null);
+  const [bookFilterMonth, setBookFilterMonth] = useState<number | null>(null);
   const [hwActiveHwId, setHwActiveHwId] = useState<string | null>(null);
   // Notes/MCQ split view: 'choose' shows a chooser overlay, 'notes' shows notes (with optional MCQ switch button),
   // 'mcq' shows MCQ-only view. Defaults to 'notes' when only notes exist, 'mcq' when only MCQ.
@@ -2572,7 +2589,17 @@ export const StudentDashboard: React.FC<Props> = ({
     handleUserUpdate({ ...user, inbox: updatedInbox });
   };
 
-  const HOMEWORK_SUBJECTS = ['mcq', 'sarSangrah', 'speedySocialScience', 'speedyScience'];
+  // Built-in subjects whose homework lives behind the "Subject view" (vs. dated history).
+  const HOMEWORK_SUBJECTS_BASE = ['mcq', 'sarSangrah', 'speedySocialScience', 'speedyScience'];
+  // Admin-added custom books (stored in settings.customBooks). They behave just like
+  // Sar Sangrah / Speedy — page-wise list of notes/MCQs + same items also visible on
+  // the date-wise Homework page (because every entry has a `date`).
+  const customBooksFromSettings: { id: string; name: string }[] = ((settings as any)?.customBooks || [])
+    .filter((b: any) => b && b.id && b.name);
+  const HOMEWORK_SUBJECTS = [...HOMEWORK_SUBJECTS_BASE, ...customBooksFromSettings.map(b => b.id)];
+  // Subjects that show a flat page-wise list (sorted by pageNo) in their book view,
+  // skipping the Year / Month / Week date hierarchy used for MCQ/standard homework.
+  const PAGE_WISE_SUBJECTS = new Set<string>(['sarSangrah', 'speedySocialScience', 'speedyScience', ...customBooksFromSettings.map(b => b.id)]);
 
   const handleContentSubjectSelect = (subject: Subject) => {
     setSelectedSubject(subject);
@@ -2728,13 +2755,15 @@ export const StudentDashboard: React.FC<Props> = ({
       }
     };
 
-    // HOMEWORK SUBJECT VIEW (MCQ, Sar Sangrah, Speedy Social Science, Speedy Science)
+    // HOMEWORK SUBJECT VIEW (MCQ, Sar Sangrah, Speedy Social Science, Speedy Science, custom books)
     if (homeworkSubjectView && contentViewStep === "SUBJECTS") {
       const subjectLabel: Record<string, string> = {
         mcq: 'MCQ Practice',
         sarSangrah: 'Sar Sangrah',
         speedySocialScience: 'Speedy Social Science',
         speedyScience: 'Speedy Science',
+        // Custom book labels — pulled live from admin settings.
+        ...Object.fromEntries(customBooksFromSettings.map(b => [b.id, b.name])),
       };
       const SUBJECT_THEME: Record<string, { bg: string; bgSoft: string; text: string; textDeep: string; border: string; ring: string; btn: string; btnHover: string; chip: string; }> = {
         mcq: { bg: 'bg-green-50', bgSoft: 'bg-green-100', text: 'text-green-600', textDeep: 'text-green-800', border: 'border-green-200', ring: 'ring-green-300', btn: 'bg-green-600', btnHover: 'hover:bg-green-700', chip: 'bg-green-100 text-green-700' },
@@ -2742,15 +2771,31 @@ export const StudentDashboard: React.FC<Props> = ({
         speedySocialScience: { bg: 'bg-orange-50', bgSoft: 'bg-orange-100', text: 'text-orange-600', textDeep: 'text-orange-800', border: 'border-orange-200', ring: 'ring-orange-300', btn: 'bg-orange-600', btnHover: 'hover:bg-orange-700', chip: 'bg-orange-100 text-orange-700' },
         speedyScience: { bg: 'bg-blue-50', bgSoft: 'bg-blue-100', text: 'text-blue-600', textDeep: 'text-blue-800', border: 'border-blue-200', ring: 'ring-blue-300', btn: 'bg-blue-600', btnHover: 'hover:bg-blue-700', chip: 'bg-blue-100 text-blue-700' },
       };
-      const theme = SUBJECT_THEME[homeworkSubjectView] || SUBJECT_THEME.mcq;
+      // Custom books fall back to an indigo theme if not pre-configured.
+      const CUSTOM_BOOK_THEME = { bg: 'bg-indigo-50', bgSoft: 'bg-indigo-100', text: 'text-indigo-600', textDeep: 'text-indigo-800', border: 'border-indigo-200', ring: 'ring-indigo-300', btn: 'bg-indigo-600', btnHover: 'hover:bg-indigo-700', chip: 'bg-indigo-100 text-indigo-700' };
+      const theme = SUBJECT_THEME[homeworkSubjectView] || CUSTOM_BOOK_THEME;
+      const isPageWiseSubject = PAGE_WISE_SUBJECTS.has(homeworkSubjectView);
 
       const getWeekOfMonth = (d: Date) => Math.floor((d.getDate() - 1) / 7) + 1;
       const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
       // Ascending order so "Next" goes oldest → newest naturally
+      // For page-wise subjects (Sar Sangrah / Speedy / custom books) sort by pageNo
+      // ascending so flat list and Prev/Next reading flow follow the printed book.
+      // Fallback to date for entries missing a pageNo. MCQ etc. stay date-asc.
+      const _toPage = (hw: any) => {
+        const n = parseInt(String(hw.pageNo ?? ''), 10);
+        return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+      };
       const filteredHw = (settings?.homework || [])
         .filter(hw => hw.targetSubject === homeworkSubjectView)
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        .sort((a, b) => {
+          if (isPageWiseSubject) {
+            const pa = _toPage(a), pb = _toPage(b);
+            if (pa !== pb) return pa - pb;
+          }
+          return new Date(a.date).getTime() - new Date(b.date).getTime();
+        });
 
       const goBack = () => {
         if (hwActiveHwId) {
@@ -3007,7 +3052,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       {settings?.appName || 'IIC'}
                     </h2>
                     <p className="mt-1 text-[11px] text-slate-500 font-semibold">
-                      Developed by Nadim Anwar
+                      Developed by {settings?.developerName?.trim() || 'Nadim Anwar'}
                     </p>
                     <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
                       v{APP_VERSION}
@@ -3283,6 +3328,13 @@ export const StudentDashboard: React.FC<Props> = ({
                       </div>
                     );
                   })()}
+                  {/* TTS mode is now AUTO-tied to the practice mode chosen above:
+                      • MCQ (Khud Banao)  → 'all' so the speaker reads question +
+                        every option (answer hidden — student gets to attempt).
+                      • Q&A (Sidha Answer) → 'qa' so the speaker reads question +
+                        sahi jawab directly.
+                      Flashcard mode launches FlashcardMcqView where tap-to-read
+                      lives on the cards themselves. No manual toggle needed. */}
                   <div className="space-y-3">
                     {activeHw.parsedMcqs!.map((mcq, qi) => {
                       const ansKey = `${hwKey}_${qi}`;
@@ -3293,6 +3345,8 @@ export const StudentDashboard: React.FC<Props> = ({
                       // any tap. The student can flip to Khud Banao any time to actually quiz.
                       const isRevealMode = hwMode === 'reveal';
                       const showResult = isRevealMode || selected !== undefined;
+                      // Per-question speaker mode is derived from practice mode.
+                      const cardTtsMode: 'qa' | 'all' = isRevealMode ? 'qa' : 'all';
                       return (
                         <div key={qi} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
                           <div className="flex items-start justify-between gap-2 mb-3">
@@ -3302,8 +3356,7 @@ export const StudentDashboard: React.FC<Props> = ({
                               options={mcq.options}
                               correctAnswer={mcq.correctAnswer}
                               className="shrink-0"
-                              allQuestions={(activeHw?.parsedMcqs || []) as any}
-                              index={qi}
+                              mode={cardTtsMode}
                             />
                           </div>
                           <div className="space-y-2">
@@ -3314,7 +3367,28 @@ export const StudentDashboard: React.FC<Props> = ({
                                 <button
                                   key={oi}
                                   disabled={isRevealMode}
-                                  onClick={() => { if (!isRevealMode && selected === undefined) setHwAnswers(prev => ({ ...prev, [ansKey]: oi })); }}
+                                  onClick={() => {
+                                    if (isRevealMode || selected !== undefined) return;
+                                    setHwAnswers(prev => ({ ...prev, [ansKey]: oi }));
+                                    // Voice feedback on a wrong choice — speaks the
+                                    // correct answer in Hinglish so the student gets
+                                    // immediate audible confirmation. Right answer stays
+                                    // silent (the green tick + colour change is enough).
+                                    if (!isCorrect) {
+                                      const correctLetter = String.fromCharCode(65 + mcq.correctAnswer);
+                                      const correctText = (mcq.options[mcq.correctAnswer] || '')
+                                        .replace(/<[^>]+>/g, ' ')
+                                        .replace(/\s+/g, ' ')
+                                        .trim();
+                                      stopSpeech();
+                                      speakText(
+                                        `Galat answer. Sahi answer ye hai: Option ${correctLetter}, ${correctText}.`,
+                                        null,
+                                        1.0,
+                                        'hi-IN',
+                                      ).catch(() => {});
+                                    }
+                                  }}
                                   className={`w-full text-left text-sm px-4 py-2.5 rounded-xl border-2 transition-all font-medium ${showResult
                                     ? (isCorrect ? 'bg-green-50 border-green-400 text-green-800 font-bold'
                                       : isSelected ? 'bg-red-50 border-red-400 text-red-800'
@@ -3623,46 +3697,278 @@ export const StudentDashboard: React.FC<Props> = ({
         );
       }
 
-      // ============== ROOT YEAR LIST ==============
-      const yearMap = new Map<number, number>();
-      filteredHw.forEach(hw => {
-        const y = new Date(hw.date).getFullYear();
-        yearMap.set(y, (yearMap.get(y) || 0) + 1);
+      // ============== ROOT FLAT PAGE-WISE LIST (Sar Sangrah / Speedy / Custom Books) ==============
+      // For book subjects students expect a flat list ordered by page number — like
+      // flipping through the printed book — instead of date-based Year/Month/Week
+      // navigation used for MCQ and standard homework. Items without a pageNo are
+      // appended at the end in date order so legacy entries are still reachable.
+      // A top toggle lets the student switch to "By Date" (Year → Month → notes
+      // sorted by date) — useful when reading the same notes through the
+      // Homework page mental model.
+      const renderBookViewToggle = () => (
+        <div className={`bg-white border-2 ${theme.border} rounded-2xl p-1 flex gap-1 mb-4 shadow-sm`}>
+          <button
+            onClick={() => setHwBookViewMode('page')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${hwBookViewMode === 'page' ? `${theme.btn} text-white shadow` : `${theme.text} hover:${theme.bgSoft}`}`}
+          >
+            <BookOpen size={14} /> By Page
+          </button>
+          <button
+            onClick={() => setHwBookViewMode('date')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${hwBookViewMode === 'date' ? `${theme.btn} text-white shadow` : `${theme.text} hover:${theme.bgSoft}`}`}
+          >
+            <Calendar size={14} /> By Date
+          </button>
+        </div>
+      );
+
+      if (isPageWiseSubject && hwBookViewMode === 'page' && hwYear === null && hwMonth === null) {
+        // BY PAGE shows ALL pages of the book sorted by pageNo. Year/Month
+        // filter lives in BY DATE mode (where it makes contextual sense).
+        const withPage = filteredHw.filter(hw => {
+          const n = parseInt(String((hw as any).pageNo ?? ''), 10);
+          return Number.isFinite(n);
+        });
+        const withoutPage = filteredHw.filter(hw => {
+          const n = parseInt(String((hw as any).pageNo ?? ''), 10);
+          return !Number.isFinite(n);
+        });
+
+        return (
+          <div className={`min-h-[100dvh] ${theme.bg} p-4 pt-2`}>
+            <div className="max-w-3xl mx-auto pb-8 animate-in fade-in">
+              <div className="flex items-center gap-3 mb-4">
+                <button onClick={goBack} className={`${theme.bgSoft} p-2 rounded-full ${theme.text}`} aria-label="Back">
+                  <ChevronRight size={18} className="rotate-180" />
+                </button>
+                <div className="flex-1 min-w-0">
+                  <h2 className={`text-xl font-black ${theme.textDeep} truncate`}>{subjectLabel[homeworkSubjectView] || homeworkSubjectView}</h2>
+                  <p className="text-[11px] text-slate-500 font-bold mt-0.5">
+                    📖 Page-wise · {filteredHw.length} {filteredHw.length === 1 ? 'note' : 'notes'}
+                  </p>
+                </div>
+              </div>
+              {renderBookViewToggle()}
+
+              {filteredHw.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+                  <BookOpen size={36} className={`${theme.text} mx-auto mb-2 opacity-60`} />
+                  <p className="text-sm font-bold text-slate-600">Abhi koi note add nahi hua</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Admin jab is book me page add karega, yahaan dikhega.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {withPage.map((hw) => {
+                    const pageNum = parseInt(String((hw as any).pageNo ?? ''), 10);
+                    const mcqCount = Array.isArray((hw as any).mcqs) ? (hw as any).mcqs.length : 0;
+                    const d = new Date(hw.date);
+                    const monthYear = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+                    return (
+                      <button
+                        key={hw.id}
+                        onClick={() => setHwActiveHwId(hw.id || null)}
+                        className={`w-full bg-white border-2 ${theme.border} rounded-2xl p-3 text-left hover:shadow-md transition-all active:scale-[0.99] flex items-center gap-3`}
+                      >
+                        <div className={`${theme.bgSoft} ${theme.textDeep} w-14 h-14 rounded-xl shrink-0 flex flex-col items-center justify-center`}>
+                          <span className="text-[9px] font-bold uppercase tracking-wider opacity-70">Page</span>
+                          <span className="text-lg font-black leading-none">{pageNum}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-black ${theme.textDeep} truncate`}>{hw.title || `Page ${pageNum}`}</p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            {mcqCount > 0 && (
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${theme.chip}`}>{mcqCount} MCQ</span>
+                            )}
+                            <span className={`text-[10px] font-bold ${theme.text} bg-slate-50 px-1.5 py-0.5 rounded`}>{monthYear}</span>
+                          </div>
+                        </div>
+                        <ChevronRight size={18} className={theme.text} />
+                      </button>
+                    );
+                  })}
+
+                  {withoutPage.length > 0 && (
+                    <>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-4 mb-1 px-1">Without page number</p>
+                      {withoutPage.map((hw) => {
+                        const mcqCount = Array.isArray((hw as any).mcqs) ? (hw as any).mcqs.length : 0;
+                        const d = new Date(hw.date);
+                        const monthYear = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+                        return (
+                          <button
+                            key={hw.id}
+                            onClick={() => setHwActiveHwId(hw.id || null)}
+                            className={`w-full bg-white border-2 border-slate-200 rounded-2xl p-3 text-left hover:shadow-md transition-all active:scale-[0.99] flex items-center gap-3`}
+                          >
+                            <div className="bg-slate-100 text-slate-600 w-14 h-14 rounded-xl shrink-0 flex items-center justify-center">
+                              <FileText size={20} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-black text-slate-700 truncate">{hw.title || 'Untitled'}</p>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                {mcqCount > 0 && (
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${theme.chip}`}>{mcqCount} MCQ</span>
+                                )}
+                                <span className={`text-[10px] font-bold ${theme.text} bg-slate-50 px-1.5 py-0.5 rounded`}>{monthYear}</span>
+                              </div>
+                            </div>
+                            <ChevronRight size={18} className="text-slate-400" />
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // ============== ROOT MONTH-YEAR LIST (flat — skips standalone Year step) ==============
+      // Earlier the BY DATE root showed a Year card → Month list → Notes. The Year
+      // step added little value when most books only have one or two years of
+      // entries. Now we render a single flat list of "Month YYYY" cards (e.g.
+      // "May 2026 — 5 notes"). Tapping a card sets BOTH hwYear and hwMonth and
+      // jumps straight to the existing month → date-sorted notes view.
+      const monthYearAvailable = (() => {
+        // Years that actually have notes (used to populate the Year filter dropdown).
+        const yearsSet = new Set<number>();
+        filteredHw.forEach(hw => yearsSet.add(new Date(hw.date).getFullYear()));
+        return Array.from(yearsSet).sort((a, b) => b - a);
+      })();
+      const monthsForFilterYear = bookFilterYear === null
+        ? Array.from(new Set(filteredHw.map(hw => new Date(hw.date).getMonth()))).sort((a, b) => a - b)
+        : Array.from(new Set(
+            filteredHw
+              .filter(hw => new Date(hw.date).getFullYear() === bookFilterYear)
+              .map(hw => new Date(hw.date).getMonth())
+          )).sort((a, b) => a - b);
+
+      const passesDateFilter = (hw: any) => {
+        const d = new Date(hw.date);
+        if (bookFilterYear !== null && d.getFullYear() !== bookFilterYear) return false;
+        if (bookFilterMonth !== null && d.getMonth() !== bookFilterMonth) return false;
+        return true;
+      };
+
+      // Build "yyyy-mm" → { year, month, count } map of all distinct month-year
+      // buckets present in the filtered data.
+      const monthYearMap = new Map<string, { year: number; month: number; count: number }>();
+      filteredHw.filter(passesDateFilter).forEach(hw => {
+        const d = new Date(hw.date);
+        const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+        const cur = monthYearMap.get(key);
+        if (cur) cur.count++;
+        else monthYearMap.set(key, { year: d.getFullYear(), month: d.getMonth(), count: 1 });
       });
-      const years = Array.from(yearMap.entries()).sort((a,b) => b[0]-a[0]);
+      // Newest first (descending year, then descending month).
+      const monthYearList = Array.from(monthYearMap.values()).sort((a, b) => {
+        if (b.year !== a.year) return b.year - a.year;
+        return b.month - a.month;
+      });
+      const dateFilterActive = bookFilterYear !== null || bookFilterMonth !== null;
 
       return (
         <div className={`min-h-[100dvh] ${theme.bg} p-4 pt-2`}>
           <div className="max-w-3xl mx-auto pb-8 animate-in fade-in">
-            <div className="flex items-center gap-3 mb-5">
+            <div className="flex items-center gap-3 mb-4">
               <button onClick={goBack} className={`${theme.bgSoft} p-2 rounded-full ${theme.text}`}>
                 <ChevronRight size={18} className="rotate-180" />
               </button>
               <h2 className={`text-xl font-black ${theme.textDeep}`}>{subjectLabel[homeworkSubjectView] || homeworkSubjectView}</h2>
             </div>
-            {lucentSectionEl}
-            {showLucentSection && (
-              <p className={`text-[10px] font-bold ${theme.text} uppercase tracking-widest mb-2`}>📅 By Year</p>
-            )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {years.map(([y, count]) => (
-                <button
-                  key={y}
-                  onClick={() => setHwYear(y)}
-                  className={`bg-white border-2 ${theme.border} rounded-2xl p-5 text-left hover:shadow-md transition-all active:scale-[0.98] flex items-center gap-4`}
+            {/* Page-wise subjects also offer "By Page" mode here so the user can flip
+                back to the flat page-number list without going to the home grid. */}
+            {isPageWiseSubject && renderBookViewToggle()}
+
+            {/* === Year / Month filter (BY DATE only) ===
+                Lets the student narrow down the month list — useful when a book
+                spans many months/years. Year filter populates Month filter. */}
+            {isPageWiseSubject && filteredHw.length > 0 && (
+              <div className={`bg-white border-2 ${theme.border} rounded-2xl p-2 mb-3 flex items-center gap-2`}>
+                <span className={`text-[10px] font-black uppercase tracking-wider ${theme.text} pl-1 shrink-0`}>Filter</span>
+                <select
+                  value={bookFilterYear === null ? 'all' : String(bookFilterYear)}
+                  onChange={e => {
+                    const v = e.target.value;
+                    const newYear = v === 'all' ? null : parseInt(v, 10);
+                    setBookFilterYear(newYear);
+                    // Reset month if it doesn't exist in the newly chosen year.
+                    if (newYear !== null && bookFilterMonth !== null) {
+                      const monthsInNewYear = new Set(
+                        filteredHw.filter(hw => new Date(hw.date).getFullYear() === newYear).map(hw => new Date(hw.date).getMonth())
+                      );
+                      if (!monthsInNewYear.has(bookFilterMonth)) setBookFilterMonth(null);
+                    }
+                  }}
+                  className={`flex-1 min-w-0 text-xs font-bold ${theme.textDeep} bg-transparent border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-slate-400`}
                 >
-                  <div className={`${theme.bgSoft} ${theme.textDeep} w-20 h-20 rounded-2xl flex flex-col items-center justify-center shrink-0`}>
-                    <span className="text-[10px] font-bold uppercase">Year</span>
-                    <span className="text-2xl font-black leading-none">{y}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-lg font-black ${theme.textDeep}`}>{y}</p>
-                    <p className="text-xs text-slate-500 font-bold mt-0.5">{count} {count === 1 ? 'note' : 'notes'} added</p>
-                  </div>
-                  <ChevronRight size={18} className={`${theme.text}`} />
-                </button>
-              ))}
-            </div>
+                  <option value="all">All Years</option>
+                  {monthYearAvailable.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <select
+                  value={bookFilterMonth === null ? 'all' : String(bookFilterMonth)}
+                  onChange={e => {
+                    const v = e.target.value;
+                    setBookFilterMonth(v === 'all' ? null : parseInt(v, 10));
+                  }}
+                  className={`flex-1 min-w-0 text-xs font-bold ${theme.textDeep} bg-transparent border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-slate-400`}
+                >
+                  <option value="all">All Months</option>
+                  {monthsForFilterYear.map(m => (
+                    <option key={m} value={m}>{monthNames[m]}</option>
+                  ))}
+                </select>
+                {dateFilterActive && (
+                  <button
+                    type="button"
+                    onClick={() => { setBookFilterYear(null); setBookFilterMonth(null); }}
+                    className={`shrink-0 text-[10px] font-black uppercase tracking-wider ${theme.text} hover:${theme.bgSoft} rounded-lg px-2 py-1.5`}
+                    aria-label="Clear filter"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
+            {lucentSectionEl}
+
+            {filteredHw.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+                <Calendar size={36} className={`${theme.text} mx-auto mb-2 opacity-60`} />
+                <p className="text-sm font-bold text-slate-600">Abhi koi note add nahi hua</p>
+              </div>
+            ) : monthYearList.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+                <Calendar size={32} className="mx-auto mb-2 text-slate-300" />
+                <p className="text-sm font-bold text-slate-600">Is filter ke liye koi note nahi mila</p>
+                <p className="text-[11px] text-slate-400 mt-1">Year ya Month change karke try karein.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {monthYearList.map(({ year, month, count }) => (
+                  <button
+                    key={`${year}-${month}`}
+                    onClick={() => { setHwYear(year); setHwMonth(month); }}
+                    className={`bg-white border-2 ${theme.border} rounded-2xl p-4 text-left hover:shadow-md transition-all active:scale-[0.98] flex items-center gap-3`}
+                  >
+                    <div className={`${theme.bgSoft} ${theme.textDeep} w-16 h-16 rounded-2xl flex flex-col items-center justify-center shrink-0`}>
+                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">{monthNames[month].slice(0, 3)}</span>
+                      <span className="text-base font-black leading-none mt-0.5">{year}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-base font-black ${theme.textDeep}`}>{monthNames[month]} {year}</p>
+                      <p className="text-xs text-slate-500 font-bold mt-0.5">{count} {count === 1 ? 'note' : 'notes'}</p>
+                    </div>
+                    <ChevronRight size={18} className={`${theme.text}`} />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       );
@@ -5363,7 +5669,7 @@ export const StudentDashboard: React.FC<Props> = ({
             <p
               className={`text-[9px] relative z-10 ${user.subscriptionLevel === "ULTRA" && user.isPremium ? "text-slate-500" : "text-slate-400"}`}
             >
-              Developed by Nadim Anwar
+              Developed by {settings?.developerName?.trim() || 'Nadim Anwar'}
             </p>
 
             <div className="mt-4 relative z-10">
@@ -5705,20 +6011,59 @@ export const StudentDashboard: React.FC<Props> = ({
           </div>
 
           {/* SETTINGS SHEET MODAL */}
-          {showSettingsSheet && (
+          {showSettingsSheet && (() => {
+            // Read current dark theme type once per render so the labels stay in
+            // sync without re-reading localStorage in five different places.
+            const themeType = localStorage.getItem("nst_dark_theme_type"); // 'blue' | 'black' | null
+            const isBlue = isDarkMode && themeType === "blue";
+            const isBlack = isDarkMode && themeType !== "blue";
+            // Sheet background needs an explicit dark colour because the global
+            // `.dark-mode .bg-white` override turns plain `bg-white` to pure
+            // black — that clashed with the blue theme. Pick a softer slate /
+            // dark-blue here so the sheet itself feels native to each theme.
+            const sheetBg = isBlue
+              ? "bg-slate-900 border-t border-blue-900/60"
+              : isBlack
+                ? "bg-zinc-950 border-t border-zinc-800"
+                : "bg-white";
+            const sheetTextStrong = isDarkMode ? "text-slate-100" : "text-slate-800";
+            const sheetTextMuted  = isDarkMode ? "text-slate-300" : "text-slate-600";
+            const cardBg          = isBlue ? "bg-slate-800/70 border-blue-900/60" : isBlack ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200 hover:bg-slate-50";
+
+            return (
             <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowSettingsSheet(false)}>
-              <div className="bg-white w-full max-w-lg rounded-t-3xl p-6 shadow-2xl space-y-3 pb-8 animate-in slide-in-from-bottom duration-300" onClick={e => e.stopPropagation()}>
-                <div className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto mb-4"></div>
-                <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
-                  <Settings size={18} className="text-slate-600" /> Settings
+              <div className={`${sheetBg} w-full max-w-lg rounded-t-3xl p-6 shadow-2xl space-y-3 pb-8 animate-in slide-in-from-bottom duration-300`} onClick={e => e.stopPropagation()}>
+                <div className="w-12 h-1.5 bg-slate-400/40 rounded-full mx-auto mb-4"></div>
+                <h3 className={`text-lg font-black mb-4 flex items-center gap-2 ${sheetTextStrong}`}>
+                  <Settings size={18} className={sheetTextMuted} /> {tApp(appLang, 'settings')}
                 </h3>
+
+                {/* LANGUAGE TOGGLE — switches app text (settings, rules, warnings) */}
+                <div className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${cardBg}`}>
+                  <div className={`p-2 rounded-lg ${isDarkMode ? "bg-indigo-500/20" : "bg-indigo-50"}`}>
+                    <Globe size={18} className={isDarkMode ? "text-indigo-300" : "text-indigo-600"} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-bold ${sheetTextStrong}`}>{tApp(appLang, 'language')}</p>
+                    <p className={`text-[11px] ${sheetTextMuted}`}>{tApp(appLang, 'language_hint')}</p>
+                  </div>
+                  <div className={`flex p-0.5 rounded-full ${isDarkMode ? "bg-black/30" : "bg-slate-100"}`}>
+                    <button
+                      onClick={() => setAppLangState('EN')}
+                      className={`px-3 py-1 rounded-full text-[11px] font-black transition-all ${appLang === 'EN' ? (isDarkMode ? 'bg-indigo-500 text-white shadow' : 'bg-white text-indigo-700 shadow') : (isDarkMode ? 'text-slate-400' : 'text-slate-500')}`}
+                    >EN</button>
+                    <button
+                      onClick={() => setAppLangState('HI')}
+                      className={`px-3 py-1 rounded-full text-[11px] font-black transition-all ${appLang === 'HI' ? (isDarkMode ? 'bg-indigo-500 text-white shadow' : 'bg-white text-indigo-700 shadow') : (isDarkMode ? 'text-slate-400' : 'text-slate-500')}`}
+                    >हिं</button>
+                  </div>
+                </div>
 
                 {/* LIGHT/DARK MODE TOGGLE */}
                 <button
                   onClick={() => {
                     if (!isDarkMode) {
                       localStorage.setItem("nst_dark_theme_type", "black");
-                      // Apply classes immediately (no refresh needed)
                       document.documentElement.classList.remove('dark-mode-blue', 'dark-mode-black');
                       document.documentElement.classList.add('dark-mode', 'dark-mode-black');
                       onToggleDarkMode && onToggleDarkMode(true);
@@ -5726,26 +6071,24 @@ export const StudentDashboard: React.FC<Props> = ({
                       const currentType = localStorage.getItem("nst_dark_theme_type");
                       if (currentType === "black") {
                         localStorage.setItem("nst_dark_theme_type", "blue");
-                        // Apply blue theme immediately without waiting for React state cycle
                         document.documentElement.classList.remove('dark-mode-black');
                         document.documentElement.classList.add('dark-mode', 'dark-mode-blue');
                         onToggleDarkMode && onToggleDarkMode(true);
                       } else {
-                        // Switching back to light
                         document.documentElement.classList.remove('dark-mode', 'dark-mode-blue', 'dark-mode-black');
                         onToggleDarkMode && onToggleDarkMode(false);
                       }
                     }
                   }}
-                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${isDarkMode ? (localStorage.getItem("nst_dark_theme_type") === "blue" ? "bg-blue-900 border-blue-800" : "bg-slate-800 border-slate-700") : "bg-white border-slate-200 hover:bg-slate-50"}`}
+                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${cardBg}`}
                 >
-                  <div className={`p-2 rounded-lg ${isDarkMode ? "bg-black/20" : "bg-slate-100"}`}>
-                    {isDarkMode ? <Sparkles size={18} className={localStorage.getItem("nst_dark_theme_type") === "blue" ? "text-blue-300" : "text-yellow-400"} /> : <Zap size={18} className="text-slate-600" />}
+                  <div className={`p-2 rounded-lg ${isDarkMode ? "bg-black/30" : "bg-slate-100"}`}>
+                    {isDarkMode ? <Sparkles size={18} className={isBlue ? "text-blue-300" : "text-yellow-400"} /> : <Zap size={18} className="text-slate-600" />}
                   </div>
-                  <span className={`text-sm font-bold flex-1 text-left ${isDarkMode ? (localStorage.getItem("nst_dark_theme_type") === "blue" ? "text-blue-300" : "text-slate-300") : "text-slate-700"}`}>
-                    {isDarkMode ? (localStorage.getItem("nst_dark_theme_type") === "blue" ? "Blue Mode Active" : "Black Mode Active") : "Light Mode Active"}
+                  <span className={`text-sm font-bold flex-1 text-left ${sheetTextStrong}`}>
+                    {isBlue ? tApp(appLang, 'blue_mode_active') : isBlack ? tApp(appLang, 'black_mode_active') : tApp(appLang, 'light_mode_active')}
                   </span>
-                  <div className="w-10 h-6 bg-slate-200 rounded-full flex items-center px-1 overflow-hidden">
+                  <div className={`w-10 h-6 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'} rounded-full flex items-center px-1 overflow-hidden`}>
                     <div className={`w-4 h-4 rounded-full transition-transform ${isDarkMode ? "translate-x-4 bg-indigo-500" : "bg-white shadow"}`}></div>
                   </div>
                 </button>
@@ -5753,19 +6096,20 @@ export const StudentDashboard: React.FC<Props> = ({
                 {/* SETUP RECOVERY */}
                 <button
                   onClick={() => { setShowSidebar(false); setShowRecoveryModal(true); setShowSettingsSheet(false); }}
-                  className="w-full bg-white p-4 rounded-xl border border-orange-100 shadow-sm flex items-center gap-3 hover:bg-orange-50 transition-all"
+                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${isDarkMode ? 'bg-orange-900/20 border-orange-900/40' : 'bg-white border-orange-100 hover:bg-orange-50'}`}
                 >
-                  <div className="bg-orange-100 p-2 rounded-lg text-orange-600"><Lock size={18} /></div>
-                  <span className="text-sm font-bold text-slate-800 flex-1 text-left">Setup Recovery</span>
-                  <ChevronRight size={16} className="text-slate-400" />
+                  <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-orange-500/20 text-orange-300' : 'bg-orange-100 text-orange-600'}`}><Lock size={18} /></div>
+                  <span className={`text-sm font-bold flex-1 text-left ${sheetTextStrong}`}>{tApp(appLang, 'setup_recovery')}</span>
+                  <ChevronRight size={16} className={sheetTextMuted} />
                 </button>
 
-                <button onClick={() => setShowSettingsSheet(false)} className="w-full mt-2 text-slate-500 text-sm font-bold py-3">
-                  Close
+                <button onClick={() => setShowSettingsSheet(false)} className={`w-full mt-2 text-sm font-bold py-3 ${sheetTextMuted}`}>
+                  {tApp(appLang, 'close')}
                 </button>
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       );
 
@@ -10845,8 +11189,8 @@ RULES:
         // letting the Home page's streak ("6/8") bleed through. Solid bg
         // ensures the user sees only ONE page at a time.
         <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in slide-in-from-right-full duration-300">
-          {/* === PREMIUM HEADER (gradient + crown) === */}
-          <div className="relative bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 sticky top-0 z-10 shadow-lg shadow-amber-200/50">
+          {/* === PREMIUM HEADER (study-app gradient) === */}
+          <div className="relative bg-gradient-to-br from-indigo-600 via-blue-600 to-violet-600 sticky top-0 z-10 shadow-lg shadow-indigo-200/50">
             {/* Decorative pattern overlay */}
             <div className="absolute inset-0 opacity-10 pointer-events-none" style={{
               backgroundImage: `radial-gradient(circle at 20% 30%, white 1px, transparent 1px), radial-gradient(circle at 70% 60%, white 1px, transparent 1px)`,
@@ -10864,7 +11208,7 @@ RULES:
                   <h2 className="font-black text-lg text-white tracking-tight">Important Notes</h2>
                   <span className="text-[8px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-md uppercase tracking-widest shadow-sm">⭐ Premium</span>
                 </div>
-                <p className="text-[11px] text-amber-50/90 font-semibold mt-0.5">
+                <p className="text-[11px] text-indigo-50/90 font-semibold mt-0.5">
                   {starredPageTab === 'mine'
                     ? (starredNotes.length === 0
                         ? 'Notes save karein, yahan dikhenge'
@@ -10872,6 +11216,21 @@ RULES:
                     : `${globalList.length} popular notes · Live community picks`}
                 </p>
               </div>
+              {/* Compact Trending / My Saved switch — replaces the old big tab pills.
+                  Lets the user open the Global ("Trending") page and come back. */}
+              <button
+                onClick={() => {
+                  stopProfileStarRead();
+                  setStarredPageTab(starredPageTab === 'mine' ? 'global' : 'mine');
+                }}
+                className="flex items-center gap-1 text-[10px] font-black text-white bg-white/20 hover:bg-white/30 px-2.5 py-1.5 rounded-xl backdrop-blur-sm border border-white/20 active:scale-95 transition-all"
+                title={starredPageTab === 'mine' ? 'Trending notes dekhein' : 'Apne saved notes par wapis jaayein'}
+              >
+                {starredPageTab === 'mine'
+                  ? <><TrendingUp size={12} /> Trending</>
+                  : <><Star size={12} className="fill-white text-white" /> My Saved</>
+                }
+              </button>
               {starredPageTab === 'mine' && starredNotes.length > 0 && (
                 <button
                   onClick={() => {
@@ -10887,60 +11246,11 @@ RULES:
               )}
             </div>
 
-            {/* Quick stat pills */}
-            <div className="relative px-4 pb-3 flex items-center gap-2">
-              <div className="flex-1 bg-white/15 backdrop-blur-sm border border-white/20 rounded-xl px-3 py-1.5 flex items-center gap-2">
-                <Star size={12} className="fill-amber-200 text-amber-200" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[8px] font-black uppercase tracking-widest text-amber-100/90">My Saved</div>
-                  <div className="text-sm font-black text-white -mt-0.5">{starredNotes.length}</div>
-                </div>
-              </div>
-              <div className="flex-1 bg-white/15 backdrop-blur-sm border border-white/20 rounded-xl px-3 py-1.5 flex items-center gap-2">
-                <Users size={12} className="text-white" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[8px] font-black uppercase tracking-widest text-amber-100/90">Community</div>
-                  <div className="text-sm font-black text-white -mt-0.5">{globalList.length}</div>
-                </div>
-              </div>
-            </div>
           </div>
 
-          {/* MY SAVED / GLOBAL tab toggle — pulled up so it overlaps the gradient like a card */}
-          <div className="px-4 -mt-2 pb-2 bg-transparent">
-            <div className="grid grid-cols-2 gap-1 p-1 bg-white rounded-2xl border border-amber-200 shadow-md shadow-amber-100/40">
-              <button
-                onClick={() => { stopProfileStarRead(); setStarredPageTab('mine'); }}
-                className={`py-2.5 rounded-xl text-[12px] font-black flex items-center justify-center gap-1.5 transition-all ${
-                  starredPageTab === 'mine'
-                    ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md shadow-amber-200'
-                    : 'text-amber-700 hover:bg-amber-50'
-                }`}
-              >
-                <Star size={13} className={starredPageTab === 'mine' ? 'fill-white text-white' : 'fill-amber-500 text-amber-500'} />
-                My Saved
-                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${starredPageTab === 'mine' ? 'bg-white/30 text-white' : 'bg-amber-100 text-amber-800'}`}>
-                  {starredNotes.length}
-                </span>
-              </button>
-              <button
-                onClick={() => { stopProfileStarRead(); setStarredPageTab('global'); }}
-                className={`py-2.5 rounded-xl text-[12px] font-black flex items-center justify-center gap-1.5 transition-all ${
-                  starredPageTab === 'global'
-                    ? 'bg-gradient-to-br from-rose-400 to-orange-500 text-white shadow-md shadow-rose-200'
-                    : 'text-amber-700 hover:bg-amber-50'
-                }`}
-              >
-                <TrendingUp size={13} />
-                Trending
-                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${starredPageTab === 'global' ? 'bg-white/30 text-white' : 'bg-amber-100 text-amber-800'}`}>
-                  {globalList.length}
-                </span>
-              </button>
-            </div>
-
-            {/* === SECONDARY VIEW TOGGLE: List View vs Book-wise Grouping === */}
-            <div className="mt-2 grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
+          {/* === SECONDARY VIEW TOGGLE: List View vs Book-wise Grouping === */}
+          <div className="px-4 pt-3 pb-2 bg-transparent">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
               <button
                 onClick={() => setImportantNotesView('list')}
                 className={`py-1.5 rounded-lg text-[10px] font-black flex items-center justify-center gap-1.5 transition-all ${

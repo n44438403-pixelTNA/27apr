@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Shield, BookOpen, Lock, Coins, MessageCircle, Crown, Info, CheckCircle2, AlertTriangle, KeyRound, Languages } from 'lucide-react';
+import { useAppLang } from '../utils/appLang';
 
 interface Props {
   onBack: () => void;
@@ -7,7 +8,9 @@ interface Props {
 }
 
 export const RulesPage: React.FC<Props> = ({ onBack, settings }) => {
-  const [lang, setLang] = useState<'EN' | 'HI'>('HI');
+  // Lang now lives in the global app-lang store (`nst_app_lang`) so the
+  // Settings Sheet toggle and this page stay in sync everywhere.
+  const [lang, setLang] = useAppLang();
 
   const content = {
       EN: {
