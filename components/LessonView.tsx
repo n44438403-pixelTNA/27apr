@@ -438,13 +438,22 @@ export const LessonView: React.FC<Props> = ({
 
   if (content.isComingSoon) {
       return (
-          <div className="h-[70vh] flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl m-4 border-2 border-dashed border-slate-200">
-              <Clock size={64} className="text-orange-400 mb-4 opacity-80" />
+          <div className="min-h-[70vh] flex flex-col items-center justify-center text-center p-6 bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 rounded-2xl m-4 border-2 border-dashed border-orange-200">
+              <div className="relative mb-4">
+                <div className="absolute inset-0 bg-orange-300/30 blur-2xl rounded-full" />
+                <Clock size={72} className="relative text-orange-500 opacity-90" />
+              </div>
               <h2 className="text-2xl font-black text-slate-800 mb-2">Coming Soon</h2>
-              <p className="text-slate-600 max-w-xs mx-auto mb-6">
-                  This content is currently being prepared by the Admin.
+              <p className="text-slate-600 max-w-xs mx-auto mb-4 text-sm">
+                  Yeh content abhi Admin ke dwara taiyar ki ja rahi hai. Jaldi hi available hogi.
               </p>
-              <button onClick={onBack} className="mt-8 text-slate-500 font-bold hover:text-slate-600">
+              {/* Diagnostic chip — helps the user tell admin EXACTLY what's missing */}
+              <div className="bg-white/80 backdrop-blur border border-orange-200 rounded-xl px-3 py-2 mb-4 text-[11px] text-slate-700 font-semibold shadow-sm">
+                <div className="text-[9px] font-black text-orange-600 uppercase tracking-widest mb-1">Missing Content</div>
+                <div>📖 <b>{chapter?.title || content.title}</b></div>
+                {content.subjectName && <div className="text-slate-500 mt-0.5">📚 {content.subjectName}</div>}
+              </div>
+              <button onClick={onBack} className="px-6 py-2.5 rounded-xl bg-slate-700 text-white font-bold text-sm hover:bg-slate-800 active:scale-95 transition shadow-md">
                   Go Back
               </button>
           </div>

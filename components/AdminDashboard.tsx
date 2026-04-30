@@ -4664,6 +4664,67 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
               </div>
 
+              {/* CLASS VISIBILITY PANEL — hide/unhide individual classes 6-12 */}
+              <div className="mt-8 pt-8 border-t border-slate-100">
+                  <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                          <span className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm">🎓</span>
+                          Class Visibility (6 — 12)
+                      </h4>
+                      <div className="flex gap-2">
+                          <button
+                              onClick={() => setLocalSettings({ ...localSettings, hiddenClasses: [] })}
+                              className="text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                          >
+                              Show All
+                          </button>
+                          <button
+                              onClick={() => setLocalSettings({ ...localSettings, hiddenClasses: ['6','7','8','9','10','11','12'] })}
+                              className="text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200"
+                          >
+                              Hide All
+                          </button>
+                      </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                      Toggle individual classes on the home page. Hidden classes vanish from the student class picker but their data is preserved.
+                  </p>
+                  <div className="grid grid-cols-7 gap-2">
+                      {(['6','7','8','9','10','11','12'] as const).map((c) => {
+                          const isHidden = (localSettings.hiddenClasses || []).includes(c);
+                          return (
+                              <button
+                                  key={c}
+                                  onClick={() => {
+                                      const list = localSettings.hiddenClasses || [];
+                                      const next = isHidden ? list.filter(x => x !== c) : [...list, c];
+                                      setLocalSettings({ ...localSettings, hiddenClasses: next });
+                                  }}
+                                  className={`relative aspect-square rounded-2xl border-2 font-black text-base transition-all flex flex-col items-center justify-center ${
+                                      isHidden
+                                          ? 'bg-rose-50 border-rose-300 text-rose-400 opacity-70'
+                                          : 'bg-gradient-to-br from-indigo-50 to-violet-50 border-indigo-300 text-indigo-700 hover:shadow-md'
+                                  }`}
+                                  title={isHidden ? `Class ${c} is hidden — tap to show` : `Class ${c} is visible — tap to hide`}
+                              >
+                                  <span>{c}</span>
+                                  <span className={`text-[8px] font-bold mt-0.5 uppercase tracking-wider ${isHidden ? 'text-rose-500' : 'text-emerald-600'}`}>
+                                      {isHidden ? 'Hidden' : 'Visible'}
+                                  </span>
+                                  <span className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-black ${
+                                      isHidden ? 'bg-rose-500' : 'bg-emerald-500'
+                                  }`}>
+                                      {isHidden ? '✕' : '✓'}
+                                  </span>
+                              </button>
+                          );
+                      })}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-2 italic">
+                      Tip: same control also lives under Content tab → Visibility Mode. Both update the same setting.
+                  </p>
+              </div>
+
               {/* NEW BANNER CONFIG SECTION */}
               <div className="mt-8 pt-8 border-t border-slate-100">
                   <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">

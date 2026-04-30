@@ -55,6 +55,7 @@ import {
   Layout,
   Gift,
   Cloud,
+  CloudOff,
   Sparkles,
   Megaphone,
   Lock,
@@ -126,8 +127,11 @@ import {
   PlusCircle,
   Search,
   Users,
+  Target,
+  History as HistoryIcon,
 } from "lucide-react";
 import { speakText, stopSpeech } from "../utils/textToSpeech";
+import { getMistakeBankSync } from "../utils/mistakeBank";
 import { hapticLight, hapticMedium, hapticStrong } from "../utils/haptic";
 import { splitIntoTopics } from "../utils/notesSplitter";
 import { SubjectSelection } from "./SubjectSelection";
@@ -173,6 +177,7 @@ import { ExplorePage } from "./ExplorePage";
 import { StudentHistoryModal } from "./StudentHistoryModal";
 import { generateDailyRoutine } from "../utils/routineGenerator";
 import { OfflineDownloads } from "./OfflineDownloads";
+import { saveOfflineItem } from "../utils/offlineStorage";
 import { NotificationPrompt } from "./NotificationPrompt";
 // @ts-ignore
 import jsPDF from "jspdf";
@@ -1048,8 +1053,19 @@ export const StudentDashboard: React.FC<Props> = ({
   // student returns to exactly where they were when they tap that tab again.
   // Eg: creating an MCQ on Home → tap Profile → tap Home → MCQ creator restores.
   // Reading a homework note → tap GK → tap Homework → same note reopens.
-  type LogicalTab = 'HOME' | 'HOMEWORK' | 'REVISION_V2' | 'GK' | 'VIDEO' | 'PROFILE' | 'APP_STORE';
+  type LogicalTab = 'HOME' | 'HOMEWORK' | 'REVISION_V2' | 'GK' | 'VIDEO' | 'PROFILE' | 'APP_STORE' | 'HISTORY';
   const [currentLogicalTab, setCurrentLogicalTab] = useState<LogicalTab>('HOME');
+
+  // ── MY MISTAKE COUNT (lightweight: synced via storage event + 30s poll) ──
+  const [mistakeCount, setMistakeCount] = useState<number>(() => getMistakeBankSync().length);
+  useEffect(() => {
+    const refresh = () => setMistakeCount(getMistakeBankSync().length);
+    refresh();
+    const onStorage = (e: StorageEvent) => { if (!e.key || e.key === 'nst_mistake_bank_v1') refresh(); };
+    window.addEventListener('storage', onStorage);
+    const t = window.setInterval(refresh, 30000);
+    return () => { window.removeEventListener('storage', onStorage); window.clearInterval(t); };
+  }, []);
   const [tabSnapshots, setTabSnapshots] = useState<Record<string, any>>({});
   // Last-read line index per homework note id (for tap-to-resume after tab switch).
   const [hwNotePositions, setHwNotePositions] = useState<Record<string, number>>({});
@@ -1573,45 +1589,49 @@ export const StudentDashboard: React.FC<Props> = ({
   const allNotifications: AppNotification[] = settings?.notifications || [];
   const unreadNotifCount = allNotifications.filter(n => !seenNotifIds.includes(n.id)).length;
 
-  // Star/unstar a note topic. Also syncs to Firebase so we can show
-  // global "X students saved this" social-proof counts.
+  // Star a note topic — ONE-WAY ONLY. Once saved, the user cannot un-save it
+  // from the source location (lesson / homework / book viewer). Removal is
+  // possible only from the dedicated "Saved Notes" page via swipe-to-delete.
+  // This prevents accidental tap-to-unstar and double-saves of the same note.
+  // Also syncs to Firebase so we can show global "X students saved this"
+  // social-proof counts (Firebase de-dupes by userId so count won't inflate).
   const toggleStarNote = (noteKey: string, topicText: string, source?: StarredNoteSource) => {
     let didStar = false;
     setStarredNotes(prev => {
-      const existing = prev.find(n => n.noteKey === noteKey && n.topicText === topicText);
-      let updated: typeof prev;
-      if (existing) {
-        updated = prev.filter(n => !(n.noteKey === noteKey && n.topicText === topicText));
-        didStar = false;
-      } else {
-        updated = [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            noteKey,
-            topicText,
-            savedAt: new Date().toISOString(),
-            ...(source ? { source } : {}),
-          },
-        ];
-        didStar = true;
+      const alreadySaved = prev.some(n => n.noteKey === noteKey && n.topicText === topicText);
+      if (alreadySaved) {
+        // Already saved → show a soft message and return prev unchanged.
+        try { showAlert('Yeh note pehle se saved hai. Remove karne ke liye Saved Notes page me swipe karein.', 'INFO'); } catch {}
+        return prev;
       }
+      const updated = [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          noteKey,
+          topicText,
+          savedAt: new Date().toISOString(),
+          ...(source ? { source } : {}),
+        },
+      ];
+      didStar = true;
       try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
       return updated;
     });
-    try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
-    // Fire-and-forget global count sync so other students see it.
-    try {
-      if (user?.id) {
-        if (didStar) recordNoteStar(user.id, noteKey, topicText, source ? {
-          lessonTitle: source.lessonTitle,
-          subject: source.subject,
-          pageNo: source.pageNo as any,
-          pageIndex: source.pageIndex as any,
-        } : undefined);
-        else recordNoteUnstar(user.id, topicText);
-      }
-    } catch {}
+    if (didStar) {
+      try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
+      // Fire-and-forget global count sync so other students see it.
+      try {
+        if (user?.id) {
+          recordNoteStar(user.id, noteKey, topicText, source ? {
+            lessonTitle: source.lessonTitle,
+            subject: source.subject,
+            pageNo: source.pageNo as any,
+            pageIndex: source.pageIndex as any,
+          } : undefined);
+        }
+      } catch {}
+    }
   };
 
   const isNoteTopicStarred = (noteKey: string, topicText: string) =>
@@ -4568,6 +4588,65 @@ export const StudentDashboard: React.FC<Props> = ({
                                 Resume <ChevronRight size={10} />
                               </button>
                             </div>
+                            {/* Action row — Save Offline + Download MHTML, parity with Competition section.
+                                Standardized 28px tall buttons in a single row for clean alignment. */}
+                            <div className="grid grid-cols-2 gap-1.5 mt-2">
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    await saveOfflineItem({
+                                      id: `chapter_${entry.id}`,
+                                      type: 'NOTE',
+                                      title: entry.chapter?.title || 'Chapter',
+                                      subtitle: `Class ${entry.classLevel} · ${entry.subject?.name || ''}`,
+                                      data: {
+                                        kind: 'CHAPTER_REF',
+                                        classLevel: entry.classLevel,
+                                        subject: entry.subject,
+                                        chapter: entry.chapter,
+                                        scrollPct: entry.scrollPct,
+                                      },
+                                    });
+                                    try { (window as any).__toast?.({ type: 'success', message: 'Saved offline ✓' }); } catch {}
+                                  } catch (err) { console.error(err); }
+                                }}
+                                className="h-7 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-[10px] font-black flex items-center justify-center gap-1 active:scale-95 transition-all border border-emerald-200"
+                                title="Save Offline"
+                              >
+                                <CloudOff size={11} /> <span>Offline</span>
+                              </button>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    const wrapper = document.createElement('div');
+                                    wrapper.id = `ch-print-${entry.id}`;
+                                    const safeTitle = (entry.chapter?.title || 'Chapter').replace(/</g,'&lt;');
+                                    wrapper.innerHTML = `
+                                      <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;color:white;border-radius:18px 18px 0 0;font-family:Inter,system-ui,sans-serif;">
+                                        <div style="font-size:11px;font-weight:900;letter-spacing:.18em;opacity:.9;text-transform:uppercase;">${(settings?.appName || 'IIC')} · Continue Reading</div>
+                                        <div style="font-size:22px;font-weight:900;margin-top:6px;">${safeTitle}</div>
+                                        <div style="font-size:12px;font-weight:700;opacity:.85;margin-top:4px;">Class ${entry.classLevel} · ${entry.subject?.name || ''}</div>
+                                      </div>
+                                      <div style="background:#fff;border:1px solid #e5e7eb;border-top:0;padding:24px;border-radius:0 0 18px 18px;font-family:Inter,system-ui,sans-serif;color:#0f172a;line-height:1.7;">
+                                        <div style="font-size:13px;color:#475569;font-weight:600;">Reading progress: ${entry.scrollPct}%</div>
+                                        <div style="margin-top:14px;font-size:11px;color:#6366f1;font-weight:800;">Resume this chapter inside the IIC app to continue from where you left off.</div>
+                                      </div>`;
+                                    wrapper.style.position = 'fixed';
+                                    wrapper.style.left = '-9999px';
+                                    document.body.appendChild(wrapper);
+                                    const fname = (entry.chapter?.title || 'chapter').slice(0,40).replace(/[^a-z0-9]+/gi,'_');
+                                    await downloadAsMHTML(wrapper.id, `${fname}_${new Date().toISOString().slice(0,10)}`);
+                                    setTimeout(() => { try { document.body.removeChild(wrapper); } catch {} }, 500);
+                                  } catch (err) { console.error(err); }
+                                }}
+                                className="h-7 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 text-[10px] font-black flex items-center justify-center gap-1 active:scale-95 transition-all border border-blue-200"
+                                title="Download (MHTML)"
+                              >
+                                <Download size={11} /> <span>Download</span>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -7290,8 +7369,43 @@ export const StudentDashboard: React.FC<Props> = ({
 
             <div className="flex-1 overflow-y-auto">
               <div className="max-w-2xl mx-auto px-4 py-4 space-y-5">
+                {/* DAILY MY MISTAKE BANNER — always shows when student has
+                    pending mistakes. Tapping opens History → My Mistake tab
+                    where they can review or practice them. */}
+                {mistakeCount > 0 && (
+                  <button
+                    onClick={() => {
+                      setShowHomeworkHistory(false);
+                      onTabChange('HISTORY');
+                      setCurrentLogicalTab('HISTORY');
+                    }}
+                    className="w-full text-left rounded-2xl p-4 bg-gradient-to-br from-rose-500 via-orange-500 to-amber-500 text-white shadow-lg relative overflow-hidden active:scale-[0.99] transition-transform"
+                  >
+                    <div className="absolute -top-8 -right-8 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+                    <div className="flex items-center gap-3 relative">
+                      <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center shrink-0">
+                        <Target size={24} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <h4 className="text-base font-black leading-tight">Daily My Mistake</h4>
+                          <span className="bg-white/25 text-white text-[10px] font-black px-2 py-0.5 rounded-full leading-none">
+                            {mistakeCount}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-white/90 leading-snug">
+                          {mistakeCount} galt MCQ pending hain — tap karke practice karein
+                        </p>
+                      </div>
+                      <ChevronRight size={20} className="opacity-90 shrink-0" />
+                    </div>
+                  </button>
+                )}
+
                 {/* FIXED GK CARD — Daily GK + GK History both accessible from here.
-                    Replaces the tiny GK button that used to sit in the header. */}
+                    Replaces the tiny GK button that used to sit in the header.
+                    When admin hides GK from bottom nav, this card stays so the
+                    student can still access GK from inside the Homework page. */}
                 {(() => {
                   const allGksForCard = (settings?.dailyGk || []).filter((gk: any) => {
                     if (!gk.targetClass || gk.targetClass === user.class) return true;
@@ -9376,6 +9490,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 case 'VIDEO':    return { ...empty, activeTab: 'UNIVERSAL_VIDEO' };
                 case 'PROFILE':  return { ...empty, activeTab: 'PROFILE' };
                 case 'APP_STORE':return { ...empty, activeTab: 'APP_STORE' };
+                case 'HISTORY':  return { ...empty, activeTab: 'HISTORY' };
                 default:         return empty;
               }
             };
@@ -9397,6 +9512,7 @@ export const StudentDashboard: React.FC<Props> = ({
               VIDEO:     ['UNIVERSAL_VIDEO'],
               PROFILE:   ['PROFILE'],
               APP_STORE: ['APP_STORE'],
+              HISTORY:   ['HISTORY'],
             };
 
             const switchToLogicalTab = (target: LogicalTab) => {
@@ -9455,8 +9571,9 @@ export const StudentDashboard: React.FC<Props> = ({
                 isActive: !showStarredPage && currentLogicalTab === "HOME",
                 onClick: () => switchToLogicalTab("HOME"),
               },
-              // ── HOMEWORK: always visible when there is active homework ──────
-              // (Not conditional on RevHub being enabled — user wants it always shown)
+              // ── HOMEWORK: visible if active homework OR pending mistakes ────
+              // Daily My Mistake lives inside Homework page, so the tab persists
+              // whenever student has unresolved mistakes (even with no homework).
               ...(() => {
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
@@ -9466,7 +9583,8 @@ export const StudentDashboard: React.FC<Props> = ({
                   d.setHours(0, 0, 0, 0);
                   return d.getTime() >= today.getTime();
                 });
-                return hasActiveHomework
+                const hasMistakes = mistakeCount > 0;
+                return (hasActiveHomework || hasMistakes)
                   ? [{ id: "HOMEWORK" as const, label: "Homework", Icon: GraduationCap,
                        isActive: !showStarredPage && currentLogicalTab === "HOMEWORK",
                        onClick: () => switchToLogicalTab("HOMEWORK") }]
@@ -9477,31 +9595,34 @@ export const StudentDashboard: React.FC<Props> = ({
               // Each item occupies its slot only if enabled.
               // When an item is disabled, the next item slides into that position.
               //
-              //  Slot order:  RevHub → GK → Video/Profile
+              //  Slot order:  GK (permanent) → RevHub → Video/Profile
               //
-              //  RevHub disabled  → GK fills Slot 1 (slides left)
-              //  GK hidden        → Video/Profile fills Slot 2 (slides left)
-              //  Video in top bar → Profile fills the Video slot
-              //
-              // Result examples:
-              //  All on:            RevHub | GK | Video
-              //  RevHub off:        GK | Video
-              //  GK hidden:         RevHub | Video
-              //  Video in top bar:  RevHub | GK | Profile
-              //  RevHub off + GK hidden: Video
-              //  RevHub off + GK hidden + Video in top bar: Profile
+              //  GK is now PERMANENT in Slot A (replaces old Revision-Hub-first slot
+              //  per user request). Revision Hub now lives in Slot B and remains
+              //  admin-toggleable. Important Notes page is reachable from inside GK.
 
-              // Slot A — Revision Hub (if enabled AND not individually hidden)
-              ...(settings?.revisionHubV2Enabled !== false && !(settings?.hiddenBottomNavButtons || []).includes('REVISION_V2')
-                ? [{ id: "REVISION_V2" as const, label: "Revision", Icon: BrainCircuit,
+              // Slot A — HISTORY (PERMANENT per user request).
+              // GK has been removed from the bottom nav entirely — it's now
+              // accessible from the GK card inside the Homework page.
+              // Admin can opt back into a GK tab by adding 'HISTORY' to
+              // hiddenBottomNavButtons (which falls back to GK in that slot).
+              ...((settings?.hiddenBottomNavButtons || []).includes('HISTORY')
+                ? [{ id: "GK" as const, label: "GK", Icon: Sparkles,
                      filledOnActive: true,
-                     isActive: !showStarredPage && currentLogicalTab === "REVISION_V2",
-                     onClick: () => switchToLogicalTab("REVISION_V2") }]
-                : []),
+                     isActive: !showStarredPage && currentLogicalTab === "GK",
+                     onClick: () => switchToLogicalTab("GK") }]
+                : [{ id: "HISTORY" as const, label: "History", Icon: HistoryIcon,
+                     filledOnActive: true,
+                     isActive: !showStarredPage && currentLogicalTab === "HISTORY",
+                     onClick: () => switchToLogicalTab("HISTORY") }]),
 
-              // Slot B — GK / Important Notes (if not hidden by admin)
-              ...(!settings?.starredPageHidden && !(settings?.hiddenBottomNavButtons || []).includes('GK')
-                ? [{ id: "GK" as const, label: "Important", Icon: Star,
+              // Slot B — Revision Hub REMOVED from bottom nav per user request.
+              // GK is now permanent in Slot A (taking Revision Hub's old place).
+              // Revision Hub remains accessible from the sidebar / Home tile.
+
+              // Slot B' — Important Notes (Star) — separate from GK now.
+              ...(!settings?.starredPageHidden && !(settings?.hiddenBottomNavButtons || []).includes('IMPORTANT')
+                ? [{ id: "IMPORTANT" as const, label: "Important", Icon: Star,
                      filledOnActive: true,
                      isActive: showStarredPage,
                      onClick: () => setShowStarredPage(true) }]
@@ -11234,10 +11355,14 @@ RULES:
               {starredPageTab === 'mine' && starredNotes.length > 0 && (
                 <button
                   onClick={() => {
-                    if (!confirm('Delete every starred note?')) return;
+                    const ok = window.confirm(
+                      `${starredNotes.length} saved notes ko permanently delete karein?\n\nYe undo nahi ho sakta. Cancel karne ke liye No dabayein.`
+                    );
+                    if (!ok) return;
                     stopProfileStarRead();
                     setStarredNotes([]);
                     try { localStorage.removeItem('nst_starred_notes_v1'); } catch {}
+                    showAlert(`Sab ${starredNotes.length} saved notes delete ho gayi.`, 'SUCCESS');
                   }}
                   className="text-[10px] font-black text-white bg-red-500/80 hover:bg-red-600 px-2.5 py-1.5 rounded-xl backdrop-blur-sm border border-white/20 active:scale-95 transition-all"
                 >
@@ -11335,11 +11460,42 @@ RULES:
               </div>
             )}
 
+            {/* === SAVE/REMOVE RULES — always visible when on "mine" tab === */}
+            {starredPageTab === 'mine' && starredNotes.length > 0 && (
+              <div className="rounded-2xl border-2 border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-3 shadow-sm">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-amber-400 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <Star size={16} className="fill-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-black text-amber-900 uppercase tracking-wider mb-1">Save / Remove Rules</p>
+                    <ul className="text-[11px] text-slate-700 leading-relaxed space-y-0.5">
+                      <li>• Ek note sirf <b>ek baar</b> save hoti hai (duplicate save nahi hota).</li>
+                      <li>• Remove karne ke liye note ko <b>left-swipe</b> karein 👈, ya <b>Clear</b> button se sab ek saath delete karein.</li>
+                      <li>• Lesson / Book me dobara ⭐ tap karne se note delete <b>NAHI</b> hogi — accidental loss safe.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {starredNotes.length === 0 ? (
-              <div className="text-center py-14 bg-amber-50 rounded-2xl border border-amber-100">
-                <Star size={40} className="text-amber-300 mx-auto mb-3" />
-                <p className="font-bold text-slate-600 text-sm">No important notes yet.</p>
-                <p className="text-xs text-slate-400 mt-1">While reading a note tap the ⭐ — it will show up here.</p>
+              <div className="text-center py-12 bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border-2 border-dashed border-amber-200">
+                <div className="relative inline-block mb-3">
+                  <div className="absolute inset-0 bg-amber-300/40 blur-2xl rounded-full" />
+                  <Star size={48} className="relative text-amber-400 mx-auto" />
+                </div>
+                <p className="font-black text-slate-700 text-base">Abhi koi note saved nahi hai</p>
+                <p className="text-xs text-slate-500 mt-1 px-6">Lesson padhte waqt ⭐ tap karein, woh yahan aa jayegi.</p>
+                {/* Quick shortcut to Trending tab so empty state is actionable */}
+                <button
+                  onClick={() => { stopProfileStarRead(); setStarredPageTab('global'); }}
+                  className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 text-white text-xs font-black shadow-md active:scale-95 hover:shadow-lg transition-all"
+                >
+                  <TrendingUp size={14} />
+                  Dekho Trending Notes
+                </button>
+                <p className="text-[10px] text-amber-700 mt-4 font-semibold">💡 Saved notes ko remove karne ke liye left-swipe 👈</p>
               </div>
             ) : filtered.length === 0 ? (
               <div className="text-center py-10 bg-amber-50 rounded-2xl border border-amber-100">
@@ -11403,19 +11559,81 @@ RULES:
                         )}
                       </div>
                     </button>
-                    <button
-                      onClick={() => {
-                        setStarredNotes(prev => {
-                          const updated = prev.filter(n => n.id !== note.id);
-                          try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
-                          return updated;
-                        });
-                      }}
-                      className="p-1.5 rounded-full text-amber-400 hover:text-red-400 hover:bg-red-50 transition-colors shrink-0 mt-0.5"
-                      title="Remove"
-                    >
-                      <X size={14} />
-                    </button>
+                    {/* ── Action cluster: Download · Save Offline · Remove ──
+                        Standardized button sizes (w-9 h-9) and arranged in a
+                        single column for a clean, professional look. */}
+                    <div className="flex flex-col items-center gap-1 shrink-0">
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            // Build a self-contained printable wrapper that
+                            // mirrors the in-app Important Notes card so the
+                            // downloaded MHTML preserves theme/background/header.
+                            const wrapper = document.createElement('div');
+                            wrapper.id = 'imp-note-printable';
+                            wrapper.innerHTML = `
+                              <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;color:white;border-radius:18px 18px 0 0;font-family:Inter,system-ui,sans-serif;">
+                                <div style="font-size:11px;font-weight:900;letter-spacing:.18em;opacity:.9;text-transform:uppercase;">${(settings?.appName || 'IIC')} · Important Notes</div>
+                                <div style="font-size:22px;font-weight:900;margin-top:6px;">${note.topicText.replace(/</g,'&lt;')}</div>
+                                ${src?.lessonTitle ? `<div style="font-size:12px;font-weight:700;opacity:.85;margin-top:4px;">${src.lessonTitle}${src.pageNo!=null?` · Page ${src.pageNo}`:''}</div>` : ''}
+                              </div>
+                              <div style="background:#fff;border:1px solid #fde68a;border-top:0;padding:24px;border-radius:0 0 18px 18px;font-family:Inter,system-ui,sans-serif;color:#0f172a;line-height:1.7;">
+                                <div style="font-size:15px;font-weight:600;">${note.topicText.replace(/</g,'&lt;')}</div>
+                                <div style="margin-top:14px;font-size:11px;color:#92400e;font-weight:800;">Saved on ${note.savedAt ? new Date(note.savedAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : ''}</div>
+                              </div>`;
+                            wrapper.style.position = 'fixed';
+                            wrapper.style.left = '-9999px';
+                            document.body.appendChild(wrapper);
+                            const safeTitle = note.topicText.slice(0,40).replace(/[^a-z0-9]+/gi,'_');
+                            await downloadAsMHTML('imp-note-printable', `Important_${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                            setTimeout(() => { try { document.body.removeChild(wrapper); } catch {} }, 500);
+                          } catch (err) { console.error(err); }
+                        }}
+                        className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 active:scale-95 transition-all flex items-center justify-center"
+                        title="Download (MHTML / Webpage)"
+                      >
+                        <Download size={14} />
+                      </button>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            const html = `
+                              <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:18px;color:white;border-radius:14px 14px 0 0;font-family:Inter,system-ui,sans-serif;">
+                                <div style="font-size:10px;font-weight:900;letter-spacing:.18em;opacity:.9;text-transform:uppercase;">Important Notes</div>
+                                <div style="font-size:18px;font-weight:900;margin-top:4px;">${note.topicText.replace(/</g,'&lt;')}</div>
+                              </div>
+                              <div style="background:#fffbeb;padding:16px;border:1px solid #fde68a;border-top:0;border-radius:0 0 14px 14px;color:#0f172a;line-height:1.6;font-size:14px;">${note.topicText.replace(/</g,'&lt;')}</div>`;
+                            await saveOfflineItem({
+                              id: `imp_${note.id}`,
+                              type: 'NOTE',
+                              title: note.topicText.slice(0, 80),
+                              subtitle: src?.lessonTitle || 'Important Notes',
+                              data: { html, topicText: note.topicText, source: src },
+                            });
+                            try { (window as any).__toast?.({ type: 'success', message: 'Saved offline ✓' }); } catch {}
+                          } catch (err) { console.error(err); }
+                        }}
+                        className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 active:scale-95 transition-all flex items-center justify-center"
+                        title="Save Offline"
+                      >
+                        <CloudOff size={14} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStarredNotes(prev => {
+                            const updated = prev.filter(n => n.id !== note.id);
+                            try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
+                            return updated;
+                          });
+                        }}
+                        className="w-9 h-9 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 active:scale-95 transition-all flex items-center justify-center"
+                        title="Remove"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
                   </div>
                 );
               })

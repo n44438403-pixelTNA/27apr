@@ -13,6 +13,119 @@ import { AiInterstitial } from './AiInterstitial';
 import { FlashcardMcqView } from './FlashcardMcqView';
 import { McqSpeakButtons } from './McqSpeakButtons';
 import { recordAttempt as recordRevisionAttempt } from '../utils/revisionTrackerV2';
+import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
+
+// Normalize chapter data so handleStart sees `manualMcqData` regardless of
+// whether the admin/save layer used `manualMcqData` or `mcqData` (legacy).
+const normalizeChapterData = (raw: any): any => {
+  if (!raw) return raw;
+  // If only `mcqData` exists, mirror it onto `manualMcqData` so downstream
+  // checks (`!data.manualMcqData || data.manualMcqData.length === 0`) pass.
+  if (!Array.isArray(raw.manualMcqData) && Array.isArray(raw.mcqData)) {
+    return { ...raw, manualMcqData: raw.mcqData };
+  }
+  return raw;
+};
+const dataHasContent = (d: any) => !!(
+  d && (
+    (Array.isArray(d.manualMcqData) && d.manualMcqData.length > 0) ||
+    (Array.isArray(d.mcqData) && d.mcqData.length > 0) ||
+    (typeof d.notes === 'string' && d.notes.trim().length > 0) ||
+    (typeof d.content === 'string' && d.content.trim().length > 0)
+  )
+);
+
+// Resilient chapter-data fetcher.
+// Admins occasionally save MCQ content under a slightly different key shape
+// (e.g. with/without stream suffix, or a different subject-name spelling).
+// We try the canonical key first, then a small set of common variants so the
+// student isn't blocked by a key mismatch — especially Class 6-12 where
+// stream is irrelevant but historical data sometimes carried a leading dash.
+// As a LAST RESORT (mirroring RevisionHub.tsx + MarksheetCard.tsx), we scan
+// all `nst_content_*` keys in localStorage and pick any whose key ends with
+// `_${chapterId}` — chapter IDs are unique enough to make this safe.
+const fetchChapterDataResilient = async (
+  board: string,
+  classLevel: string,
+  stream: string | null,
+  subjectName: string,
+  chapterId: string,
+): Promise<any | null> => {
+  const variants: string[] = [];
+  const push = (k: string) => { if (k && !variants.includes(k)) variants.push(k); };
+
+  const isHigh = classLevel === '11' || classLevel === '12';
+  const streamKey = isHigh && stream ? `-${stream}` : '';
+
+  // Build all key variants we'll try
+  push(`nst_content_${board}_${classLevel}${streamKey}_${subjectName}_${chapterId}`);
+  if (!isHigh) push(`nst_content_${board}_${classLevel}_${subjectName}_${chapterId}`);
+  if (!isHigh && stream) push(`nst_content_${board}_${classLevel}-${stream}_${subjectName}_${chapterId}`);
+  push(`nst_content_${board}_${classLevel}-_${subjectName}_${chapterId}`);
+  const normSub = (subjectName || '').trim();
+  if (normSub && normSub !== subjectName) push(`nst_content_${board}_${classLevel}${streamKey}_${normSub}_${chapterId}`);
+  push(`nst_content_${(board || '').toUpperCase()}_${classLevel}${streamKey}_${subjectName}_${chapterId}`);
+  const altBoard = board === 'CBSE' ? 'BSEB' : 'CBSE';
+  push(`nst_content_${altBoard}_${classLevel}${streamKey}_${subjectName}_${chapterId}`);
+
+  // ── PHASE 1: localStorage variants (synchronous, instant) ─────────────
+  for (const key of variants) {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (dataHasContent(parsed)) {
+          console.log('[McqView] ✓ localStorage key:', key);
+          return normalizeChapterData(parsed);
+        }
+      }
+    } catch {}
+  }
+
+  // ── PHASE 2: localStorage brute-force scan (still instant) ────────────
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith('nst_content_') || !k.endsWith(`_${chapterId}`)) continue;
+      try {
+        const stored = localStorage.getItem(k);
+        if (!stored) continue;
+        const parsed = JSON.parse(stored);
+        if (dataHasContent(parsed)) {
+          console.log('[McqView] ✓ localStorage SCAN key:', k);
+          return normalizeChapterData(parsed);
+        }
+      } catch {}
+    }
+  } catch {}
+
+  // ── PHASE 3: Firebase — try ALL variants in PARALLEL with a single
+  // overall 4 s budget. Whichever returns content first wins; the rest
+  // are abandoned. This bounds the loading spinner to ≤4 s, not 20+ s.
+  const fetchWithTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
+    Promise.race([
+      promise,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
+
+  try {
+    const remote = await fetchWithTimeout(
+      Promise.any(
+        variants.map(async (key) => {
+          const data = await getChapterData(key);
+          if (!dataHasContent(data)) throw new Error('empty');
+          console.log('[McqView] ✓ Firebase key:', key);
+          return normalizeChapterData(data);
+        }),
+      ),
+      4000,
+    );
+    if (remote) return remote;
+  } catch {}
+
+  console.warn('[McqView] ✗ No MCQ data. Tried keys:', variants, 'chapterId:', chapterId);
+  return null;
+};
 
 interface Props {
   chapter: Chapter;
@@ -77,21 +190,23 @@ export const McqView: React.FC<Props> = ({
   // NEW: MCQ Mode State (Free vs Premium Experience)
   const [mcqMode, setMcqMode] = useState<'FREE' | 'PREMIUM'>('FREE');
 
-  // Load topics on mount if content exists locally or via minimal fetch
+  // Load topics on mount if content exists locally or via minimal fetch.
+  // Uses the same resilient/normalized lookup so topic chips show up even when
+  // admin-uploaded MCQs landed under a key variant or legacy `mcqData` field.
   useEffect(() => {
-      // Helper to extract unique topics from chapter data (optimistic)
-      const streamKey = (classLevel === '11' || classLevel === '12') && stream ? `-${stream}` : '';
-      const key = `nst_content_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-          try {
-              const data = JSON.parse(stored);
-              if (data.manualMcqData) {
-                  const topics = Array.from(new Set(data.manualMcqData.map((q: any) => q.topic).filter(Boolean))) as string[];
-                  setAvailableTopics(topics);
-              }
-          } catch(e) {}
-      }
+      let cancelled = false;
+      (async () => {
+          const data: any = await fetchChapterDataResilient(board, classLevel, stream, subject.name, chapter.id);
+          if (cancelled) return;
+          const arr = Array.isArray(data?.manualMcqData) ? data.manualMcqData
+                    : Array.isArray(data?.mcqData) ? data.mcqData
+                    : null;
+          if (arr && arr.length > 0) {
+              const topics = Array.from(new Set(arr.map((q: any) => q.topic).filter(Boolean))) as string[];
+              setAvailableTopics(topics);
+          }
+      })();
+      return () => { cancelled = true; };
   }, [board, classLevel, stream, subject, chapter]);
 
   // Lucent-style Interactive MCQ List — load MCQs and open the unified
@@ -100,19 +215,15 @@ export const McqView: React.FC<Props> = ({
   const handleStartList = async (initialMode: 'mcq' | 'qa') => {
       setLoading(true);
       const streamKey = (classLevel === '11' || classLevel === '12') && stream ? `-${stream}` : '';
-      const key = `nst_content_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
-      let data: any = null;
-      try {
-          const fetchWithTimeout = (promise: Promise<any>, ms: number) =>
-              Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject('timeout'), ms))]);
-          data = await fetchWithTimeout(getChapterData(key), 2500);
-      } catch {}
-      if (!data) {
-          const stored = localStorage.getItem(key);
-          if (stored) data = JSON.parse(stored);
-      }
+      const data: any = await fetchChapterDataResilient(board, classLevel, stream, subject.name, chapter.id);
       if (!data || !data.manualMcqData || data.manualMcqData.length === 0) {
-          setAlertConfig({ isOpen: true, title: 'Coming Soon', message: "MCQs for this chapter aren't available yet." });
+          const expectedKey = `nst_content_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
+          setAlertConfig({
+            isOpen: true,
+            title: 'MCQ Coming Soon',
+            message: `Is chapter ke MCQ abhi upload nahi hue.\n\nDebug info:\n• Chapter ID: ${chapter.id}\n• Subject: ${subject.name}\n• Class: ${classLevel}\n• Board: ${board}\n\nAdmin se request karein ki "${chapter.title || 'this chapter'}" ke MCQ upload karein.`
+          });
+          console.warn('[McqView] No MCQ data. Expected key:', expectedKey);
           setLoading(false);
           return;
       }
@@ -141,20 +252,13 @@ export const McqView: React.FC<Props> = ({
 
   const handleStartFlashcard = async () => {
       setLoading(true);
-      const streamKey = (classLevel === '11' || classLevel === '12') && stream ? `-${stream}` : '';
-      const key = `nst_content_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
-      let data: any = null;
-      try {
-          const fetchWithTimeout = (promise: Promise<any>, ms: number) =>
-              Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject('timeout'), ms))]);
-          data = await fetchWithTimeout(getChapterData(key), 2500);
-      } catch {}
-      if (!data) {
-          const stored = localStorage.getItem(key);
-          if (stored) data = JSON.parse(stored);
-      }
+      const data: any = await fetchChapterDataResilient(board, classLevel, stream, subject.name, chapter.id);
       if (!data || !data.manualMcqData || data.manualMcqData.length === 0) {
-          setAlertConfig({ isOpen: true, title: 'Coming Soon', message: "MCQs for this chapter aren't available yet." });
+          setAlertConfig({
+            isOpen: true,
+            title: 'Flashcards Coming Soon',
+            message: `Is chapter ke flashcards abhi nahi banaye gaye.\n\nDebug info:\n• Chapter ID: ${chapter.id}\n• Subject: ${subject.name}\n• Class: ${classLevel}\n\nAdmin "${chapter.title || 'this chapter'}" ke MCQ upload karenge to flashcard yahan dikhega.`
+          });
           setLoading(false);
           return;
       }
@@ -201,29 +305,7 @@ export const McqView: React.FC<Props> = ({
 
       // 1. Fetch Data First (To avoid charging for empty chapters)
       setLoading(true);
-      
-      // STRICT KEY MATCHING WITH ADMIN
-      const streamKey = (classLevel === '11' || classLevel === '12') && stream ? `-${stream}` : '';
-      const key = `nst_content_${board}_${classLevel}${streamKey}_${subject.name}_${chapter.id}`;
-      
-      let data = null;
-      try {
-          // Race Firebase against a 2.5s timeout to prevent hanging on slow/offline networks
-          const fetchWithTimeout = (promise: Promise<any>, ms: number) => 
-              Promise.race([
-                  promise, 
-                  new Promise((_, reject) => setTimeout(() => reject("timeout"), ms))
-              ]);
-          
-          data = await fetchWithTimeout(getChapterData(key), 2500);
-      } catch (e) {
-          console.warn("Firebase fetch timed out or failed, falling back to local storage.");
-      }
-
-      if (!data) {
-          const stored = localStorage.getItem(key);
-          if (stored) data = JSON.parse(stored);
-      }
+      const data: any = await fetchChapterDataResilient(board, classLevel, stream, subject.name, chapter.id);
 
       // Handle Empty Content
       if (!data || !data.manualMcqData || data.manualMcqData.length === 0) {
@@ -482,6 +564,41 @@ export const McqView: React.FC<Props> = ({
             return null;
         })
         .filter((item): item is { question: string; qIndex: number, correctAnswer: number } => item !== null);
+
+      // ── MY MISTAKE BANK ──────────────────────────────────────────────
+      // Push every wrong-answered question into the persistent mistake bank
+      // so the My Mistake page can show & replay them. Right-answered ones
+      // are removed (so once student fixes a mistake it disappears).
+      try {
+          const wrongPayload = submittedQuestions
+              .map((q, idx) => {
+                  const selected = remappedAnswers[idx] !== undefined ? remappedAnswers[idx] : -1;
+                  if (selected !== -1 && selected !== q.correctAnswer) {
+                      return {
+                          question: q.question,
+                          options: q.options || [],
+                          correctAnswer: q.correctAnswer,
+                          explanation: q.explanation,
+                          topic: q.topic,
+                          chapterTitle: chapter.title,
+                          subjectName: subject.name,
+                          classLevel: classLevel,
+                          board: board,
+                          source: 'MCQ',
+                      };
+                  }
+                  return null;
+              })
+              .filter((x): x is NonNullable<typeof x> => x !== null);
+          if (wrongPayload.length > 0) addMistakes(wrongPayload);
+          // Remove correctly-answered mistakes from the bank.
+          submittedQuestions.forEach((q, idx) => {
+              const selected = remappedAnswers[idx] !== undefined ? remappedAnswers[idx] : -1;
+              if (selected !== -1 && selected === q.correctAnswer) {
+                  removeMistakeByQuestion(q.question, q.correctAnswer);
+              }
+          });
+      } catch (err) { console.warn('mistakeBank update failed:', err); }
 
       // Performance Label based on marks (Excllent, Good, Average, Bad)
       const scorePct = (score / attemptsCount) * 100;
