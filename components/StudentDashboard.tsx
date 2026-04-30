@@ -43,6 +43,7 @@ import { RewardEngine } from "../utils/engines/rewardEngine";
 import { Button } from "./ui/Button"; // Design System
 import { getActiveChallenges } from "../services/questionBank";
 import { generateDailyChallengeQuestions } from "../utils/challengeGenerator";
+import { searchNotesByWords, type NoteSearchResult } from "../utils/noteSearcher";
 import { generateMorningInsight } from "../services/morningInsight";
 import { LessonActionModal } from "./LessonActionModal";
 import { PullToRefresh } from "./PullToRefresh";
@@ -1253,6 +1254,40 @@ export const StudentDashboard: React.FC<Props> = ({
   const [homeResumeFilter, setHomeResumeFilter] = useState<'all' | 'chapter' | 'sarSangrah' | 'speedy' | 'mcq' | 'lucent'>('all');
   const [showHomeSearch, setShowHomeSearch] = useState(false);
   const [homeSearchQuery, setHomeSearchQuery] = useState('');
+  // Chapter-notes search results — yeh Class 6-12 (aur Competition) ke
+  // locally-cached chapter notes (Concept / Retention / Teaching Strategy /
+  // deep dives) mein word-match karta hai. Pehle search bar sirf chapter
+  // titles & subject names mein dhoondhta tha — ab agar koi word kisi bhi
+  // padhe hue chapter ke notes ke andar bhi ho, woh bhi result mein aata hai.
+  const [chapterNoteHits, setChapterNoteHits] = useState<NoteSearchResult[]>([]);
+  const [chapterNoteHitsLoading, setChapterNoteHitsLoading] = useState(false);
+  // Debounced effect — 250ms wait so we don't thrash the indexedDB scan
+  // while the user is still typing.
+  useEffect(() => {
+    const q = homeSearchQuery.trim();
+    if (!q || q.length < 2) {
+      setChapterNoteHits([]);
+      setChapterNoteHitsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setChapterNoteHitsLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        // Split query into words >=3 chars for the matcher; if user typed a
+        // single short word we still pass it through so an exact short match
+        // can hit (e.g. "DNA").
+        const words = q.split(/\s+/).filter(w => w.length >= 2);
+        const results = await searchNotesByWords(words.length ? words : [q], 12);
+        if (!cancelled) setChapterNoteHits(results);
+      } catch {
+        if (!cancelled) setChapterNoteHits([]);
+      } finally {
+        if (!cancelled) setChapterNoteHitsLoading(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [homeSearchQuery]);
   // When the user clicks a search result, we stash the query here so the
   // ChunkedNotesReader on the next screen (Lucent / Homework notes) can find
   // the matching topic and auto-read from that exact line. Cleared shortly
@@ -1463,6 +1498,59 @@ export const StudentDashboard: React.FC<Props> = ({
     setChapterOpenedFrom(currentLogicalTab === 'HOME' ? 'HOME' : 'COURSES');
     onTabChange((entry.contentType || 'PDF') as any);
     setFullScreen(true);
+  };
+
+  // Open a chapter that came from a chapter-notes search hit. The hit only
+  // gives us board/class/subjectName/chapterId — we need the full Subject
+  // and Chapter objects to drive the player. We resolve the Subject from
+  // the static syllabus list by name match (case-insensitive, also tries
+  // hyphen-variants), then call fetchChapters to obtain the Chapter object,
+  // and finally hand off to openRecentChapter so the existing resume +
+  // navigation pipeline kicks in.
+  const openChapterFromNoteHit = async (hit: NoteSearchResult) => {
+    try {
+      const board = (hit.board === 'BSEB' ? 'BSEB' : 'CBSE') as 'CBSE' | 'BSEB';
+      const cls = hit.classLevel;
+      const stream = (user.stream || 'Science') as any;
+      // Resolve subject by name. Try exact (case-insensitive) match first,
+      // then a normalised match that ignores hyphens / extra whitespace.
+      const subs = getSubjectsList(cls, stream, board);
+      const wanted = (hit.subjectName || '').toLowerCase().replace(/[-\s]+/g, ' ').trim();
+      let subj = subs.find(s => s.name.toLowerCase() === hit.subjectName?.toLowerCase());
+      if (!subj) {
+        subj = subs.find(s => s.name.toLowerCase().replace(/[-\s]+/g, ' ').trim() === wanted);
+      }
+      if (!subj) {
+        showAlert('Iss chapter ka subject is class mein available nahi hai.', 'ERROR');
+        return;
+      }
+      const lang = (user.preferredLanguage || 'English') as any;
+      const chapters = await fetchChapters(board, cls as any, stream, subj, lang);
+      const chapter = chapters.find(c => c.id === hit.chapterId);
+      if (!chapter) {
+        showAlert('Chapter milana mushkil hai. Shayad syllabus update ho gaya hai.', 'ERROR');
+        return;
+      }
+      // Stash the search query so the next reader auto-scrolls / highlights
+      // the matching line, just like Lucent / Homework hits do.
+      setPendingReadQuery(homeSearchQuery.trim());
+      // Build a minimal RecentChapterEntry-shaped object so we reuse the
+      // exact same open path (correct class context, scroll restore, tab
+      // switch, fullscreen).
+      openRecentChapter({
+        id: `search_${chapter.id}`,
+        chapter,
+        subject: subj as any,
+        classLevel: cls,
+        board,
+        contentType: 'PDF',
+        scrollY: 0,
+        timestamp: Date.now(),
+      } as any);
+    } catch (err) {
+      console.error('[search] openChapterFromNoteHit failed', err);
+      showAlert('Chapter kholne mein dikkat aayi.', 'ERROR');
+    }
   };
 
   // Open a previously-read Lucent page (from History → Continue Reading).
@@ -5084,8 +5172,16 @@ export const StudentDashboard: React.FC<Props> = ({
                         }
                       });
                       const hwResults = hwHits.slice(0, 8);
-                      const totalCount = recentResults.length + subjectResults.length + starResults.length + lucentResults.length + hwResults.length;
+                      // 6) Match inside any cached Class 6-12 / Competition chapter
+                      //    notes (Concept / Retention / Teaching Strategy / deep
+                      //    dives). Computed asynchronously by the debounced effect
+                      //    above and stored in `chapterNoteHits`.
+                      const noteResults = chapterNoteHits;
+                      const totalCount = recentResults.length + subjectResults.length + starResults.length + lucentResults.length + hwResults.length + noteResults.length;
                       if (totalCount === 0) {
+                        if (chapterNoteHitsLoading) {
+                          return <p className="text-center text-xs text-slate-400 font-bold py-3">Searching inside chapter notes…</p>;
+                        }
                         return <p className="text-center text-xs text-slate-400 font-bold py-3">No matches found. The search also looks inside notes — try a word that appears in your notes.</p>;
                       }
                       return (
@@ -5114,6 +5210,37 @@ export const StudentDashboard: React.FC<Props> = ({
                                     <p className="text-[10px] font-bold text-slate-400 truncate">Class {s.cls} · {board}</p>
                                   </div>
                                   <ChevronRight size={14} className="text-blue-400 shrink-0" />
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {noteResults.length > 0 && (
+                            <div className="space-y-1.5">
+                              <p className="text-[10px] font-black uppercase tracking-wider text-violet-500 px-1 flex items-center gap-1">
+                                Inside Chapter Notes
+                                <span className="text-[9px] font-bold text-slate-400">· Class 6-12 + Competition</span>
+                              </p>
+                              {noteResults.map((h, i) => (
+                                <button
+                                  key={`note_${h.storageKey}_${i}`}
+                                  onClick={() => {
+                                    openChapterFromNoteHit(h);
+                                    setShowHomeSearch(false);
+                                    setHomeSearchQuery('');
+                                  }}
+                                  className="w-full flex items-start gap-3 bg-white border border-violet-100 hover:border-violet-300 rounded-xl px-3 py-2.5 text-left transition-all active:scale-[0.98] shadow-sm"
+                                >
+                                  <div className="w-8 h-8 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center shrink-0">
+                                    <BookOpen size={14} />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-black text-slate-800 truncate">{h.noteTitle || h.subjectName}</p>
+                                    <p className="text-[10px] font-bold text-violet-500 truncate">
+                                      Class {h.classLevel} · {h.subjectName.replace(/-/g, ' ')} · {h.board}
+                                    </p>
+                                    <p className="text-[10px] text-slate-500 line-clamp-2 mt-0.5">{h.noteContent}</p>
+                                  </div>
+                                  <ChevronRight size={14} className="text-violet-400 shrink-0 mt-1" />
                                 </button>
                               ))}
                             </div>
@@ -9782,7 +9909,14 @@ export const StudentDashboard: React.FC<Props> = ({
                      isActive: !showStarredPage && currentLogicalTab === "GK",
                      onClick: () => switchToLogicalTab("GK") }]
                 : [{ id: "HISTORY" as const, label: "History", Icon: HistoryIcon,
-                     filledOnActive: true,
+                     // History icon (clock-with-rewind-arrow) is an OUTLINE
+                     // glyph — its inner clock-hands & numerals are negative
+                     // space. Filling it with `currentColor` (like Star/Home
+                     // do) collapses everything into a solid blue disc, which
+                     // looked like a meaningless blob in the bottom nav. So
+                     // we keep it OUTLINE-only and rely on the active blue
+                     // colour + bold stroke for the active state.
+                     filledOnActive: false,
                      isActive: !showStarredPage && currentLogicalTab === "HISTORY",
                      onClick: () => switchToLogicalTab("HISTORY") }]),
 

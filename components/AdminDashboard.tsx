@@ -9788,16 +9788,23 @@ Statement 2"
                                           </p>
                                           </div>
                                       </div>
+                                      {/* Upper cap = 1,00,00,00,000 (100 crore = 1 billion).
+                                          Yeh 32-bit integer aur localStorage ke liye safe hai
+                                          aur Number.MAX_SAFE_INTEGER (9 × 10^15) se bahut neeche
+                                          hai, isliye precision loss bhi nahi hota. Display
+                                          formatting (toLocaleString) bhi 12 digits tak comfortable
+                                          handle karta hai. */}
                                       <div className="grid grid-cols-3 gap-2">
                                           <div>
                                               <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Boost Min</label>
                                               <input
                                                   type="number"
                                                   min={0}
+                                                  max={1000000000}
                                                   step={1}
                                                   value={boost || ''}
                                                   onChange={e => {
-                                                      const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                                      const v = Math.min(1000000000, Math.max(0, Math.floor(Number(e.target.value) || 0)));
                                                       setLocalSettings({ ...localSettings, globalNotesFakeBoost: v });
                                                   }}
                                                   placeholder="0"
@@ -9809,10 +9816,11 @@ Statement 2"
                                               <input
                                                   type="number"
                                                   min={0}
+                                                  max={1000000000}
                                                   step={1}
                                                   value={boostMax || ''}
                                                   onChange={e => {
-                                                      const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                                      const v = Math.min(1000000000, Math.max(0, Math.floor(Number(e.target.value) || 0)));
                                                       setLocalSettings({ ...localSettings, globalNotesFakeBoostMax: v });
                                                   }}
                                                   placeholder="(same as min)"
@@ -9824,10 +9832,11 @@ Statement 2"
                                               <input
                                                   type="number"
                                                   min={0}
+                                                  max={1000000000}
                                                   step={1}
                                                   value={minVal || ''}
                                                   onChange={e => {
-                                                      const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                                      const v = Math.min(1000000000, Math.max(0, Math.floor(Number(e.target.value) || 0)));
                                                       setLocalSettings({ ...localSettings, globalNotesFakeMin: v });
                                                   }}
                                                   placeholder="0"
@@ -9835,6 +9844,9 @@ Statement 2"
                                               />
                                           </div>
                                       </div>
+                                      <p className="text-[10px] text-slate-500 mt-1 px-0.5">
+                                          Range: 0 – <b>1,00,00,00,000</b> (100 crore / 1 billion). Itni badi value se students ko massive social proof dikhega — sambhalkar use karein.
+                                      </p>
                                       <div className="flex gap-2 mt-3">
                                           <button
                                               onClick={() => {
@@ -9860,7 +9872,36 @@ Statement 2"
                                               }}
                                               className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-[11px] border border-emerald-300 hover:bg-emerald-200 transition-colors"
                                           >
-                                              200–12K Preset
+                                              200–12K
+                                          </button>
+                                          {/* 1 Crore preset — har note pe roughly 50 lakh – 1 crore
+                                              between min/max so numbers feel organic. Useful when
+                                              admin wants notes to look "very popular nationwide". */}
+                                          <button
+                                              onClick={() => {
+                                                  const ns = { ...localSettings, globalNotesFakeBoost: 5000000, globalNotesFakeBoostMax: 10000000, globalNotesFakeMin: 0 };
+                                                  setLocalSettings(ns);
+                                                  handleSaveSettings(ns);
+                                                  setAlertConfig({ isOpen: true, message: '✅ Preset applied: 50 lakh – 1 crore random per note.' });
+                                              }}
+                                              className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg font-bold text-[11px] border border-blue-300 hover:bg-blue-200 transition-colors whitespace-nowrap"
+                                          >
+                                              1 Cr
+                                          </button>
+                                          {/* 100 Crore preset — top of the supported range
+                                              (10 crore – 100 crore per note). Massive viral-look
+                                              numbers. Use sirf bohut bade events ya marketing
+                                              push ke liye. */}
+                                          <button
+                                              onClick={() => {
+                                                  const ns = { ...localSettings, globalNotesFakeBoost: 100000000, globalNotesFakeBoostMax: 1000000000, globalNotesFakeMin: 0 };
+                                                  setLocalSettings(ns);
+                                                  handleSaveSettings(ns);
+                                                  setAlertConfig({ isOpen: true, message: '✅ Preset applied: 10 crore – 100 crore random per note. (Maximum range)' });
+                                              }}
+                                              className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg font-bold text-[11px] border border-purple-300 hover:bg-purple-200 transition-colors whitespace-nowrap"
+                                          >
+                                              100 Cr
                                           </button>
                                           {enabled && (
                                               <button

@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Volume2, Square, BookOpen, Star, Palette, Check } from 'lucide-react';
+import { Volume2, Square, BookOpen, Star, Palette, Check, Type, RotateCcw, Search } from 'lucide-react';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
 import { splitIntoTopics, NotesTopic as Topic } from '../utils/notesSplitter';
+import { READING_FONTS, TOP_10_READING_FONTS, ensureReadingFontLoaded, getReadingFontById, ReadingFont } from '../utils/notesFonts';
+import { ReadingStylePopover } from './ReadingStylePopover';
 
 const FONT_SIZES = [13, 15, 17, 20] as const;
 const FONT_SIZE_KEY = 'nst_reading_font_size';
+const FONT_FAMILY_KEY = 'nst_reading_font_family';
+
+const getStoredFontFamilyId = (): string | null => {
+  try { return localStorage.getItem(FONT_FAMILY_KEY); } catch { return null; }
+};
 
 const getStoredFontIdx = (): number => {
   try {
@@ -118,6 +125,39 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   const [showFontMenu, setShowFontMenu] = useState(false);
   const fontSize = FONT_SIZES[fontIdx];
 
+  // Font family — student can pick from 500+ Google Fonts. The chosen font
+  // persists in localStorage and is loaded on demand. `null` means "default"
+  // (the app's normal Inter / system font), which is also what the Reset
+  // button restores to.
+  const [fontFamilyId, setFontFamilyId] = useState<string | null>(getStoredFontFamilyId);
+  const [showFontFamilyMenu, setShowFontFamilyMenu] = useState(false);
+  const [fontSearch, setFontSearch] = useState('');
+  const [fontCategory, setFontCategory] = useState<'all' | 'top10' | 'sans' | 'serif' | 'display' | 'handwriting' | 'mono' | 'indic'>('top10');
+  const activeFont: ReadingFont | null = useMemo(() => getReadingFontById(fontFamilyId), [fontFamilyId]);
+  // Whenever the active font changes, eagerly load its <link> tag so the page
+  // can render with the right glyphs immediately.
+  useEffect(() => {
+    if (activeFont?.gfontParam) ensureReadingFontLoaded(activeFont.gfontParam);
+  }, [activeFont]);
+  const pickFontFamily = (id: string | null) => {
+    setFontFamilyId(id);
+    try {
+      if (id) localStorage.setItem(FONT_FAMILY_KEY, id);
+      else localStorage.removeItem(FONT_FAMILY_KEY);
+    } catch {}
+    try { window.dispatchEvent(new CustomEvent('nst-reading-style-changed')); } catch {}
+    try { if (navigator.vibrate) navigator.vibrate(20); } catch {}
+  };
+  const filteredFonts = useMemo(() => {
+    const q = fontSearch.trim().toLowerCase();
+    let pool: ReadingFont[];
+    if (fontCategory === 'top10') pool = TOP_10_READING_FONTS;
+    else if (fontCategory === 'all') pool = READING_FONTS;
+    else pool = READING_FONTS.filter(f => f.category === fontCategory);
+    if (!q) return pool;
+    return pool.filter(f => f.label.toLowerCase().includes(q));
+  }, [fontSearch, fontCategory]);
+
   // Reading text colour — per active theme. We watch the <html> class list so
   // when the user flips Light/Dark/Blue from the Settings sheet, the picker
   // and applied colour update instantly without a remount.
@@ -145,10 +185,30 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     setFontIdx(prev => {
       const next = Math.max(0, Math.min(3, prev + delta));
       try { localStorage.setItem(FONT_SIZE_KEY, String(next)); } catch {}
+      try { window.dispatchEvent(new CustomEvent('nst-reading-style-changed')); } catch {}
       return next;
     });
     try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
   };
+
+  // Stay in sync with external Reading-Style controls (e.g. PdfView's outer
+  // "Aa" font popover). When the user changes size or family from outside,
+  // every mounted reader re-reads the stored values so the change is visible
+  // instantly without unmounting/remounting the topic list.
+  useEffect(() => {
+    const sync = () => {
+      try {
+        const v = parseInt(localStorage.getItem(FONT_SIZE_KEY) || '1', 10);
+        if (!isNaN(v) && v >= 0 && v <= 3) setFontIdx(v);
+      } catch {}
+      try {
+        const id = localStorage.getItem(FONT_FAMILY_KEY);
+        setFontFamilyId(id);
+      } catch {}
+    };
+    window.addEventListener('nst-reading-style-changed', sync);
+    return () => window.removeEventListener('nst-reading-style-changed', sync);
+  }, []);
 
   const itemRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
@@ -258,10 +318,16 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   }, [content]);
 
   // Auto-start "Read All" when the autoStart prop is true (used by Lucent's
-  // Auto-Read & Sync mode to chain pages together). Defer slightly so that the
-  // stopAll() above on content change has a chance to flush first.
+  // Auto-Read & Sync mode + the Concept-page Read All to chain pages/topics
+  // together). Defer slightly so that the stopAll() above on content change
+  // has a chance to flush first. When `autoStart` flips from true → false the
+  // parent has cancelled chained playback, so we mirror that by stopping any
+  // in-flight TTS in this reader so it doesn't keep advancing lines.
   useEffect(() => {
-    if (!autoStart) return;
+    if (!autoStart) {
+      if (isReadingRef.current) stopAll();
+      return;
+    }
     if (topics.length === 0) return;
     const t = setTimeout(() => startFromIndex(0), 200);
     return () => clearTimeout(t);
@@ -302,6 +368,11 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
 
   return (
     <div className={className || ''}>
+      {/* Centered Reading Style popover (Portal-based, viewport-centred).
+          Tapping the small Type ("T") button in the top bar opens this same
+          popup — same as PdfView's outer "Aa" button — so the experience is
+          consistent regardless of where the picker is launched from. */}
+      <ReadingStylePopover isOpen={showFontFamilyMenu} onClose={() => setShowFontFamilyMenu(false)} />
       {/* Header with font controls + Read All.
           NOTE: Must be fully opaque (`bg-white`) — earlier `bg-white/95` +
           backdrop-blur let the scrolling notes content bleed visibly behind
@@ -344,6 +415,28 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   A+
                 </button>
               </div>
+
+              {/* Font family picker — pehle yeh ek narrow card ke andar
+                  absolute-position se kholta tha jisse Read More jaisi narrow
+                  views mein side se cut ho jata tha. Ab same centered popup
+                  use karte hain (ReadingStylePopover) jo Portal ke through
+                  poori screen ke beech mein khulta hai — left-cut/clipping
+                  nahi hota, aur category tabs (All/Hindi/etc.) tap karne par
+                  bhi kuch gayab nahi hota. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFontFamilyMenu(true);
+                  // Preload top10 fonts for previews
+                  TOP_10_READING_FONTS.forEach(f => ensureReadingFontLoaded(f.gfontParam));
+                }}
+                className={`p-1.5 rounded-lg transition flex items-center gap-1 ${activeFont ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 active:bg-slate-300'}`}
+                title={activeFont ? `Font: ${activeFont.label}` : 'Font badlein (686+ choices)'}
+                aria-label="Pick reading font"
+                aria-expanded={showFontFamilyMenu}
+              >
+                <Type size={14} />
+              </button>
 
               {/* Reading-text colour picker — opens a small palette below the
                   bar with 6 swatches curated for the active theme. The first
@@ -441,7 +534,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               >
                 <p
                   className="font-black text-indigo-800 uppercase tracking-wide"
-                  style={{ fontSize: `${Math.min(fontSize + 2, 20)}px` }}
+                  style={{ fontSize: `${Math.min(fontSize + 2, 20)}px`, fontFamily: activeFont?.family }}
                 >
                   {topic.text}
                 </p>
@@ -484,6 +577,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                     // parent-supplied override (if any) or the student's
                     // chosen palette colour for the active theme.
                     color: isActive ? undefined : (textColorOverride || textColor),
+                    fontFamily: activeFont?.family,
                   }}
                 >
                   <span className={`font-bold mr-1.5 ${starred ? 'text-amber-400' : 'text-indigo-400'}`}>•</span>

@@ -4,7 +4,8 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { Chapter, User, Subject, SystemSettings, HtmlModule, PremiumNoteSlot, DeepDiveEntry, AdditionalNoteEntry } from '../types';
-import { FileText, Lock, ArrowLeft, Crown, Star, CheckCircle, AlertCircle, Globe, Maximize, Minimize, Layers, HelpCircle, Minus, Plus, Volume2, Square, Zap, Headphones, BookOpen, Music, Play, Pause, SkipForward, SkipBack, Book, List, Layout, ExternalLink, GraduationCap, ChevronRight, Sparkles, RotateCw, Palette } from 'lucide-react';
+import { FileText, Lock, ArrowLeft, Crown, Star, CheckCircle, AlertCircle, Globe, Maximize, Minimize, Layers, HelpCircle, Minus, Plus, Volume2, Square, Zap, Headphones, BookOpen, Music, Play, Pause, SkipForward, SkipBack, Book, List, Layout, ExternalLink, GraduationCap, ChevronRight, Sparkles, RotateCw, Palette, Type } from 'lucide-react';
+import { ReadingStylePopover } from './ReadingStylePopover';
 import { CustomAlert } from './CustomDialogs';
 import { getChapterData, saveUserToLive } from '../firebase';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
@@ -210,6 +211,10 @@ export const PdfView: React.FC<Props> = ({
   // SCROLL TO HIDE HEADER STATE
   const [showHeader, setShowHeader] = useState(true);
   const [scrollProgress, setScrollProgress] = useState(0);
+  // Reading-style popover (font size + 686 font family picker) — opened via
+  // the small "Aa" button in the header. Persists choices to the same
+  // localStorage keys ChunkedNotesReader uses, so tabs/lessons stay in sync.
+  const [showReadingStyle, setShowReadingStyle] = useState(false);
   const lastScrollY = useRef(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollSaveTimerRef = useRef<number | null>(null);
@@ -260,11 +265,12 @@ export const PdfView: React.FC<Props> = ({
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
       const target = e.currentTarget;
       const currentScrollY = target.scrollTop;
-      if (currentScrollY > lastScrollY.current + 10 && currentScrollY > 50) {
-          setShowHeader(false); // Scrolling down
-      } else if (currentScrollY < lastScrollY.current - 10 || currentScrollY < 50) {
-          setShowHeader(true); // Scrolling up
-      }
+      // Sticky tabs: keep the Concept / Retention / Teaching Strategy strip
+      // ALWAYS visible. Earlier the entire header (title row + tabs) auto-hid
+      // on scroll-down, which left students stranded — they had to scroll all
+      // the way back up to switch tabs. Now the header simply never collapses
+      // so the tab card is permanently fixed at the top.
+      setShowHeader(true);
       lastScrollY.current = currentScrollY;
 
       // Reading progress (0-100)
@@ -547,38 +553,29 @@ export const PdfView: React.FC<Props> = ({
   }, [isAutoPlaying, premiumChunkIndex, activeTab, premiumChunks]);
 
   // DEEP DIVE AUTO-PLAY LOGIC
+  // ─────────────────────────────────────────────────────────────────────────
+  // Earlier this effect spoke the WHOLE topic content as one big speakText
+  // chunk, which meant the Concept page never showed the active line, never
+  // auto-scrolled within a topic, and the per-line star/tap-to-read affordance
+  // was wasted. Now the page-level "Read All" simply selects which topic is
+  // currently active — each topic's <ChunkedNotesReader> picks that up via
+  // its `autoStart` prop and runs its own line-by-line TTS with highlight +
+  // auto-scroll. When ChunkedNotesReader fires `onComplete`, the parent
+  // advances to the next topic (handled inline in the topic .map below).
+  //
+  // The only thing we still do here is keep the active topic CARD scrolled
+  // into view whenever auto-play moves on, so the new active card is visible
+  // while its lines start streaming.
   useEffect(() => {
-      if (isAutoPlaying && activeTab === 'DEEP_DIVE' && deepDiveTopics.length > 0) {
-          const currentIndex = activeTopicIndex; // Start from current viewed
-
-          if (currentIndex < deepDiveTopics.length) {
-              const topic = deepDiveTopics[currentIndex];
-              setTopicSpeakingState(currentIndex);
-
-              // Scroll to topic
-              document.getElementById(`topic-card-${currentIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-              speakText(
-                  topic.content, // speakText strips HTML automatically
-                  null,
-                  speechRate,
-                  'hi-IN',
-                  undefined,
-                  () => {
-                      // On End
-                      if (isAutoPlaying) {
-                          if (currentIndex + 1 < deepDiveTopics.length) {
-                              setActiveTopicIndex(currentIndex + 1);
-                          } else {
-                              setIsAutoPlaying(false);
-                              setTopicSpeakingState(null);
-                          }
-                      }
-                  }
-              );
-          }
-      }
-  }, [isAutoPlaying, activeTopicIndex, activeTab]); // Trigger when index updates in auto mode
+      if (!isAutoPlaying || activeTab !== 'DEEP_DIVE') return;
+      if (deepDiveTopics.length === 0) return;
+      setTopicSpeakingState(activeTopicIndex);
+      // Defer scroll so the autoStart-driven inner reader has time to mount.
+      const t = setTimeout(() => {
+          document.getElementById(`topic-card-${activeTopicIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+      return () => clearTimeout(t);
+  }, [isAutoPlaying, activeTopicIndex, activeTab, deepDiveTopics.length]);
 
   const handleTopicPlay = (index: number) => {
       if (topicSpeakingState === index) {
@@ -1422,6 +1419,10 @@ export const PdfView: React.FC<Props> = ({
            message={alertConfig.message}
            onClose={() => setAlertConfig({...alertConfig, isOpen: false})}
        />
+       {/* Reading Style popover (font size + 686 font family) — opens from
+           the "Aa" button in the header. Lives at the top of the tree so it
+           floats above sticky tabs / pdf rotate buttons / etc. */}
+       <ReadingStylePopover isOpen={showReadingStyle} onClose={() => setShowReadingStyle(false)} />
 
        {/* HEADER — Lucent/Sar-Sangrah style: edge-to-edge, no manual fullscreen toggle.
            Top row keeps only Back + Lesson title (Read All button is rendered by
@@ -1439,35 +1440,31 @@ export const PdfView: React.FC<Props> = ({
              is on the PDF cover anyway) — keep only Back + 📚/📝 MCQ pill + tab
              strip + a "Maximize" button. */}
        {!(activeTab === 'PREMIUM' && pdfFullscreen) && (
-       <div className={`sticky top-0 z-30 bg-white shadow-sm flex flex-col transition-all duration-300 w-full m-0 rounded-none ${!showHeader ? '-translate-y-full absolute opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
+       /* Header: bg-slate-50 hata diya, padding reduce ki, aur Notes/MCQ pill
+          ko title row mein inline kar diya — taaki URL bar ke neeche koi
+          extra white gap na bache aur tabs upar aa jayein. Title row +
+          tabs row sirf 2 thin rows hain ab. */
+       <div className={`sticky top-0 z-30 bg-white shadow-sm flex flex-col transition-all duration-200 w-full m-0 rounded-none ${!showHeader ? '-translate-y-full absolute opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
            {activeTab !== 'PREMIUM' && (
-               <div className="flex items-center gap-2 px-2 sm:px-3 pt-1.5 pb-1">
-                   <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-600 shrink-0">
-                       <ArrowLeft size={18} />
+               <div className="flex items-center gap-1.5 px-2 sm:px-3 py-0.5">
+                   <button onClick={onBack} className="p-1 hover:bg-slate-100 rounded-full text-slate-600 shrink-0">
+                       <ArrowLeft size={16} />
                    </button>
-                   <h3 className="flex-1 min-w-0 font-bold text-slate-800 leading-tight line-clamp-1 text-sm">{chapter.title}</h3>
-                   <button onClick={() => setSyllabusMode('SCHOOL')} className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all shrink-0 ${syllabusMode === 'SCHOOL' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>School</button>
-                   <button onClick={() => setSyllabusMode('COMPETITION')} className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all shrink-0 ${syllabusMode === 'COMPETITION' ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>Comp</button>
-               </div>
-           )}
-
-           {/* Notes ↔ MCQ pill — slimmer (single line, no emojis, smaller padding) */}
-           {onSwitchToMcq && activeTab !== 'PREMIUM' && (
-               <div className="px-3 sm:px-4 pb-1.5">
-                   <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200">
-                       <button
-                           disabled
-                           className="flex-1 py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 bg-white text-blue-600 shadow-sm"
-                       >
-                           <BookOpen size={12}/> Notes
-                       </button>
+                   <h3 className="flex-1 min-w-0 font-bold text-slate-800 leading-tight line-clamp-1 text-[13px]">{chapter.title}</h3>
+                   <button onClick={() => setSyllabusMode('SCHOOL')} className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold transition-all shrink-0 ${syllabusMode === 'SCHOOL' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>School</button>
+                   <button onClick={() => setSyllabusMode('COMPETITION')} className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold transition-all shrink-0 ${syllabusMode === 'COMPETITION' ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>Comp</button>
+                   {/* Notes ↔ MCQ inline pill — title row mein hi merge kar diya
+                       taaki ek alag row na lage. Sirf MCQ button dikhata hai
+                       (already on Notes hain). */}
+                   {onSwitchToMcq && (
                        <button
                            onClick={onSwitchToMcq}
-                           className="flex-1 py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 text-slate-600 hover:bg-white/60 transition-all"
+                           className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 shrink-0 flex items-center gap-0.5"
+                           title="Switch to MCQ"
                        >
-                           <HelpCircle size={12}/> MCQ
+                           <HelpCircle size={10} /> MCQ
                        </button>
-                   </div>
+                   )}
                </div>
            )}
 
@@ -1493,6 +1490,16 @@ export const PdfView: React.FC<Props> = ({
                            </button>
                        </div>
                    )}
+                   {/* Aa font controls also available on Retention so students
+                       padhte waqt kabhi bhi font/size badal sakein. */}
+                   <button
+                       onClick={() => setShowReadingStyle(true)}
+                       className="p-1.5 rounded-full text-slate-600 hover:bg-slate-100 shrink-0"
+                       title="Font & size badlein"
+                       aria-label="Reading style"
+                   >
+                       <Type size={15} />
+                   </button>
                    <button
                        onClick={rotatePdf}
                        className={`relative p-1.5 rounded-full shrink-0 transition-colors ${pdfRotation !== 0 ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
@@ -1651,6 +1658,19 @@ export const PdfView: React.FC<Props> = ({
                                <div className="flex justify-between items-center px-3 sm:px-0 pt-1.5 pb-1">
                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{deepDiveTopics.length} Sections</p>
                                    <div className="flex gap-1 items-center">
+                                       {/* Aa font controls — yahaan ALWAYS visible hain (Concept ke
+                                           main notes mein), Read More wrapper jaisa. Tap karne par
+                                           ek centered popup khulta hai jismein font size (A−/A+) +
+                                           686 fonts ka picker hai. */}
+                                       <button
+                                           onClick={() => setShowReadingStyle(true)}
+                                           className="flex items-center gap-1 px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 hover:bg-indigo-100 active:bg-indigo-200 transition-colors font-bold text-[10px] uppercase tracking-wider"
+                                           title="Font & size badlein"
+                                           aria-label="Reading style"
+                                       >
+                                           <Type size={11} />
+                                           Aa
+                                       </button>
                                        <button
                                            onClick={() => {
                                                const htmlContent = deepDiveTopics.map(t => `<h2>${t.title}</h2>${t.content}`).join('<hr/>');
@@ -1793,12 +1813,29 @@ export const PdfView: React.FC<Props> = ({
                                               // pill already drives chained-topic playback, and tap-to-
                                               // read on each line still works without that bar — saving
                                               // a duplicate ~50px sticky strip on every card.
+                                              //
+                                              // AUTO-PLAY HOOK-UP: when the page-level Read All is on
+                                              // and this card is the current topic, we set `autoStart`
+                                              // so ChunkedNotesReader plays its own line-by-line TTS
+                                              // (with highlight + auto-scroll). On `onComplete` we move
+                                              // to the next topic — chaining all Concept sections in
+                                              // sequence with proper per-line UX, not one giant blob.
                                               <div className="-mx-3 sm:-mx-5">
                                                   <ChunkedNotesReader
                                                       content={topic.content}
                                                       topBarLabel={topic.title}
                                                       noteKey={`pdfview_${chapter.id}_topic_${idx}`}
                                                       hideTopBar
+                                                      autoStart={isAutoPlaying && activeTopicIndex === idx}
+                                                      onComplete={() => {
+                                                          if (!isAutoPlaying) return;
+                                                          if (idx + 1 < deepDiveTopics.length) {
+                                                              setActiveTopicIndex(idx + 1);
+                                                          } else {
+                                                              setIsAutoPlaying(false);
+                                                              setTopicSpeakingState(null);
+                                                          }
+                                                      }}
                                                   />
                                               </div>
                                           )}
