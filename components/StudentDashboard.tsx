@@ -77,6 +77,7 @@ import {
   Check,
   Ban,
   Smartphone,
+  Monitor,
   Trophy,
   ShoppingBag,
   ArrowRight,
@@ -131,7 +132,8 @@ import {
   History as HistoryIcon,
 } from "lucide-react";
 import { speakText, stopSpeech } from "../utils/textToSpeech";
-import { getMistakeBankSync } from "../utils/mistakeBank";
+import { getMistakeBankSync, addMistakes, removeMistakeByQuestion } from "../utils/mistakeBank";
+import { isDesktopModeOn, setDesktopMode, applyDesktopModeFromStorage, rotateScreen } from "../utils/displayPrefs";
 import { hapticLight, hapticMedium, hapticStrong } from "../utils/haptic";
 import { splitIntoTopics } from "../utils/notesSplitter";
 import { SubjectSelection } from "./SubjectSelection";
@@ -1053,6 +1055,8 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showHomeworkHistory, setShowHomeworkHistory] = useState(false);
   const [showSettingsSheet, setShowSettingsSheet] = useState(false);
   const [appLang, setAppLangState] = useAppLang();
+  const [desktopMode, setDesktopModeState] = useState<boolean>(() => isDesktopModeOn());
+  useEffect(() => { applyDesktopModeFromStorage(); }, []);
   const [homeworkSubjectView, setHomeworkSubjectView] = useState<string | null>(null);
   const [lucentCategoryView, setLucentCategoryView] = useState(false);
   // Page-wise notes viewer for admin-added Lucent lessons
@@ -1416,8 +1420,42 @@ export const StudentDashboard: React.FC<Props> = ({
     setReadingStreak(getReadingStreak());
   }, [activeTab, showHomeworkHistory, hwActiveHwId, contentViewStep]);
 
-  // Open a previously-read chapter (from "Resume reading" card on Home)
+  // Open a previously-read chapter (from "Resume reading" card on Home).
+  // IMPORTANT: We MUST restore the class + board the chapter was originally
+  // saved under, otherwise PdfView will fetch its content using the user's
+  // *current* class/board and find nothing — i.e. the bug where Continue
+  // Reading for a class-7 chapter showed "0 SECTIONS / No Deep Dive content
+  // available" because PdfView re-keyed the fetch with class-10 (the user's
+  // default). The saved entry already has both fields, we just weren't using
+  // them.
   const openRecentChapter = (entry: RecentChapterEntry) => {
+    // Restore the saved class/board context FIRST so the downstream PdfView
+    // useEffect (which depends on classLevel + board) refetches with the
+    // correct key as soon as it mounts.
+    if (entry.classLevel) {
+      setActiveSessionClass(entry.classLevel as any);
+    }
+    if (entry.board === 'CBSE' || entry.board === 'BSEB') {
+      setActiveSessionBoard(entry.board);
+    }
+    // Seed PdfView's per-chapter scroll cache from the entry's saved scrollY
+    // so the user lands back on the exact paragraph they stopped at — even
+    // if localStorage was cleared on this device but the recent-reads list
+    // is still intact (e.g. PWA cache wipe). PdfView's restore effect
+    // reads this same key on mount and retries via ResizeObserver until the
+    // content is tall enough to honour the saved position.
+    try {
+      if (entry.chapter?.id && typeof entry.scrollY === 'number' && entry.scrollY > 20) {
+        const k = `nst_chapter_scroll_${entry.chapter.id}`;
+        const existing = parseInt(localStorage.getItem(k) || '0', 10) || 0;
+        // Only overwrite when the entry's saved position is more recent /
+        // further than what's already cached, so we don't accidentally
+        // rewind the user past a more-recent local read.
+        if (entry.scrollY > existing) {
+          localStorage.setItem(k, String(Math.round(entry.scrollY)));
+        }
+      }
+    } catch {}
     setSelectedSubject(entry.subject as any);
     setSelectedChapter(entry.chapter);
     setContentViewStep('PLAYER');
@@ -3071,7 +3109,11 @@ export const StudentDashboard: React.FC<Props> = ({
                 onClick={async () => {
                   try {
                     const safeTitle = (activeHw.title || 'Homework').replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
-                    await downloadAsMHTML('hw-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                    await downloadAsMHTML('hw-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`, {
+                      appName: settings?.appShortName || settings?.appName || 'IIC',
+                      pageTitle: activeHw.title || 'Homework',
+                      subtitle: 'Homework Notes',
+                    });
                     showAlert('📥 Saved offline!', 'SUCCESS');
                   } catch (e) {
                     showAlert('Download failed. Please try again.', 'ERROR');
@@ -4676,7 +4718,11 @@ export const StudentDashboard: React.FC<Props> = ({
                                     wrapper.style.left = '-9999px';
                                     document.body.appendChild(wrapper);
                                     const fname = (entry.chapter?.title || 'chapter').slice(0,40).replace(/[^a-z0-9]+/gi,'_');
-                                    await downloadAsMHTML(wrapper.id, `${fname}_${new Date().toISOString().slice(0,10)}`);
+                                    await downloadAsMHTML(wrapper.id, `${fname}_${new Date().toISOString().slice(0,10)}`, {
+                                      appName: settings?.appShortName || settings?.appName || 'IIC',
+                                      pageTitle: entry.chapter?.title || 'Chapter',
+                                      subtitle: `Class ${entry.classLevel || ''} · ${entry.subject?.name || ''}`.trim(),
+                                    });
                                     setTimeout(() => { try { document.body.removeChild(wrapper); } catch {} }, 500);
                                   } catch (err) { console.error(err); }
                                 }}
@@ -6211,6 +6257,47 @@ export const StudentDashboard: React.FC<Props> = ({
                   </div>
                 </button>
 
+                {/* DESKTOP MODE TOGGLE */}
+                <button
+                  onClick={() => {
+                    const next = !desktopMode;
+                    setDesktopMode(next);
+                    setDesktopModeState(next);
+                  }}
+                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${cardBg}`}
+                >
+                  <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-600'}`}>
+                    {desktopMode ? <Monitor size={18} /> : <Smartphone size={18} />}
+                  </div>
+                  <div className="flex-1 text-left min-w-0">
+                    <div className={`text-sm font-bold ${sheetTextStrong}`}>{tApp(appLang, 'desktop_mode')}</div>
+                    <div className={`text-[11px] font-medium ${sheetTextMuted}`}>{tApp(appLang, 'desktop_mode_hint')}</div>
+                  </div>
+                  <div className={`w-10 h-6 ${desktopMode ? 'bg-indigo-500' : (isDarkMode ? 'bg-slate-700' : 'bg-slate-200')} rounded-full flex items-center px-1 overflow-hidden`}>
+                    <div className={`w-4 h-4 rounded-full transition-transform bg-white shadow ${desktopMode ? 'translate-x-4' : ''}`}></div>
+                  </div>
+                </button>
+
+                {/* ROTATE SCREEN */}
+                <button
+                  onClick={async () => {
+                    const result = await rotateScreen();
+                    if (result === null) {
+                      showAlert(tApp(appLang, 'rotate_unsupported'), 'WARNING');
+                    }
+                  }}
+                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${cardBg}`}
+                >
+                  <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-violet-500/20 text-violet-300' : 'bg-violet-100 text-violet-600'}`}>
+                    <RotateCcw size={18} />
+                  </div>
+                  <div className="flex-1 text-left min-w-0">
+                    <div className={`text-sm font-bold ${sheetTextStrong}`}>{tApp(appLang, 'rotate_screen')}</div>
+                    <div className={`text-[11px] font-medium ${sheetTextMuted}`}>{tApp(appLang, 'rotate_screen_hint')}</div>
+                  </div>
+                  <ChevronRight size={16} className={sheetTextMuted} />
+                </button>
+
                 {/* SETUP RECOVERY */}
                 <button
                   onClick={() => { setShowSidebar(false); setShowRecoveryModal(true); setShowSettingsSheet(false); }}
@@ -6799,17 +6886,40 @@ export const StudentDashboard: React.FC<Props> = ({
                         <button
                           key={i}
                           onClick={() => {
-                            if (
-                              i ===
-                              settings.globalChallengeMcq![0].correctAnswer
-                            ) {
+                            const mcq = settings.globalChallengeMcq![0];
+                            const isCorrect = i === mcq.correctAnswer;
+                            // ── MY MISTAKE BANK ──────────────────────────
+                            // Challenge of the Day auto-submits on tap (no
+                            // Submit button) — user reported wrong answers
+                            // here were never landing on the My Mistake
+                            // page. So track them inline: wrong → add,
+                            // right → remove (so a fixed mistake disappears).
+                            try {
+                              if (isCorrect) {
+                                removeMistakeByQuestion(mcq.question, mcq.correctAnswer);
+                              } else {
+                                addMistakes([{
+                                  question: mcq.question,
+                                  options: mcq.options || [],
+                                  correctAnswer: mcq.correctAnswer,
+                                  explanation: (mcq as any).explanation,
+                                  topic: (mcq as any).topic || 'Daily Challenge',
+                                  chapterTitle: 'Challenge of the Day',
+                                  subjectName: (mcq as any).subjectName || 'Challenge',
+                                  classLevel: user.classLevel,
+                                  board: user.board,
+                                  source: 'CHALLENGE',
+                                }]);
+                              }
+                            } catch (err) { console.warn('mistakeBank update failed:', err); }
+                            if (isCorrect) {
                               showAlert(
                                 "🎉 Correct Answer! Great job!",
                                 "SUCCESS",
                               );
                             } else {
                               showAlert(
-                                `❌ Incorrect. The right answer is: ${settings.globalChallengeMcq![0].options[settings.globalChallengeMcq![0].correctAnswer]}`,
+                                `❌ Incorrect. The right answer is: ${mcq.options[mcq.correctAnswer]}. Added to My Mistake page for revision.`,
                                 "ERROR",
                               );
                             }
@@ -7972,7 +8082,11 @@ export const StudentDashboard: React.FC<Props> = ({
                   <button
                     onClick={async () => {
                       try {
-                        await downloadAsMHTML('comp-mcq-printable', `Competition_MCQs_${new Date().toISOString().slice(0,10)}`);
+                        await downloadAsMHTML('comp-mcq-printable', `Competition_MCQs_${new Date().toISOString().slice(0,10)}`, {
+                          appName: settings?.appShortName || settings?.appName || 'IIC',
+                          pageTitle: 'Competition MCQs',
+                          subtitle: `Practice MCQ Maker · ${allMcqs.length} questions`,
+                        });
                         showAlert(`📥 ${allMcqs.length} MCQs offline save ho gaye!`, 'SUCCESS');
                       } catch (e) {
                         showAlert('Download failed. Please try again.', 'ERROR');
@@ -10218,7 +10332,11 @@ export const StudentDashboard: React.FC<Props> = ({
                     try {
                       const safeTitle = `${entry.lessonTitle || 'Lucent'}_pg${currentPage?.pageNo || safeIndex + 1}`
                         .replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
-                      await downloadAsMHTML('lucent-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                      await downloadAsMHTML('lucent-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`, {
+                        appName: settings?.appShortName || settings?.appName || 'IIC',
+                        pageTitle: `${entry.lessonTitle || 'Lucent'} · Page ${currentPage?.pageNo || safeIndex + 1}`,
+                        subtitle: 'Lucent Notes',
+                      });
                       showAlert('📥 Saved offline!', 'SUCCESS');
                     } catch (e) {
                       showAlert('Download failed. Please try again.', 'ERROR');
@@ -10468,7 +10586,11 @@ RULES:
                             try {
                               const safeTitle = `${entry.lessonTitle || 'Lucent'}_pg${currentPage?.pageNo || safeIndex + 1}_MCQs`
                                 .replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
-                              await downloadAsMHTML('lucent-mcq-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                              await downloadAsMHTML('lucent-mcq-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`, {
+                                appName: settings?.appShortName || settings?.appName || 'IIC',
+                                pageTitle: `${entry.lessonTitle || 'Lucent'} · Page ${currentPage?.pageNo || safeIndex + 1} MCQs`,
+                                subtitle: `Lucent MCQs · ${mcqs.length} questions`,
+                              });
                               showAlert(`📥 ${mcqs.length} MCQs saved offline!`, 'SUCCESS');
                             } catch (e) {
                               showAlert('Download failed. Please try again.', 'ERROR');
@@ -10732,7 +10854,11 @@ RULES:
               onClick={async () => {
                 try {
                   const safeTitle = (activePlayerHw.title || 'Homework_MCQ').replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60);
-                  await downloadAsMHTML('hw-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                  await downloadAsMHTML('hw-note-printable', `${safeTitle}_${new Date().toISOString().slice(0,10)}`, {
+                    appName: settings?.appShortName || settings?.appName || 'IIC',
+                    pageTitle: activePlayerHw.title || 'Homework MCQ',
+                    subtitle: 'Homework MCQs',
+                  });
                   showAlert('📥 Saved offline!', 'SUCCESS');
                 } catch (e) {
                   showAlert('Download failed. Please try again.', 'ERROR');
@@ -11645,7 +11771,11 @@ RULES:
                             wrapper.style.left = '-9999px';
                             document.body.appendChild(wrapper);
                             const safeTitle = note.topicText.slice(0,40).replace(/[^a-z0-9]+/gi,'_');
-                            await downloadAsMHTML('imp-note-printable', `Important_${safeTitle}_${new Date().toISOString().slice(0,10)}`);
+                            await downloadAsMHTML('imp-note-printable', `Important_${safeTitle}_${new Date().toISOString().slice(0,10)}`, {
+                              appName: settings?.appShortName || settings?.appName || 'IIC',
+                              pageTitle: `Important · ${note.topicText.slice(0, 60)}`,
+                              subtitle: 'Important Notes',
+                            });
                             setTimeout(() => { try { document.body.removeChild(wrapper); } catch {} }, 500);
                           } catch (err) { console.error(err); }
                         }}

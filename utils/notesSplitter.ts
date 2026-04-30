@@ -65,9 +65,22 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
 
     const isMdHeading = /^#{1,6}\s+/.test(trimmed);
     const isShortBoldHeading = /^\*\*[^*]+\*\*\s*$/.test(trimmed) && trimmed.length < 80;
-    const isSectionLabel = /^(SET|MODEL\s*SET|UNIT|CHAPTER|PART)\s*[-–]?\s*\d+/i.test(trimmed);
+    // A "PART 1" / "UNIT 2" / "CHAPTER 3" prefix only counts as a STANDALONE
+    // heading when the line is short and is just the label (with maybe a tiny
+    // title). Earlier this matched even when the entire long content blob
+    // happened to start with "PART 1:" — which made the whole library-reference
+    // text turn into a single heading and skip all sentence-splitting (=> the
+    // "Read More" view showed everything as one giant blob with "1 topics").
+    // Now: only treat as heading when the line is short AND has no Hindi danda
+    // or sentence-ending punctuation in the middle (i.e. it's truly a label).
+    const isShortSectionLabel =
+      /^(SET|MODEL\s*SET|UNIT|CHAPTER|PART)\s*[-–]?\s*\d+/i.test(trimmed) &&
+      trimmed.length <= 80 &&
+      !/[।!?]/.test(trimmed) &&
+      // Allow at most one trailing period (e.g. "PART 1.")
+      (trimmed.match(/\./g) || []).length <= 1;
 
-    if (isMdHeading || isShortBoldHeading || isSectionLabel) {
+    if (isMdHeading || isShortBoldHeading || isShortSectionLabel) {
       flush();
       const cleaned = trimmed.replace(/^#{1,6}\s+/, '').replace(/^\*\*|\*\*$/g, '').trim();
       topics.push({ text: cleaned, isHeading: true });
@@ -97,25 +110,41 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
   // Post-process: explode any topic line into per-sentence chunks so the
   // reader shows tappable lines instead of one giant paragraph blob. We split
   // on multiple boundaries (in priority order):
-  //   1. Hindi danda (।)  — primary Hindi sentence end.
+  //   1. Hindi danda (।)  — ALWAYS starts a new chunk (every full-stop = a
+  //      new note line, as per the Read More requirement: "full stop ke
+  //      baad new notes ban jayega").
   //   2. English . ! ?    — followed by whitespace + capital / Devanagari /
-  //      digit (avoids false splits inside abbreviations like "Dr." or
-  //      "e.g." because those aren't followed by such characters).
+  //      digit / paren / emoji / bullet / hyphen (covers nearly everything
+  //      that follows a sentence break, including 🎯/📝 emoji headers).
+  //      Abbreviations like "Dr." or "e.g." don't match because they're
+  //      followed by a lowercase letter.
   //   3. Inline section markers like "(IMPORTANT FACTS)", "(PRIMARY SECTOR):",
   //      "PART 1:", "🎯", "📝", "✏️" etc. — many imported library blobs glue
   //      everything inside one <p> with these as the only structure.
-  // Headings are left intact. Empty / placeholder fragments are dropped.
-  const SENTENCE_BOUNDARY = /(?<=[।.!?])\s+(?=[A-Z\u0900-\u097F0-9(])/g;
+  // Headings are exploded too if they're long (>= 80 chars or contain a
+  // sentence terminator) — the first chunk stays as the heading and the rest
+  // become regular tappable body lines. Empty / placeholder fragments dropped.
+  // Hindi danda is its own boundary (always splits, regardless of what follows).
+  const HINDI_DANDA_BOUNDARY = /(?<=।)\s*/g;
+  // English sentence end — needs a wider lookahead so we also split before
+  // emojis, opening parens, bullets, dashes etc., not just A-Z / Devanagari.
+  // Unicode property \p{Emoji} would be ideal but is not safe in older runtimes,
+  // so we enumerate the common emoji ranges and symbol categories explicitly.
+  const ENGLISH_SENTENCE_BOUNDARY =
+    /(?<=[.!?])\s+(?=[A-Z\u0900-\u097F0-9(\-•*"'\u2013\u2014\u2018\u201C\uD83C-\uDBFF\u2600-\u27BF])/g;
   // Section markers that should each START a new topic line.
   const SECTION_MARKERS = /(?=(?:PART|UNIT|CHAPTER|SECTION|SET|MODEL\s*SET)\s*[-–]?\s*\d+\s*[:.)])|(?=\([A-Z][A-Z\s\/]{2,}\)\s*[:.)])|(?=📝|🎯|✏️|📌|⭐|💡|🔥|✨|📚|🎓|⚡)/g;
 
   const splitOneTopic = (raw: string): string[] => {
     let out: string[] = [raw];
-    // 1. Sentence-end split (covers Hindi danda + English . ! ?)
-    out = out.flatMap(s => s.split(SENTENCE_BOUNDARY));
-    // 2. Section-marker split (only for fragments still > ~120 chars,
-    //    avoid breaking already-short lines).
-    out = out.flatMap(s => (s.length > 120 ? s.split(SECTION_MARKERS) : [s]));
+    // 1. Hindi danda — always a sentence boundary.
+    out = out.flatMap(s => s.split(HINDI_DANDA_BOUNDARY));
+    // 2. English sentence-end split (. ! ?)
+    out = out.flatMap(s => s.split(ENGLISH_SENTENCE_BOUNDARY));
+    // 3. Section-marker split (for any fragment still > ~80 chars; we also
+    //    catch leading inline labels like "PART 1:" / "🎯 EXAM SPECIAL" that
+    //    survived the first two passes).
+    out = out.flatMap(s => (s.length > 80 ? s.split(SECTION_MARKERS) : [s]));
     return out.map(s => s.trim()).filter(Boolean);
   };
 
@@ -127,8 +156,29 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
     // Skip pure-placeholder lines (only dots, dashes, ellipsis etc.)
     if (isPlaceholderLine(cleaned)) continue;
 
+    // Headings: keep short ones intact, but explode long heading-blobs so we
+    // don't end up with a single un-tappable wall of text (the "PART 1: …"
+    // library-reference bug).
     if (t.isHeading) {
-      exploded.push({ ...t, text: cleaned });
+      const looksLikeBlob = cleaned.length > 80 || /[।!?]/.test(cleaned);
+      if (!looksLikeBlob) {
+        exploded.push({ ...t, text: cleaned });
+        continue;
+      }
+      const parts = splitOneTopic(cleaned);
+      if (parts.length <= 1) {
+        exploded.push({ ...t, text: stripTrailingDots(cleaned) || cleaned });
+        continue;
+      }
+      // First chunk stays as the heading marker, rest become normal tappable lines.
+      let first = true;
+      for (const p of parts) {
+        if (isPlaceholderLine(p)) continue;
+        const finalText = stripTrailingDots(p) || p;
+        if (!finalText) continue;
+        exploded.push({ text: finalText, isHeading: first });
+        first = false;
+      }
       continue;
     }
 

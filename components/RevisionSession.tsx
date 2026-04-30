@@ -4,6 +4,7 @@ import { X, BookOpen, Zap, CheckCircle, AlertCircle, ChevronRight, Check, Rotate
 import { getChapterData, saveUserToLive } from '../firebase';
 import { storage } from '../utils/storage';
 import { DEFAULT_SUBJECTS } from '../constants';
+import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 
 interface Props {
     user: User;
@@ -211,12 +212,36 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
         if (selectedOption !== null) return; // Prevent change
         setSelectedOption(idx);
 
-        const correct = mcqData[currentQIndex].correctAnswer;
+        const q = mcqData[currentQIndex];
+        const correct = q.correctAnswer;
         const isRight = idx === correct;
         setIsCorrect(isRight);
         setShowExplanation(true);
 
         if (isRight) setScore(prev => prev + 1);
+
+        // ── MY MISTAKE BANK ──────────────────────────────────────────────
+        // Revision MCQ auto-grades on tap (no Submit button) — track wrong
+        // answers immediately so they land on the My Mistake page, and
+        // remove from the bank when the same question is answered correctly.
+        try {
+            if (isRight) {
+                removeMistakeByQuestion(q.question, q.correctAnswer);
+            } else {
+                addMistakes([{
+                    question: q.question,
+                    options: q.options || [],
+                    correctAnswer: q.correctAnswer,
+                    explanation: q.explanation,
+                    topic: q.topic || subTopic,
+                    chapterTitle: chapterTitle,
+                    subjectName: subjectName || 'Revision',
+                    classLevel: user.classLevel,
+                    board: user.board,
+                    source: 'REVISION',
+                }]);
+            }
+        } catch (err) { console.warn('mistakeBank update failed:', err); }
     };
 
     const nextQuestion = () => {

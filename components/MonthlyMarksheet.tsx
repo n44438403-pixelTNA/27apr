@@ -186,7 +186,11 @@ export const MonthlyMarksheet: React.FC<Props> = ({ user, settings, onClose }) =
                 onClose={() => setDownloadModalOpen(false)}
                 title="Download Report"
                 onDownloadPdf={handleDownloadPdf}
-                onDownloadMhtml={() => downloadAsMHTML('marksheet-report', `Marksheet_${user.name}`)}
+                onDownloadMhtml={() => downloadAsMHTML('marksheet-report', `Marksheet_${user.name}`, {
+                    appName: settings?.appShortName || settings?.appName || 'IIC',
+                    pageTitle: `Marksheet · ${user.name}`,
+                    subtitle: 'Performance Report',
+                })}
             />
 
             {/* SCROLLABLE CONTENT */}

@@ -5,6 +5,7 @@ import { getChapterData, saveUserToLive, saveTestResult, saveDemand } from '../f
 import { storage } from '../utils/storage';
 import { generateAnalysisJson } from '../utils/analysisUtils';
 import { recordAttempt as recordRevisionAttempt } from '../utils/revisionTrackerV2';
+import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 
 interface Props {
     user: User;
@@ -340,6 +341,44 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 });
             } catch (_) { /* silent — tracking is non-critical */ }
         }
+
+        // ── MY MISTAKE BANK ──────────────────────────────────────────────
+        // Push every wrong-answered question into the persistent mistake bank
+        // so the My Mistake page can show & replay them. Right-answered ones
+        // are removed (so once student fixes a mistake it disappears).
+        // Mirrors the same flow McqView uses for school MCQs — earlier the
+        // Today/Revision MCQ session was skipping this step entirely so
+        // wrong answers in revision never landed on the My Mistake page.
+        try {
+            const wrongPayload = currentMcqData
+                .map((q, idx) => {
+                    const selected = userAnswersMap[idx];
+                    if (selected !== undefined && selected !== q.correctAnswer) {
+                        return {
+                            question: q.question,
+                            options: q.options || [],
+                            correctAnswer: q.correctAnswer,
+                            explanation: q.explanation,
+                            topic: q.topic || topic.name,
+                            chapterTitle: topic.chapterName,
+                            subjectName: topic.subjectName || 'Revision',
+                            classLevel: user.classLevel,
+                            board: user.board,
+                            source: 'REVISION',
+                        };
+                    }
+                    return null;
+                })
+                .filter((x): x is NonNullable<typeof x> => x !== null);
+            if (wrongPayload.length > 0) addMistakes(wrongPayload);
+            // Remove correctly-answered mistakes from the bank.
+            currentMcqData.forEach((q, idx) => {
+                const selected = userAnswersMap[idx];
+                if (selected !== undefined && selected === q.correctAnswer) {
+                    removeMistakeByQuestion(q.question, q.correctAnswer);
+                }
+            });
+        } catch (err) { console.warn('mistakeBank update failed:', err); }
 
         // Save to DB immediately to be safe
         saveTestResult(user.id, result);

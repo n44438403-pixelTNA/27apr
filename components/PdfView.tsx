@@ -301,31 +301,101 @@ export const PdfView: React.FC<Props> = ({
       }
   };
 
-  // Restore last-read scroll position when chapter content is ready
+  // Restore last-read scroll position when the chapter is reopened (Continue
+  // Reading flow OR normal re-open). Earlier this only ran once on
+  // [chapter.id, contentData] change, but the deep-dive cards / images / PDFs
+  // keep rendering AFTER contentData is set — so scrollHeight at the moment
+  // of restore was usually smaller than the saved position, and the clamp
+  // `Math.min(saved, scrollHeight - clientHeight)` snapped the user to a
+  // wrong (often partway) position. Now we keep retrying for ~3 seconds via
+  // a ResizeObserver: every time content height grows, if the saved
+  // position is now reachable AND the user hasn't manually scrolled, we
+  // re-apply it. As soon as the user scrolls themselves (or 3s passes), we
+  // stop touching scrollTop and switch to "save mode".
   useEffect(() => {
       scrollRestoredRef.current = false;
-      const el = scrollContainerRef.current;
-      if (!el) return;
+      const node = scrollContainerRef.current;
+      if (!node) return;
+
       let saved = 0;
       try {
           saved = parseInt(localStorage.getItem(SCROLL_STORAGE_KEY) || '0', 10) || 0;
       } catch {}
-      // Wait two frames so the rendered tabs/content have measurable height
-      const raf1 = requestAnimationFrame(() => {
-          const raf2 = requestAnimationFrame(() => {
-              const node = scrollContainerRef.current;
-              if (node && saved > 0 && node.scrollHeight > node.clientHeight) {
-                  node.scrollTop = Math.min(saved, node.scrollHeight - node.clientHeight);
-                  lastScrollY.current = node.scrollTop;
-                  const max = node.scrollHeight - node.clientHeight;
-                  setScrollProgress(max > 0 ? Math.min(100, (node.scrollTop / max) * 100) : 0);
-              }
+
+      // Nothing saved -> we're at the top, no restore needed; just enable save mode.
+      if (saved <= 0) {
+          scrollRestoredRef.current = true;
+          return;
+      }
+
+      let cancelled = false;
+      let lastAppliedTarget = -1;
+      // Mark restore "done" the moment the user scrolls themselves so we
+      // don't fight their input. handleScroll already updates lastScrollY,
+      // so we just compare the live scrollTop to our last applied target.
+      const userScrolledAway = () => {
+          const cur = node.scrollTop;
+          // Only count as "user scrolled" once we've actually applied at least
+          // once, AND the current position differs from what we set by > ~30px.
+          if (lastAppliedTarget < 0) return false;
+          return Math.abs(cur - lastAppliedTarget) > 30;
+      };
+
+      const tryApply = () => {
+          if (cancelled || scrollRestoredRef.current) return;
+          if (userScrolledAway()) {
               scrollRestoredRef.current = true;
-          });
-          (raf1 as any)._next = raf2;
+              return;
+          }
+          const max = node.scrollHeight - node.clientHeight;
+          // Wait until the page is at least tall enough to actually reach the
+          // saved position — otherwise we'd land halfway and look broken.
+          if (max <= 0) return;
+          const target = Math.min(saved, max);
+          // If we're still short of the saved spot, reapply at the current
+          // best target so user isn't stuck at the very top while content loads.
+          if (Math.abs(node.scrollTop - target) > 4) {
+              node.scrollTop = target;
+              lastAppliedTarget = target;
+              lastScrollY.current = node.scrollTop;
+              setScrollProgress(max > 0 ? Math.min(100, (node.scrollTop / max) * 100) : 0);
+          }
+          // Once the page is tall enough that `target === saved` (i.e. we
+          // can fully honour the saved position), we're done.
+          if (max >= saved) {
+              scrollRestoredRef.current = true;
+          }
+      };
+
+      // First attempt on next two animation frames (rendered tabs measurable).
+      const raf1 = requestAnimationFrame(() => {
+          requestAnimationFrame(tryApply);
       });
+
+      // Re-apply every time the container's content size grows (e.g. as
+      // deep-dive cards mount, images load, embedded PDFs settle).
+      let resizeObs: ResizeObserver | null = null;
+      try {
+          if (typeof ResizeObserver !== 'undefined') {
+              resizeObs = new ResizeObserver(() => tryApply());
+              resizeObs.observe(node);
+              // Also observe the immediate child wrapper if there's one,
+              // since that's usually what actually grows.
+              const child = node.firstElementChild as Element | null;
+              if (child) resizeObs.observe(child);
+          }
+      } catch {}
+
+      // Hard timeout — after 3s, give up and let the user scroll freely.
+      const giveUpTimer = window.setTimeout(() => {
+          scrollRestoredRef.current = true;
+      }, 3000);
+
       return () => {
+          cancelled = true;
           cancelAnimationFrame(raf1);
+          window.clearTimeout(giveUpTimer);
+          if (resizeObs) { try { resizeObs.disconnect(); } catch {} }
           if (scrollSaveTimerRef.current) window.clearTimeout(scrollSaveTimerRef.current);
       };
   }, [chapter.id, contentData]);

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { WeeklyTest, MCQItem } from '../types';
 import { Clock, AlertTriangle, CheckCircle, Trophy, ArrowLeft } from 'lucide-react';
 import { CustomAlert, CustomConfirm } from './CustomDialogs';
+import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 
 interface Props {
   test: WeeklyTest;
@@ -64,7 +65,41 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
         score++;
       }
     });
-    
+
+    // ── MY MISTAKE BANK ──────────────────────────────────────────────
+    // Push every wrong-answered question into the persistent mistake bank
+    // so the My Mistake page can show & replay them. Right-answered ones
+    // are removed (so once student fixes a mistake it disappears).
+    // Mirrors the same flow McqView uses for school MCQs.
+    try {
+      const wrongPayload = safeQuestions
+        .map((q, idx) => {
+          const selected = answers[idx];
+          if (selected !== undefined && selected !== q.correctAnswer) {
+            return {
+              question: q.question,
+              options: q.options || [],
+              correctAnswer: q.correctAnswer,
+              explanation: (q as any).explanation,
+              topic: (q as any).topic,
+              chapterTitle: test.name || 'Weekly Test',
+              subjectName: 'Weekly Test / Challenge',
+              classLevel: (test.classLevel as any) || undefined,
+              source: 'WEEKLY_TEST',
+            };
+          }
+          return null;
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+      if (wrongPayload.length > 0) addMistakes(wrongPayload);
+      // Remove correctly-answered mistakes from the bank.
+      safeQuestions.forEach((q, idx) => {
+        if (answers[idx] !== undefined && answers[idx] === q.correctAnswer) {
+          removeMistakeByQuestion(q.question, q.correctAnswer);
+        }
+      });
+    } catch (err) { console.warn('mistakeBank update failed:', err); }
+
     // Clear local storage for this test
     localStorage.removeItem(`weekly_test_start_${test.id}`);
     
