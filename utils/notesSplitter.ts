@@ -94,10 +94,31 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
   }
   flush();
 
-  // Post-process: explode any topic line that contains Hindi danda (।) into
-  // multiple topics — one per sentence — because for Hindi notes the danda is
-  // the natural sentence boundary (equivalent to "."). Headings are left
-  // intact. Empty / whitespace-only fragments are dropped.
+  // Post-process: explode any topic line into per-sentence chunks so the
+  // reader shows tappable lines instead of one giant paragraph blob. We split
+  // on multiple boundaries (in priority order):
+  //   1. Hindi danda (।)  — primary Hindi sentence end.
+  //   2. English . ! ?    — followed by whitespace + capital / Devanagari /
+  //      digit (avoids false splits inside abbreviations like "Dr." or
+  //      "e.g." because those aren't followed by such characters).
+  //   3. Inline section markers like "(IMPORTANT FACTS)", "(PRIMARY SECTOR):",
+  //      "PART 1:", "🎯", "📝", "✏️" etc. — many imported library blobs glue
+  //      everything inside one <p> with these as the only structure.
+  // Headings are left intact. Empty / placeholder fragments are dropped.
+  const SENTENCE_BOUNDARY = /(?<=[।.!?])\s+(?=[A-Z\u0900-\u097F0-9(])/g;
+  // Section markers that should each START a new topic line.
+  const SECTION_MARKERS = /(?=(?:PART|UNIT|CHAPTER|SECTION|SET|MODEL\s*SET)\s*[-–]?\s*\d+\s*[:.)])|(?=\([A-Z][A-Z\s\/]{2,}\)\s*[:.)])|(?=📝|🎯|✏️|📌|⭐|💡|🔥|✨|📚|🎓|⚡)/g;
+
+  const splitOneTopic = (raw: string): string[] => {
+    let out: string[] = [raw];
+    // 1. Sentence-end split (covers Hindi danda + English . ! ?)
+    out = out.flatMap(s => s.split(SENTENCE_BOUNDARY));
+    // 2. Section-marker split (only for fragments still > ~120 chars,
+    //    avoid breaking already-short lines).
+    out = out.flatMap(s => (s.length > 120 ? s.split(SECTION_MARKERS) : [s]));
+    return out.map(s => s.trim()).filter(Boolean);
+  };
+
   const exploded: NotesTopic[] = [];
   for (const t of topics) {
     const cleaned = t.text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\s+/g, ' ').trim();
@@ -106,16 +127,21 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
     // Skip pure-placeholder lines (only dots, dashes, ellipsis etc.)
     if (isPlaceholderLine(cleaned)) continue;
 
-    if (t.isHeading || !cleaned.includes('।')) {
-      const finalText = t.isHeading ? cleaned : stripTrailingDots(cleaned);
+    if (t.isHeading) {
+      exploded.push({ ...t, text: cleaned });
+      continue;
+    }
+
+    const parts = splitOneTopic(cleaned);
+    if (parts.length <= 1) {
+      const finalText = stripTrailingDots(cleaned);
       if (finalText) exploded.push({ ...t, text: finalText });
       continue;
     }
-    // Keep the danda attached to each sentence so TTS pauses naturally.
-    const parts = cleaned.split(/(?<=।)\s*/).map(p => p.trim()).filter(Boolean);
     for (const p of parts) {
       if (!isPlaceholderLine(p)) {
-        exploded.push({ text: stripTrailingDots(p) || p, isHeading: false });
+        const finalText = stripTrailingDots(p) || p;
+        if (finalText) exploded.push({ text: finalText, isHeading: false });
       }
     }
   }

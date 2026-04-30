@@ -4,7 +4,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { Chapter, User, Subject, SystemSettings, HtmlModule, PremiumNoteSlot, DeepDiveEntry, AdditionalNoteEntry } from '../types';
-import { FileText, Lock, ArrowLeft, Crown, Star, CheckCircle, AlertCircle, Globe, Maximize, Minimize, Layers, HelpCircle, Minus, Plus, Volume2, Square, Zap, Headphones, BookOpen, Music, Play, Pause, SkipForward, SkipBack, Book, List, Layout, ExternalLink, GraduationCap, ChevronRight, Sparkles } from 'lucide-react';
+import { FileText, Lock, ArrowLeft, Crown, Star, CheckCircle, AlertCircle, Globe, Maximize, Minimize, Layers, HelpCircle, Minus, Plus, Volume2, Square, Zap, Headphones, BookOpen, Music, Play, Pause, SkipForward, SkipBack, Book, List, Layout, ExternalLink, GraduationCap, ChevronRight, Sparkles, RotateCw, Palette } from 'lucide-react';
 import { CustomAlert } from './CustomDialogs';
 import { getChapterData, saveUserToLive } from '../firebase';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
@@ -174,6 +174,38 @@ export const PdfView: React.FC<Props> = ({
   const [sessionUnlockedTabs, setSessionUnlockedTabs] = useState<string[]>([]);
   const [quickRevisionPoints, setQuickRevisionPoints] = useState<{title: string, points: string[]}[]>([]);
   const [currentPremiumEntryIdx, setCurrentPremiumEntryIdx] = useState(0);
+
+  // INLINE EXPAND STATE: which Concept-card's "Read More" Additional Note is open
+  // (rendered inline below the topic instead of opening a fullscreen overlay).
+  const [expandedNoteIdx, setExpandedNoteIdx] = useState<number | null>(null);
+  // RETENTION (PREMIUM) tab — let user toggle a "PDF only" mode that hides
+  // the entire sticky header so the PDF gets the full screen height.
+  const [pdfFullscreen, setPdfFullscreen] = useState(false);
+  // RETENTION (PREMIUM) tab — manual 90° rotation. Ek tap = +90° clockwise
+  // (0 → 90 → 180 → 270 → 0). User ne specifically request kiya tha kyunki
+  // Drive-rendered PDFs ka vertical title left margin par hota hai aur
+  // 90°/180°/270° me se koi orientation user ke device + content ke liye
+  // best fit ho sakti hai. 4 tap me wapas original orientation aa jaati hai.
+  const [pdfRotation, setPdfRotation] = useState(0);
+  const rotatePdf = () => setPdfRotation(r => (r + 90) % 360);
+  // INLINE READ MORE — color theme picker. ChunkedNotesReader apna khud
+  // ka colour control deta hai but uska state library reference ke andar
+  // re-mount par reset ho jata hai. Yahaan ek lightweight wrapper-level
+  // tint maintain karte hain (default cream so reading easy ho).
+  // Each theme carries an explicit `textHex` because ChunkedNotesReader
+  // applies an inline `style.color` on every line — Tailwind text classes on
+  // the wrapper alone get overridden. We pass `textHex` as
+  // `textColorOverride` so wrapper bg + line-text always match as a coherent
+  // preset (and the inner palette picker auto-hides in that mode).
+  const READ_MORE_THEMES = [
+      { id: 'cream', label: 'Cream', bg: 'bg-amber-50',    text: 'text-stone-900', textHex: '#1c1917', border: 'border-amber-200',   dot: 'bg-amber-200' },
+      { id: 'white', label: 'White', bg: 'bg-white',       text: 'text-slate-900', textHex: '#0f172a', border: 'border-slate-200',   dot: 'bg-white border border-slate-300' },
+      { id: 'sepia', label: 'Sepia', bg: 'bg-orange-50',   text: 'text-stone-900', textHex: '#44403c', border: 'border-orange-200',  dot: 'bg-orange-200' },
+      { id: 'mint',  label: 'Mint',  bg: 'bg-emerald-50',  text: 'text-emerald-900', textHex: '#064e3b', border: 'border-emerald-200', dot: 'bg-emerald-200' },
+      { id: 'dark',  label: 'Dark',  bg: 'bg-slate-900',   text: 'text-slate-50',  textHex: '#f1f5f9', border: 'border-slate-700',   dot: 'bg-slate-800' },
+  ] as const;
+  const [readMoreThemeId, setReadMoreThemeId] = useState<string>('cream');
+  const readMoreTheme = READ_MORE_THEMES.find(t => t.id === readMoreThemeId) || READ_MORE_THEMES[0];
 
   // SCROLL TO HIDE HEADER STATE
   const [showHeader, setShowHeader] = useState(true);
@@ -1327,37 +1359,89 @@ export const PdfView: React.FC<Props> = ({
            and the section tab strip (Concept / Retention / Extended / Teaching
            Strategy) — both ALWAYS visible so the student can switch from anywhere
            without hunting for a fullscreen toggle. */}
+       {/* Compact header. On Retention with `pdfFullscreen` true, the entire
+           bar hides so PDF gets the full screen. Otherwise:
+           — On Concept (DEEP_DIVE): single-line top row (Back + truncated title
+             + School/Competition pills inline + 📚/📝 MCQ pill) followed by the
+             tab strip. The earlier 3-row layout (title row → Notes/MCQ row →
+             tab strip ≈ 150px) reduced to ~90px so notes get more screen.
+           — On Retention (PREMIUM): drop title/pills entirely (the lesson title
+             is on the PDF cover anyway) — keep only Back + 📚/📝 MCQ pill + tab
+             strip + a "Maximize" button. */}
+       {!(activeTab === 'PREMIUM' && pdfFullscreen) && (
        <div className={`sticky top-0 z-30 bg-white shadow-sm flex flex-col transition-all duration-300 w-full m-0 rounded-none ${!showHeader ? '-translate-y-full absolute opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
-           <div className="flex items-center gap-2 p-2 sm:p-3">
-               <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full text-slate-600 shrink-0">
-                   <ArrowLeft size={20} />
-               </button>
-               <div className="flex-1 min-w-0">
-                   <h3 className="font-bold text-slate-800 leading-tight line-clamp-1 text-sm sm:text-base">{chapter.title}</h3>
-                   <div className="flex gap-1.5 mt-0.5">
-                     <button onClick={() => setSyllabusMode('SCHOOL')} className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all ${syllabusMode === 'SCHOOL' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>School</button>
-                     <button onClick={() => setSyllabusMode('COMPETITION')} className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all ${syllabusMode === 'COMPETITION' ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>Competition</button>
-                   </div>
+           {activeTab !== 'PREMIUM' && (
+               <div className="flex items-center gap-2 px-2 sm:px-3 pt-1.5 pb-1">
+                   <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-600 shrink-0">
+                       <ArrowLeft size={18} />
+                   </button>
+                   <h3 className="flex-1 min-w-0 font-bold text-slate-800 leading-tight line-clamp-1 text-sm">{chapter.title}</h3>
+                   <button onClick={() => setSyllabusMode('SCHOOL')} className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all shrink-0 ${syllabusMode === 'SCHOOL' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>School</button>
+                   <button onClick={() => setSyllabusMode('COMPETITION')} className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-all shrink-0 ${syllabusMode === 'COMPETITION' ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>Comp</button>
                </div>
-           </div>
+           )}
 
-           {/* === LUCENT-STYLE NOTES ↔ MCQ TAB SWITCH (always visible) === */}
-           {onSwitchToMcq && (
-               <div className="px-3 sm:px-4 pb-2 pt-1">
-                   <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
+           {/* Notes ↔ MCQ pill — slimmer (single line, no emojis, smaller padding) */}
+           {onSwitchToMcq && activeTab !== 'PREMIUM' && (
+               <div className="px-3 sm:px-4 pb-1.5">
+                   <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200">
                        <button
                            disabled
-                           className="flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 bg-white text-blue-600 shadow-sm"
+                           className="flex-1 py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 bg-white text-blue-600 shadow-sm"
                        >
-                           <BookOpen size={14}/> 📚 Notes
+                           <BookOpen size={12}/> Notes
                        </button>
                        <button
                            onClick={onSwitchToMcq}
-                           className="flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 text-slate-600 hover:bg-white/60 transition-all"
+                           className="flex-1 py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 text-slate-600 hover:bg-white/60 transition-all"
                        >
-                           <HelpCircle size={14}/> 📝 MCQ
+                           <HelpCircle size={12}/> MCQ
                        </button>
                    </div>
+               </div>
+           )}
+
+           {/* Retention-only minimal top row: back + Notes/MCQ + Maximize */}
+           {activeTab === 'PREMIUM' && (
+               <div className="flex items-center gap-2 px-2 sm:px-3 py-1.5">
+                   <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-600 shrink-0">
+                       <ArrowLeft size={18} />
+                   </button>
+                   {onSwitchToMcq && (
+                       <div className="flex-1 flex bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+                           <button
+                               disabled
+                               className="flex-1 py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 bg-white text-blue-600 shadow-sm"
+                           >
+                               <BookOpen size={12}/> Notes
+                           </button>
+                           <button
+                               onClick={onSwitchToMcq}
+                               className="flex-1 py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 text-slate-600 hover:bg-white/60 transition-all"
+                           >
+                               <HelpCircle size={12}/> MCQ
+                           </button>
+                       </div>
+                   )}
+                   <button
+                       onClick={rotatePdf}
+                       className={`relative p-1.5 rounded-full shrink-0 transition-colors ${pdfRotation !== 0 ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                       title={`Rotate +90°  (current: ${pdfRotation}°)`}
+                   >
+                       <RotateCw size={16} />
+                       {pdfRotation !== 0 && (
+                           <span className="absolute -top-1 -right-1 bg-white text-purple-700 text-[8px] font-black rounded-full w-3.5 h-3.5 flex items-center justify-center border border-purple-600">
+                               {pdfRotation}
+                           </span>
+                       )}
+                   </button>
+                   <button
+                       onClick={() => setPdfFullscreen(true)}
+                       className="p-1.5 rounded-full text-slate-600 hover:bg-slate-100 shrink-0"
+                       title="Maximize PDF"
+                   >
+                       <Maximize size={16} />
+                   </button>
                </div>
            )}
 
@@ -1397,11 +1481,14 @@ export const PdfView: React.FC<Props> = ({
                                            // collapsed header also created a large empty area at the
                                            // top of the page on mobile.
                                            setShowHeader(true);
+                                           // Leaving Retention always exits PDF-fullscreen so
+                                           // the user doesn't get stuck without controls.
+                                           if (tab.id !== 'PREMIUM') setPdfFullscreen(false);
                                        }}
-                                       className={`flex-1 min-w-[85px] py-2 sm:py-3 text-[10px] sm:text-xs font-bold flex flex-col items-center gap-1 border-b-2 transition-all ${activeTab === tab.id ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-slate-600 hover:bg-slate-50'} ${isLocked && cost === 0 ? 'grayscale' : ''}`}
+                                       className={`flex-1 min-w-[85px] py-1.5 sm:py-2 text-[10px] sm:text-xs font-bold flex items-center justify-center gap-1.5 border-b-2 transition-all ${activeTab === tab.id ? 'border-blue-600 text-blue-600 bg-blue-50' : 'border-transparent text-slate-600 hover:bg-slate-50'} ${isLocked && cost === 0 ? 'grayscale' : ''}`}
                                    >
                                        <div className="relative">
-                                           <tab.icon size={14} className="sm:w-4 sm:h-4" />
+                                           <tab.icon size={13} className="sm:w-3.5 sm:h-3.5" />
                                            {isLocked && <div className="absolute -top-1 -right-2 bg-red-500 rounded-full p-0.5 border border-white"><Lock size={8} className="text-white"/></div>}
                                        </div>
                                        {tab.label}
@@ -1411,6 +1498,41 @@ export const PdfView: React.FC<Props> = ({
                </div>
            )}
        </div>
+       )}
+
+       {/* PDF FULLSCREEN restore button — small floating chips top-right when
+           the entire header is hidden on Retention. Tap to bring header back
+           or to flip the PDF orientation without leaving fullscreen. */}
+       {activeTab === 'PREMIUM' && pdfFullscreen && (
+           <div className="fixed top-3 right-3 z-40 flex gap-2">
+               <button
+                   onClick={onBack}
+                   className="p-2 rounded-full bg-black/55 backdrop-blur text-white shadow-lg border border-white/20"
+                   title="Back"
+               >
+                   <ArrowLeft size={16} />
+               </button>
+               <button
+                   onClick={rotatePdf}
+                   className={`relative p-2 rounded-full backdrop-blur shadow-lg border border-white/20 ${pdfRotation !== 0 ? 'bg-purple-600 text-white' : 'bg-black/55 text-white'}`}
+                   title={`Rotate +90°  (current: ${pdfRotation}°)`}
+               >
+                   <RotateCw size={16} />
+                   {pdfRotation !== 0 && (
+                       <span className="absolute -top-1 -right-1 bg-white text-purple-700 text-[8px] font-black rounded-full w-4 h-4 flex items-center justify-center border border-purple-600 shadow">
+                           {pdfRotation}
+                       </span>
+                   )}
+               </button>
+               <button
+                   onClick={() => setPdfFullscreen(false)}
+                   className="p-2 rounded-full bg-black/55 backdrop-blur text-white shadow-lg border border-white/20"
+                   title="Show toolbar"
+               >
+                   <Minimize size={16} />
+               </button>
+           </div>
+       )}
 
        {/* CONTENT BODY (WRAPPED IN ERROR BOUNDARY) */}
        <ErrorBoundary>
@@ -1451,9 +1573,14 @@ export const PdfView: React.FC<Props> = ({
 
                         return (
                            <>
-                               <div className="flex justify-between items-center mb-4">
-                                   <p className="text-xs font-bold text-slate-600 uppercase">{deepDiveTopics.length} Sections</p>
-                                   <div className="flex gap-2">
+                               {/* Compact toolbar — earlier this was a tall row of two
+                                   pill buttons that ate ~50px of screen above the notes
+                                   AND duplicated the Read All inside ChunkedNotesReader.
+                                   Now: single thin row with section count + tiny icon
+                                   buttons (Save, Read All chain) so notes start higher. */}
+                               <div className="flex justify-between items-center px-3 sm:px-0 pt-1.5 pb-1">
+                                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{deepDiveTopics.length} Sections</p>
+                                   <div className="flex gap-1 items-center">
                                        <button
                                            onClick={() => {
                                                const htmlContent = deepDiveTopics.map(t => `<h2>${t.title}</h2>${t.content}`).join('<hr/>');
@@ -1466,9 +1593,11 @@ export const PdfView: React.FC<Props> = ({
                                                });
                                                setAlertConfig({isOpen: true, message: 'Deep Dive Notes Saved Offline! Access them in the History tab.'});
                                            }}
-                                           className="flex items-center gap-2 px-3 py-1.5 rounded-full font-bold text-xs transition-all bg-slate-800 text-white shadow hover:bg-slate-900"
+                                           className="p-1.5 rounded-full text-slate-600 hover:bg-slate-100 transition-colors"
+                                           title="Save offline"
+                                           aria-label="Save offline"
                                        >
-                                           <Download size={12} /> Save Offline
+                                           <Download size={14} />
                                        </button>
                                        <button
                                           onClick={() => {
@@ -1480,10 +1609,10 @@ export const PdfView: React.FC<Props> = ({
                                                   setActiveTopicIndex(0);
                                               }
                                           }}
-                                          className={`flex items-center gap-2 px-3 py-1.5 rounded-full font-bold text-xs transition-all ${isAutoPlaying ? 'bg-red-500 text-white animate-pulse' : 'bg-teal-600 text-white shadow'}`}
-                                          title={isAutoPlaying ? 'Stop reading' : 'Read everything aloud'}
+                                          className={`flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[10px] uppercase tracking-wider transition-all ${isAutoPlaying ? 'bg-red-500 text-white animate-pulse' : 'bg-teal-600 text-white shadow-sm'}`}
+                                          title={isAutoPlaying ? 'Stop reading' : 'Read all topics in sequence'}
                                       >
-                                          {isAutoPlaying ? <Pause size={12} /> : <Volume2 size={12} />}
+                                          {isAutoPlaying ? <Pause size={11} /> : <Volume2 size={11} />}
                                           {isAutoPlaying ? 'Stop' : 'Read All'}
                                       </button>
                                    </div>
@@ -1542,97 +1671,212 @@ export const PdfView: React.FC<Props> = ({
                                       <div
                                           id={`topic-card-${idx}`}
                                           key={idx}
-                                          className={`bg-white rounded-none sm:rounded-2xl p-4 sm:p-6 shadow-sm border-2 transition-all w-full ${isActive ? 'border-teal-400 ring-2 ring-teal-100 scale-[1.01] sm:scale-100' : 'border-transparent'}`}
+                                          className={`bg-white rounded-none sm:rounded-2xl p-3 sm:p-5 shadow-sm border-2 transition-all w-full ${isActive ? 'border-teal-400 ring-2 ring-teal-100 scale-[1.01] sm:scale-100' : 'border-transparent'}`}
                                       >
-                                          <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-2">
-                                              <div>
+                                          {/* Compact card header — section badge + title + lightweight
+                                              icon-only PDF/Audio buttons. Earlier the badge + Read All +
+                                              View PDF + Premium Audio + ChunkedNotesReader's own bar
+                                              stacked to ~120px above any actual notes. */}
+                                          <div className="flex justify-between items-center mb-2 gap-2">
+                                              <div className="min-w-0 flex items-center gap-2">
                                                   {idx === 0 && topic.title !== "Introduction" && (
-                                                      <span className="text-[10px] font-bold text-teal-600 bg-teal-50 px-2 py-0.5 rounded mb-1 inline-block">
-                                                          CHAPTER DEEP DIVE
+                                                      <span className="text-[9px] font-bold text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded shrink-0">
+                                                          DEEP DIVE
                                                       </span>
                                                   )}
                                                   {idx > 0 && (
-                                                      <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded mb-1 inline-block">
-                                                          TOPIC {idx}
+                                                      <span className="text-[9px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded shrink-0">
+                                                          T{idx}
                                                       </span>
                                                   )}
-                                                  <h4 className="text-lg font-black text-slate-800">{topic.title}</h4>
+                                                  <h4 className="text-base sm:text-lg font-black text-slate-800 leading-tight truncate">{topic.title}</h4>
                                               </div>
-                                              <div className="flex gap-2 items-center">
+                                              <div className="flex gap-1 items-center shrink-0">
                                                   {topic.pdfLink && (
                                                       <button
                                                           onClick={() => {
                                                               stopSpeech();
                                                               setActivePdf(formatDriveLink(topic.pdfLink!));
                                                           }}
-                                                          className="px-3 py-1.5 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white hover:from-blue-600 hover:to-indigo-700 shadow-md flex items-center gap-1.5 font-bold text-xs transition-transform hover:scale-105"
+                                                          className="p-1.5 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
                                                           title="View PDF Document"
+                                                          aria-label="View PDF"
                                                       >
-                                                          <FileText size={14} /> View PDF
+                                                          <FileText size={14} />
                                                       </button>
                                                   )}
                                                   {topic.audioUrl && (
                                                       <button
                                                           onClick={() => playCustomAudio(topic.audioUrl!)}
-                                                          className="px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 text-white hover:from-amber-500 hover:to-orange-600 shadow-md flex items-center gap-1.5 font-bold text-xs transition-transform hover:scale-105"
+                                                          className="p-1.5 rounded-full bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
                                                           title="Play Premium Audio"
+                                                          aria-label="Play audio"
                                                       >
-                                                          <Music size={14} /> Premium Audio
+                                                          <Music size={14} />
                                                       </button>
                                                   )}
-                                                  {/* Pehle yahaan ek normal Volume2 / Pause TTS button tha
-                                                      jo `handleTopicPlay(idx)` call karta tha — wo Class 6-12
-                                                      ke chapters me kaam nahi kar raha tha. Ab ChunkedNotesReader
-                                                      apna "Read All" / "Stop" button khud render karta hai
-                                                      (hideTopBar hata diya), jo har bullet / Hindi-danda line
-                                                      ko sequentially padhta hai aur reliably kaam karta hai. */}
                                               </div>
                                           </div>
                                           {topic.content && topic.content.trim() !== '<p></p>' && (
-                                              // Competition-style chunked reader: each bullet / Hindi-danda
-                                              // sentence becomes its own tappable line with TTS, instead of
-                                              // one wall of HTML. Same component used in Lucent / Homework
-                                              // notes so the experience is consistent across the app.
-                                              // Top bar ab visible hai → built-in "Read All" button milega
-                                              // jo iss topic ke saare chunks ko sequentially padhta hai.
-                                              <div className="-mx-4 sm:-mx-6">
+                                              // Competition-style chunked reader. We hide the inner top
+                                              // bar (font/colour/Read All) because the outer "Read All"
+                                              // pill already drives chained-topic playback, and tap-to-
+                                              // read on each line still works without that bar — saving
+                                              // a duplicate ~50px sticky strip on every card.
+                                              <div className="-mx-3 sm:-mx-5">
                                                   <ChunkedNotesReader
                                                       content={topic.content}
                                                       topBarLabel={topic.title}
                                                       noteKey={`pdfview_${chapter.id}_topic_${idx}`}
+                                                      hideTopBar
                                                   />
                                               </div>
                                           )}
 
-                                          {/* === PAIRED ADDITIONAL NOTE (Read More) ===
-                                              Iss Concept part ke saath jo Additional Note
-                                              same index pe hai (Part 1 ↔ Part 1, Part 2 ↔
-                                              Part 2, ...) uska Read More button yahin
-                                              dikhta hai. Tap karne par PDF / Text Reader
-                                              kholta hai. Agar same-index Additional Note
-                                              available na ho to button hide ho jata hai. */}
-                                          {pairedNote && (
-                                              <div className="mt-4 -mx-4 sm:-mx-6 px-4 sm:px-6 pt-3 border-t border-slate-100">
-                                                  <div className="flex items-center gap-3 bg-cyan-50/60 border border-cyan-200 rounded-xl p-3">
-                                                      <div className="w-9 h-9 rounded-lg bg-white text-cyan-700 flex items-center justify-center shrink-0 border border-cyan-200">
-                                                          {pairedHasPdf ? <FileText size={16} /> : <Book size={16} />}
-                                                      </div>
-                                                      <div className="flex-1 min-w-0">
-                                                          <p className="text-[10px] font-black uppercase tracking-wider text-cyan-700">Additional Notes · Part {idx + 1}</p>
-                                                          <h5 className="text-sm font-black text-slate-800 leading-tight truncate">
-                                                              {pairedNote.title || `Additional Note ${idx + 1}`}
-                                                          </h5>
-                                                      </div>
+                                          {/* === PAIRED ADDITIONAL NOTE (inline Read More) ===
+                                              Pehle yeh button ek fullscreen overlay kholta tha jisme
+                                              "EXTENDED RESOURCE / Part 1" jaise tags + sirf 1 bullet ke
+                                              andar pura blue text rendered hota tha — jo professional
+                                              nahi lagta tha. Ab Read More tap karne par same-page par
+                                              hi neeche cyan-tinted accordion expand hota hai jisme:
+                                              — chunk-wise tappable TTS lines (har sentence alag),
+                                              — agar PDF link ho to View PDF chip,
+                                              — agar audio URL ho to Audio chip,
+                                              — Save Offline icon, aur Collapse button.
+                                              Visual differentiation (cyan tint + label "Library
+                                              Reference") batati hai ki yeh main notes ka part nahi hai. */}
+                                          {pairedNote && (() => {
+                                              const isExpanded = expandedNoteIdx === idx;
+                                              const noteContent = (pairedNote as any).noteContent as string | undefined;
+                                              const audioUrl = (pairedNote as any).audioUrl as string | undefined;
+                                              const onlyPdf = pairedHasPdf && !pairedHasContent;
+                                              return (
+                                                  <div className="mt-3 -mx-3 sm:-mx-5 px-3 sm:px-5 pt-2 border-t border-slate-100">
                                                       <button
-                                                          onClick={openPairedNote}
-                                                          className="px-3 py-1.5 rounded-full text-[11px] font-black bg-cyan-600 text-white shadow hover:bg-cyan-700 active:scale-95 transition-all flex items-center gap-1 shrink-0"
-                                                          title={pairedHasPdf && pairedHasContent ? 'PDF + Reader' : pairedHasPdf ? 'PDF Document' : 'Text Reader'}
+                                                          onClick={() => {
+                                                              // PDF-only paired note → open the existing
+                                                              // fullscreen PDF viewer (no inline preview
+                                                              // for raw PDFs since they need full screen).
+                                                              if (onlyPdf) {
+                                                                  stopSpeech();
+                                                                  setActivePdf(formatDriveLink(pairedNote.pdfLink!));
+                                                                  return;
+                                                              }
+                                                              setExpandedNoteIdx(isExpanded ? null : idx);
+                                                              if (!isExpanded) {
+                                                                  // Stop any running TTS so the inline
+                                                                  // reader starts in a clean state.
+                                                                  stopAllSpeech();
+                                                              } else {
+                                                                  stopAllSpeech();
+                                                              }
+                                                          }}
+                                                          className={`w-full flex items-center gap-3 rounded-xl p-2.5 transition-colors ${isExpanded ? 'bg-cyan-100 border border-cyan-300' : 'bg-cyan-50/60 border border-cyan-200 hover:bg-cyan-50'}`}
+                                                          aria-expanded={isExpanded}
                                                       >
-                                                          Read More <ChevronRight size={12} />
+                                                          <div className="w-8 h-8 rounded-lg bg-white text-cyan-700 flex items-center justify-center shrink-0 border border-cyan-200">
+                                                              {pairedHasPdf ? <FileText size={14} /> : <Book size={14} />}
+                                                          </div>
+                                                          <span className="flex-1 text-left text-[12px] font-black text-cyan-800 truncate">
+                                                              {isExpanded ? 'Hide reference' : 'Read More'}
+                                                          </span>
+                                                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1 shrink-0 ${isExpanded ? 'bg-cyan-700 text-white' : 'bg-cyan-600 text-white shadow-sm'}`}>
+                                                              {isExpanded ? <>Close</> : <>Open <ChevronRight size={11} /></>}
+                                                          </span>
                                                       </button>
+
+                                                      {/* INLINE EXPANDED REFERENCE
+                                                          Pehle pure body pe cyan tint thi → Hindi + English text
+                                                          ek bada blue blob lag raha tha. Ab sirf top banner cyan
+                                                          rakha (visual marker that yeh main notes nahi hai); body
+                                                          neutral cream/white hai taaki ChunkedNotesReader ke
+                                                          chunks alag-alag tappable lines ki tarah saaf dikhe.
+                                                          User-pickable theme (cream/white/sepia/mint/dark) bhi
+                                                          add ki — eye-strain control ke liye. */}
+                                                      {isExpanded && noteContent && (
+                                                          <div className="mt-2 rounded-xl border border-cyan-200 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 shadow-sm">
+                                                              {/* Cyan banner — yeh batati hai ki yeh "Library Reference" hai */}
+                                                              <div className="flex items-center gap-2 px-3 py-2 bg-cyan-600 text-white">
+                                                                  <Book size={12} className="shrink-0" />
+                                                                  <span className="text-[10px] font-black uppercase tracking-wider truncate flex-1 min-w-0">
+                                                                      Library Reference{pairedNote.title ? ` · ${pairedNote.title}` : ''}
+                                                                  </span>
+                                                                  {pairedHasPdf && (
+                                                                      <button
+                                                                          onClick={(e) => { e.stopPropagation(); stopSpeech(); setActivePdf(formatDriveLink(pairedNote.pdfLink!)); }}
+                                                                          className="p-1 rounded-full bg-white/20 hover:bg-white/30 shrink-0"
+                                                                          title="Open PDF in fullscreen"
+                                                                          aria-label="Open PDF"
+                                                                      >
+                                                                          <FileText size={12} />
+                                                                      </button>
+                                                                  )}
+                                                                  {audioUrl && (
+                                                                      <button
+                                                                          onClick={(e) => { e.stopPropagation(); playCustomAudio(audioUrl); }}
+                                                                          className="p-1 rounded-full bg-white/20 hover:bg-white/30 shrink-0"
+                                                                          title="Play premium audio"
+                                                                          aria-label="Play audio"
+                                                                      >
+                                                                          <Music size={12} />
+                                                                      </button>
+                                                                  )}
+                                                                  <button
+                                                                      onClick={(e) => {
+                                                                          e.stopPropagation();
+                                                                          saveOfflineItem({
+                                                                              id: `note_${chapter.id}_${idx}_${Date.now()}`,
+                                                                              type: 'NOTE',
+                                                                              title: pairedNote.title || 'Saved Note',
+                                                                              subtitle: `${subject.name} - ${chapter.title}`,
+                                                                              data: { html: noteContent }
+                                                                          });
+                                                                          setAlertConfig({ isOpen: true, message: 'Reference saved offline.' });
+                                                                      }}
+                                                                      className="p-1 rounded-full bg-white/20 hover:bg-white/30 shrink-0"
+                                                                      title="Save offline"
+                                                                      aria-label="Save offline"
+                                                                  >
+                                                                      <Download size={12} />
+                                                                  </button>
+                                                              </div>
+
+                                                              {/* Color theme picker — chhoti horizontal strip with
+                                                                  5 swatches. Tap karke background change kar sakte
+                                                                  hain. Default: Cream (warm + low eye strain). */}
+                                                              <div className={`flex items-center gap-1.5 px-3 py-1.5 border-b ${readMoreTheme.border} ${readMoreTheme.bg} ${readMoreTheme.text === 'text-slate-50' ? 'bg-opacity-100' : ''}`}>
+                                                                  <Palette size={11} className="opacity-60 shrink-0" />
+                                                                  <span className={`text-[9px] font-bold uppercase tracking-wider opacity-60 mr-1`}>Theme</span>
+                                                                  {READ_MORE_THEMES.map(t => (
+                                                                      <button
+                                                                          key={t.id}
+                                                                          onClick={(e) => { e.stopPropagation(); setReadMoreThemeId(t.id); }}
+                                                                          className={`w-5 h-5 rounded-full ${t.dot} ${readMoreThemeId === t.id ? 'ring-2 ring-offset-1 ring-cyan-600' : ''} transition-all`}
+                                                                          title={t.label}
+                                                                          aria-label={`Theme: ${t.label}`}
+                                                                          aria-pressed={readMoreThemeId === t.id}
+                                                                      />
+                                                                  ))}
+                                                              </div>
+
+                                                              {/* CHUNKED CONTENT — each Hindi-danda sentence /
+                                                                  bullet becomes its own tappable line. Tap → TTS
+                                                                  highlights that chunk and reads it aloud. The
+                                                                  reader's own top bar is shown so user gets font
+                                                                  size + read-all + line color controls in addition
+                                                                  to our wrapper theme. */}
+                                                              <div className={`px-1 py-1 ${readMoreTheme.bg} ${readMoreTheme.text}`}>
+                                                                  <ChunkedNotesReader
+                                                                      content={noteContent}
+                                                                      noteKey={`pdfview_${chapter.id}_addnote_inline_${idx}_${readMoreThemeId}`}
+                                                                      textColorOverride={readMoreTheme.textHex}
+                                                                  />
+                                                              </div>
+                                                          </div>
+                                                      )}
                                                   </div>
-                                              </div>
-                                          )}
+                                              );
+                                          })()}
                                       </div>
                                   );
                               })}
@@ -1766,13 +2010,32 @@ export const PdfView: React.FC<Props> = ({
                                                          onTouchMove={handleTouchMove}
                                                          onTouchEnd={() => handleTouchEnd(virtualList.length)}
                                                        >
-                                                            <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center">
+                                                            <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center overflow-hidden">
                                                                 <iframe
                                                                     src={formattedLink}
-                                                                    className="w-full h-full border-none"
+                                                                    className="border-none transition-transform duration-300"
                                                                     title="PDF Viewer"
                                                                     allow="autoplay"
                                                                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups-to-escape-sandbox"
+                                                                    style={
+                                                                        pdfRotation === 0 ? { width: '100%', height: '100%' }
+                                                                        : pdfRotation === 180 ? { width: '100%', height: '100%', transform: 'rotate(180deg)', transformOrigin: 'center center' }
+                                                                        // 90°/270°: iframe ki visual width = container ki height bani jaati
+                                                                        // hai (aur vice-versa). Isliye iframe ko parent ke OPPOSITE dimensions
+                                                                        // de ke rotate karte hain — rotate ke baad woh container ke andar
+                                                                        // perfectly fit ho jaata hai.
+                                                                        : { width: 'var(--pdf-rot-w, 100%)', height: 'var(--pdf-rot-h, 100%)', transform: `rotate(${pdfRotation}deg)`, transformOrigin: 'center center' }
+                                                                    }
+                                                                    ref={(el) => {
+                                                                        if (!el) return;
+                                                                        if (pdfRotation === 90 || pdfRotation === 270) {
+                                                                            const parent = el.parentElement;
+                                                                            if (parent) {
+                                                                                el.style.setProperty('--pdf-rot-w', `${parent.clientHeight}px`);
+                                                                                el.style.setProperty('--pdf-rot-h', `${parent.clientWidth}px`);
+                                                                            }
+                                                                        }
+                                                                    }}
                                                                 />
                                                             </div>
                                                             {/* Invisible Header Blocker */}
@@ -1788,40 +2051,46 @@ export const PdfView: React.FC<Props> = ({
                                                        </div>
                                                    )}
 
-                                                   {/* FLOATING AUDIO PLAYER */}
+                                                   {/* TTS / AUDIO TOGGLE — pehle yeh button bottom-right me ek
+                                                       white pill ke roop me float karta tha (PDF ke neeche ka
+                                                       content cover karta tha). Ab top-right me uthaake floating
+                                                       chip group (Back / Rotate / Minimize) ke saath same dark
+                                                       glassmorphic style me align kar diya — professional aur
+                                                       concentrated control surface. Fullscreen me chip group ke
+                                                       LEFT me sit karta hai (right offset ~152px), non-fullscreen
+                                                       me PDF container ke top-right me. */}
                                                    {(ttsHtml && ttsHtml.length > 10) && (
-                                                       <div className="absolute bottom-4 right-4 bg-white p-2 rounded-full shadow-xl border border-slate-200 flex items-center gap-2 z-10 animate-in fade-in slide-in-from-bottom-4">
-                                                           <button
-                                                              onClick={() => {
-                                                                  if (isAutoPlaying) {
-                                                                      stopAllSpeech();
+                                                       <button
+                                                          onClick={() => {
+                                                              if (isAutoPlaying) {
+                                                                  stopAllSpeech();
+                                                              } else {
+                                                                  // START PLAYBACK
+                                                                  const topics = extractTopicsFromHtml(ttsHtml);
+                                                                  let chunks: string[] = [];
+
+                                                                  if (topics.length > 0 && topics[0].title !== "Notes") {
+                                                                      chunks = topics.map(t => `${t.title}. ${t.content}`);
                                                                   } else {
-                                                                      // START PLAYBACK
-                                                                      const topics = extractTopicsFromHtml(ttsHtml);
-                                                                      let chunks: string[] = [];
-
-                                                                      if (topics.length > 0 && topics[0].title !== "Notes") {
-                                                                          chunks = topics.map(t => `${t.title}. ${t.content}`);
+                                                                      const rawText = topics[0].content;
+                                                                      if (rawText.length > 4000) {
+                                                                          chunks = rawText.match(/[^.!?]+[.!?]+/g) || [rawText];
                                                                       } else {
-                                                                          const rawText = topics[0].content;
-                                                                          if (rawText.length > 4000) {
-                                                                              chunks = rawText.match(/[^.!?]+[.!?]+/g) || [rawText];
-                                                                          } else {
-                                                                              chunks = [rawText];
-                                                                          }
+                                                                          chunks = [rawText];
                                                                       }
-
-                                                                      setPremiumChunks(chunks);
-                                                                      setPremiumChunkIndex(0);
-                                                                      setIsAutoPlaying(true);
                                                                   }
-                                                              }}
-                                                              className={`flex items-center gap-2 px-4 py-3 rounded-full text-white shadow-lg transition-all ${isAutoPlaying ? 'bg-red-500 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                                                          >
-                                                              {isAutoPlaying ? <Pause size={20} /> : <Headphones size={20} />}
-                                                              {isAutoPlaying && <span className="text-xs font-bold">Playing...</span>}
-                                                          </button>
-                                                       </div>
+
+                                                                  setPremiumChunks(chunks);
+                                                                  setPremiumChunkIndex(0);
+                                                                  setIsAutoPlaying(true);
+                                                              }
+                                                          }}
+                                                          className={`absolute top-3 ${pdfFullscreen ? 'right-[152px]' : 'right-3'} z-20 p-2 rounded-full backdrop-blur shadow-lg border border-white/20 transition-all ${isAutoPlaying ? 'bg-red-500 text-white animate-pulse' : 'bg-black/55 text-white hover:bg-indigo-600'}`}
+                                                          title={isAutoPlaying ? 'Stop reading aloud' : 'Read this PDF aloud (TTS)'}
+                                                          aria-label={isAutoPlaying ? 'Stop TTS' : 'Start TTS'}
+                                                      >
+                                                          {isAutoPlaying ? <Pause size={16} /> : <Headphones size={16} />}
+                                                      </button>
                                                    )}
                                                </div>
                                            </div>

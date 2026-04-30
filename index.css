@@ -578,6 +578,44 @@ button {
 .dark-mode [class*="bg-violet-50"], .dark-mode [class*="bg-violet-100"] { background-color: #2e1065 !important; }
 .dark-mode [class*="bg-slate-200"], .dark-mode [class*="bg-slate-300"]  { background-color: #1e293b !important; }
 
+/* ── GRADIENT BACKGROUNDS ──
+   Tailwind ke `from-*-50/100`, `via-*-50/100`, `to-*-50/100` classes
+   sirf CSS variables (`--tw-gradient-from` etc.) set karte hain — woh
+   `[class*="bg-amber-50"]` selector me match nahi karte, isliye light
+   warm gradient cards (Govt. Exams card, Save/Remove Rules card) dark
+   mode me LIGHT yellow background ke saath render hote rehte the. Text
+   colours dark-mode ke liye remap ho jaate hain (light yellow / white)
+   to net result: light text on light bg → totally unreadable. Yahaan
+   gradient image hata kar solid dark colour force kar dete hain. */
+.dark-mode [class*="bg-gradient"][class*="from-yellow-50"],
+.dark-mode [class*="bg-gradient"][class*="from-yellow-100"],
+.dark-mode [class*="bg-gradient"][class*="via-yellow-50"],
+.dark-mode [class*="bg-gradient"][class*="via-yellow-100"],
+.dark-mode [class*="bg-gradient"][class*="to-yellow-50"],
+.dark-mode [class*="bg-gradient"][class*="to-yellow-100"] { background-image: none !important; background-color: #422006 !important; }
+.dark-mode [class*="bg-gradient"][class*="from-amber-50"],
+.dark-mode [class*="bg-gradient"][class*="from-amber-100"],
+.dark-mode [class*="bg-gradient"][class*="via-amber-50"],
+.dark-mode [class*="bg-gradient"][class*="via-amber-100"],
+.dark-mode [class*="bg-gradient"][class*="to-amber-50"],
+.dark-mode [class*="bg-gradient"][class*="to-amber-100"] { background-image: none !important; background-color: #451a03 !important; }
+.dark-mode [class*="bg-gradient"][class*="from-orange-50"],
+.dark-mode [class*="bg-gradient"][class*="from-orange-100"],
+.dark-mode [class*="bg-gradient"][class*="via-orange-50"],
+.dark-mode [class*="bg-gradient"][class*="via-orange-100"],
+.dark-mode [class*="bg-gradient"][class*="to-orange-50"],
+.dark-mode [class*="bg-gradient"][class*="to-orange-100"] { background-image: none !important; background-color: #431407 !important; }
+
+/* Colored text — `text-*-600` versions (in addition to 700/800/900
+   already handled below). Govt. Exams card uses text-orange-600 for
+   the "Competitive Mode" mini-badge — that wasn't being remapped, so
+   it stayed dark orange and disappeared on the now-dark card. */
+.dark-mode [class*="text-yellow-600"] { color: #fcd34d !important; }
+.dark-mode [class*="text-amber-600"]  { color: #fbbf24 !important; }
+.dark-mode [class*="text-orange-600"] { color: #fb923c !important; }
+.dark-mode [class*="text-orange-500"] { color: #fb923c !important; }
+.dark-mode [class*="text-amber-500"]  { color: #fbbf24 !important; }
+
 /* Colored text → lighter readable versions */
 .dark-mode [class*="text-indigo-700"],.dark-mode [class*="text-indigo-800"],.dark-mode [class*="text-indigo-900"] { color: #a5b4fc !important; }
 .dark-mode [class*="text-blue-700"],  .dark-mode [class*="text-blue-800"],  .dark-mode [class*="text-blue-900"]   { color: #93c5fd !important; }
@@ -641,6 +679,33 @@ button {
 .dark-mode-blue [class*="bg-purple-50"], .dark-mode-blue [class*="bg-purple-100"] { background-color: #250838 !important; }
 .dark-mode-blue [class*="bg-violet-50"], .dark-mode-blue [class*="bg-violet-100"] { background-color: #1e083d !important; }
 .dark-mode-blue [class*="bg-slate-200"], .dark-mode-blue [class*="bg-slate-300"]  { background-color: #1e293b !important; }
+
+/* Gradient warm-light fix (same fix as plain dark-mode above, navy variant) */
+.dark-mode-blue [class*="bg-gradient"][class*="from-yellow-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="from-yellow-100"],
+.dark-mode-blue [class*="bg-gradient"][class*="via-yellow-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="via-yellow-100"],
+.dark-mode-blue [class*="bg-gradient"][class*="to-yellow-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="to-yellow-100"] { background-image: none !important; background-color: #2c1a08 !important; }
+.dark-mode-blue [class*="bg-gradient"][class*="from-amber-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="from-amber-100"],
+.dark-mode-blue [class*="bg-gradient"][class*="via-amber-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="via-amber-100"],
+.dark-mode-blue [class*="bg-gradient"][class*="to-amber-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="to-amber-100"] { background-image: none !important; background-color: #2c1a06 !important; }
+.dark-mode-blue [class*="bg-gradient"][class*="from-orange-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="from-orange-100"],
+.dark-mode-blue [class*="bg-gradient"][class*="via-orange-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="via-orange-100"],
+.dark-mode-blue [class*="bg-gradient"][class*="to-orange-50"],
+.dark-mode-blue [class*="bg-gradient"][class*="to-orange-100"] { background-image: none !important; background-color: #2c1208 !important; }
+
+/* `text-*-600/500` warm variants — match dark-mode for consistency */
+.dark-mode-blue [class*="text-yellow-600"] { color: #fcd34d !important; }
+.dark-mode-blue [class*="text-amber-600"]  { color: #fbbf24 !important; }
+.dark-mode-blue [class*="text-orange-600"] { color: #fb923c !important; }
+.dark-mode-blue [class*="text-orange-500"] { color: #fb923c !important; }
+.dark-mode-blue [class*="text-amber-500"]  { color: #fbbf24 !important; }
 
 /* Colored text → lighter readable versions */
 .dark-mode-blue [class*="text-indigo-700"],.dark-mode-blue [class*="text-indigo-800"],.dark-mode-blue [class*="text-indigo-900"] { color: #a5b4fc !important; }

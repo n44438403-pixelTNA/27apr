@@ -96,10 +96,16 @@ interface Props {
    *  When provided and >0, the topic shows a small "⭐ N" pill so students see
    *  how many other learners have marked the same line as Important. */
   getStarCount?: (topicText: string) => number;
+  /** External text-colour override (hex). When set, this colour is applied to
+   *  every topic line and the in-reader Palette colour picker is hidden — the
+   *  parent component is fully in charge of reading colour (e.g. PdfView's
+   *  inline Read More wrapper which lets the user pick a coherent background
+   *  + text-colour preset together). */
+  textColorOverride?: string;
 }
 
 
-export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, hideTopBar, initialIndex, onPositionChange, noteKey, isStarred, onStarToggle, searchQuery, getStarCount }) => {
+export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, hideTopBar, initialIndex, onPositionChange, noteKey, isStarred, onStarToggle, searchQuery, getStarCount, textColorOverride }) => {
   const topics = useMemo(() => splitIntoTopics(content), [content]);
 
   const [activeIdx, setActiveIdx] = useState<number | null>(initialIndex ?? null);
@@ -342,8 +348,12 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               {/* Reading-text colour picker — opens a small palette below the
                   bar with 6 swatches curated for the active theme. The first
                   swatch carries a ★ (recommended) badge; the active swatch
-                  shows a ✓. Selection persists per-theme. */}
-              <div className="relative">
+                  shows a ✓. Selection persists per-theme.
+                  HIDDEN when `textColorOverride` is set — in that mode the
+                  parent fully owns the reading colour (e.g. PdfView's inline
+                  Read More wrapper picks bg + text together as a coherent
+                  preset, so two color pickers would just confuse the user. */}
+              <div className="relative" style={{ display: textColorOverride ? 'none' : undefined }}>
                 <button
                   type="button"
                   onClick={() => setShowColorMenu(s => !s)}
@@ -471,8 +481,9 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                     fontSize: `${fontSize}px`,
                     // The active (currently-being-read) line keeps its yellow
                     // highlight colour for clarity. Other lines use the
-                    // student's chosen palette colour for the active theme.
-                    color: isActive ? undefined : textColor,
+                    // parent-supplied override (if any) or the student's
+                    // chosen palette colour for the active theme.
+                    color: isActive ? undefined : (textColorOverride || textColor),
                   }}
                 >
                   <span className={`font-bold mr-1.5 ${starred ? 'text-amber-400' : 'text-indigo-400'}`}>•</span>
