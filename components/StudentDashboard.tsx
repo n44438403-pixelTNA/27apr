@@ -875,8 +875,10 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showReferralPopup, setShowReferralPopup] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [isDocFullscreen, setIsDocFullscreen] = useState(false);
+  const rotateFullscreenRef = useRef(false);
   useEffect(() => {
     const handler = () => {
+      if (rotateFullscreenRef.current) return;
       setIsDocFullscreen(!!document.fullscreenElement);
     };
     document.addEventListener('fullscreenchange', handler);
@@ -6384,31 +6386,12 @@ export const StudentDashboard: React.FC<Props> = ({
                   </div>
                 </button>
 
-                {/* DESKTOP MODE TOGGLE */}
-                <button
-                  onClick={() => {
-                    const next = !desktopMode;
-                    setDesktopMode(next);
-                    setDesktopModeState(next);
-                  }}
-                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${cardBg}`}
-                >
-                  <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-600'}`}>
-                    {desktopMode ? <Monitor size={18} /> : <Smartphone size={18} />}
-                  </div>
-                  <div className="flex-1 text-left min-w-0">
-                    <div className={`text-sm font-bold ${sheetTextStrong}`}>{tApp(appLang, 'desktop_mode')}</div>
-                    <div className={`text-[11px] font-medium ${sheetTextMuted}`}>{tApp(appLang, 'desktop_mode_hint')}</div>
-                  </div>
-                  <div className={`w-10 h-6 ${desktopMode ? 'bg-indigo-500' : (isDarkMode ? 'bg-slate-700' : 'bg-slate-200')} rounded-full flex items-center px-1 overflow-hidden`}>
-                    <div className={`w-4 h-4 rounded-full transition-transform bg-white shadow ${desktopMode ? 'translate-x-4' : ''}`}></div>
-                  </div>
-                </button>
-
                 {/* ROTATE SCREEN */}
                 <button
                   onClick={async () => {
+                    rotateFullscreenRef.current = true;
                     const result = await rotateScreen();
+                    rotateFullscreenRef.current = false;
                     if (result === null) {
                       showAlert(tApp(appLang, 'rotate_unsupported'), 'WARNING');
                     }
