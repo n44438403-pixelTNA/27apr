@@ -1,0 +1,30 @@
+--- components/StudentDashboard.tsx
++++ components/StudentDashboard.tsx
+@@ -6776,7 +6776,27 @@
+                     .toUpperCase()}
+                 </span>
+               )}
++
++            {/* ROTATE BUTTON HERE */}
++            <button onClick={async () => {
++                const isRotated = localStorage.getItem('is_screen_rotated') === 'true';
++                if (isRotated) {
++                    if (document.fullscreenElement) {
++                        try { document.exitFullscreen(); } catch (e) {}
++                    }
++                    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {}
++                    localStorage.setItem('is_screen_rotated', 'false');
++                } else {
++                    const result = await rotateScreen();
++                    if (result) {
++                        localStorage.setItem('is_screen_rotated', 'true');
++                    } else {
++                        showAlert('Screen rotation not supported on this device/browser.', 'WARNING');
++                    }
++                }
++            }} className="ml-1 p-1 bg-white/20 rounded hover:bg-white/30 text-white transition-colors" title="Rotate Screen">
++                <RotateCcw size={12} />
++            </button>
+           </div>
+         </div>
+       </div>
