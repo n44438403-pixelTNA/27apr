@@ -3,6 +3,7 @@ import { stripHtml } from './textToSpeech';
 export interface NotesTopic {
   text: string;
   isHeading: boolean;
+  isHtml?: boolean;
 }
 
 /**
@@ -35,7 +36,7 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
   // we bypass text splitting and preserve the raw HTML chunk.
   if (raw.includes('```html') || raw.includes('<table') || raw.includes('<tbody>') || (raw.includes('<div') && raw.includes('</div>'))) {
     const cleanedHtml = raw.replace(/```html\n?/gi, '').replace(/```\n?/g, '').trim();
-    return [{ text: cleanedHtml, isHeading: false }];
+    return [{ text: cleanedHtml, isHeading: false, isHtml: true }];
   }
 
   let text = raw;
