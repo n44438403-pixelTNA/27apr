@@ -4575,6 +4575,28 @@ export const StudentDashboard: React.FC<Props> = ({
       return (
         <PullToRefresh onRefresh={() => window.location.reload()}>
         <div className="flex flex-col gap-4 pb-4">
+          {/* EXTERNAL MCQ APP LINK BUTTON */}
+          {settings?.mcqAppUrl && (
+            <div className="order-0 px-4 mt-2">
+              <button
+                onClick={() => { hapticStrong(); setIframeUrl(settings.mcqAppUrl!); setIframeTitle(settings.mcqAppTitle || 'MCQ App'); }}
+                className="w-full relative overflow-hidden bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 rounded-3xl p-4 shadow-[0_8px_30px_rgb(245,158,11,0.3)] hover:shadow-[0_8px_30px_rgb(245,158,11,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all group flex items-center justify-between"
+              >
+                 <span className="absolute -right-6 -top-6 w-24 h-24 bg-white/20 rounded-full blur-2xl group-hover:bg-white/30 transition-colors" />
+                 <div className="flex items-center gap-3 relative z-10">
+                   <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center text-white shadow-inner">
+                     <Crown size={20} className="text-yellow-100" />
+                   </div>
+                   <div className="text-left">
+                     <span className="text-white font-black text-lg block leading-tight tracking-wide drop-shadow-sm">{settings.mcqAppTitle || 'MCQ App'}</span>
+                     <span className="text-white/90 text-[10px] font-bold uppercase tracking-widest block bg-white/20 px-2 py-0.5 rounded-full mt-1 border border-white/30 shadow-sm">Premium Feature</span>
+                   </div>
+                 </div>
+                 <ExternalLink size={20} className="text-white/50 group-hover:text-white transition-colors relative z-10" />
+              </button>
+            </div>
+          )}
+
           {/* RESUME READING — page-wise (chapters + ALL homework notes), sorted by latest activity */}
           <div className="order-1">
           {isHomeSectionVisible('home_continue_reading', settings) && (() => {
