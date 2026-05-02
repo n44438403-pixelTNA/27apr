@@ -139,7 +139,7 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
   // Unicode property \p{Emoji} would be ideal but is not safe in older runtimes,
   // so we enumerate the common emoji ranges and symbol categories explicitly.
   const ENGLISH_SENTENCE_BOUNDARY =
-    /(?<=[.!?])\s+(?=[A-Z\u0900-\u097F0-9(\-•*"'\u2013\u2014\u2018\u201C\uD83C-\uDBFF\u2600-\u27BF])/g;
+    /(?<=[.!?])\s+(?=[A-Za-z\u0900-\u097F0-9(\-•*"'\u2013\u2014\u2018\u201C\uD83C-\uDBFF\u2600-\u27BF])/g;
   // Section markers that should each START a new topic line.
   const SECTION_MARKERS = /(?=(?:PART|UNIT|CHAPTER|SECTION|SET|MODEL\s*SET)\s*[-–]?\s*\d+\s*[:.)])|(?=\([A-Z][A-Z\s\/]{2,}\)\s*[:.)])|(?=📝|🎯|✏️|📌|⭐|💡|🔥|✨|📚|🎓|⚡)/g;
 
