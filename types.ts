@@ -531,7 +531,8 @@ export interface SystemSettings {
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page
   showHomeResumeFilter?: boolean; // NEW: Show subject filter chips above Home "Continue Reading" card
-  mcqAppUrl?: string; // NEW: External MCQ Maker app URL (loaded in iframe)
+  mcqAppUrl?: string;
+  mcqAppTitle?: string; // NEW: External MCQ Maker app URL (loaded in iframe)
   bannerConfig?: {
       top: BannerSettings;
       bottom: BannerSettings;
