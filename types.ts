@@ -495,6 +495,8 @@ export interface SystemSettings {
     teacherCodes?: TeacherCode[];
   appName: string; // Long Name
   activeEvents?: EventBannerConfig[]; // NEW: Event Banners
+  mcqAppUrl?: string;
+  mcqAppTitle?: string;
   mcqUnlockThreshold?: number; // NEW: Customizable unlock threshold
   mcqTestLimitFree?: number;
   mcqLimitFree?: number; // Daily Limit Free

@@ -4667,6 +4667,29 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               />
                               <p className="text-[10px] text-slate-500 mt-1">This video will play in the Custom Page. (Google Drive link)</p>
                           </div>
+
+                          <div className="md:col-span-2 grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">MCQ App Title</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g. Test Series App"
+                                    value={localSettings.mcqAppTitle || ''}
+                                    onChange={(e) => setLocalSettings({...localSettings, mcqAppTitle: e.target.value})}
+                                    className="w-full p-2 bg-slate-50 border rounded-lg text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">MCQ App URL (For Home Page)</label>
+                                <input
+                                    type="text"
+                                    placeholder="Paste external app URL here"
+                                    value={localSettings.mcqAppUrl || ''}
+                                    onChange={(e) => setLocalSettings({...localSettings, mcqAppUrl: e.target.value})}
+                                    className="w-full p-2 bg-slate-50 border rounded-lg text-sm"
+                                />
+                            </div>
+                          </div>
                       </div>
                   </div>
 
