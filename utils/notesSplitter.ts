@@ -34,7 +34,7 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
 
   // If the text contains markdown codeblocks for html or explicitly large HTML structures (like tables),
   // we bypass text splitting and preserve the raw HTML chunk.
-  if (raw.includes('```html') || raw.includes('<table') || raw.includes('<tbody>') || (raw.includes('<div') && raw.includes('</div>'))) {
+  if (raw.includes('```html') || raw.includes('<table') || raw.includes('<tbody>')) {
     const cleanedHtml = raw.replace(/```html\n?/gi, '').replace(/```\n?/g, '').trim();
     return [{ text: cleanedHtml, isHeading: false, isHtml: true }];
   }
