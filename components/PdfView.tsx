@@ -1995,7 +1995,7 @@ export const PdfView: React.FC<Props> = ({
 
            {/* 3. PREMIUM NOTES (PDF + TTS) */}
            {activeTab === 'PREMIUM' && (
-               <div className="h-[calc(100vh-140px)] flex flex-col premium-slides-container">
+               <div className="h-[calc(100vh-80px)] flex flex-col premium-slides-container">
                    {(() => {
                         const access = getTabAccess('PREMIUM');
 
