@@ -1,0 +1,16 @@
+
+  VITE v6.4.2  ready in 233 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://192.168.0.2:5173/
+[BABEL] Note: The code generator has deoptimised the styling of /app/components/AdminDashboard.tsx as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of /app/components/StudentDashboard.tsx as it exceeds the max of 500KB.
+3:56:44 AM [vite] (client) hmr update /components/StudentDashboard.tsx
+3:56:44 AM [vite] (client) hmr update /components/StudentDashboard.tsx
+[BABEL] Note: The code generator has deoptimised the styling of /app/components/StudentDashboard.tsx as it exceeds the max of 500KB.
+4:01:33 AM [vite] (client) hmr update /components/StudentDashboard.tsx
+4:02:42 AM [vite] (client) hmr update /components/StudentDashboard.tsx
+[BABEL] Note: The code generator has deoptimised the styling of /app/components/StudentDashboard.tsx as it exceeds the max of 500KB.
+4:08:52 AM [vite] (client) hmr update /components/StudentDashboard.tsx
+4:14:02 AM [vite] (client) hmr update /components/StudentDashboard.tsx
+[BABEL] Note: The code generator has deoptimised the styling of /app/components/StudentDashboard.tsx as it exceeds the max of 500KB.

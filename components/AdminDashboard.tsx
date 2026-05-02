@@ -6881,6 +6881,17 @@ Statement 2"
                               <p className="text-[10px] text-slate-500 mt-1">Loading screen aur Profile page par "Developed by …" me dikhta hai.</p>
                           </div>
 
+                          <div className="grid grid-cols-2 gap-3 mt-4">
+                              <div>
+                                  <label className="text-xs font-bold uppercase text-slate-600">External MCQ App Title</label>
+                                  <input type="text" value={localSettings.mcqAppTitle || 'MCQ Maker'} onChange={e => setLocalSettings({...localSettings, mcqAppTitle: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="MCQ Maker" />
+                              </div>
+                              <div>
+                                  <label className="text-xs font-bold uppercase text-slate-600">External MCQ App URL</label>
+                                  <input type="text" value={localSettings.mcqAppUrl || ''} onChange={e => setLocalSettings({...localSettings, mcqAppUrl: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="https://mcq-app.com" />
+                              </div>
+                          </div>
+
                           {/* === Custom Books — admin can add new "Sar Sangrah / Speedy" jaisi books ===
                               Har book ek subject ban jaata hai jo student dashboard pe page-wise notes/MCQ
                               dikhata hai (date-wise hierarchy ki jagah). Same notes Homework page pe bhi

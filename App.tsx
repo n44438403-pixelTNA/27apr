@@ -1169,7 +1169,7 @@ const App: React.FC = () => {
   };
 
   const [logoutPending, setLogoutPending] = useState(false);
-  const [logoutTimeLeft, setLogoutTimeLeft] = useState(10);
+  const [logoutTimeLeft, setLogoutTimeLeft] = useState(3);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [showCloudRecoveryModal, setShowCloudRecoveryModal] = useState(false);
 

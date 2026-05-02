@@ -131,10 +131,11 @@ import {
   Users,
   Target,
   History as HistoryIcon,
+  ExternalLink,
 } from "lucide-react";
-import { speakText, stopSpeech } from "../utils/textToSpeech";
+import { speakText, stopSpeech, getCategorizedVoices, setPreferredVoice, getPreferredVoice } from "../utils/textToSpeech";
 import { getMistakeBankSync, addMistakes, removeMistakeByQuestion } from "../utils/mistakeBank";
-import { isDesktopModeOn, setDesktopMode, applyDesktopModeFromStorage, rotateScreen } from "../utils/displayPrefs";
+import { isDesktopModeOn, setDesktopMode, applyDesktopModeFromStorage, rotateScreen, getRotateScreenPref, setRotateScreenPref } from "../utils/displayPrefs";
 import { hapticLight, hapticMedium, hapticStrong } from "../utils/haptic";
 import { splitIntoTopics } from "../utils/notesSplitter";
 import { SubjectSelection } from "./SubjectSelection";
@@ -1057,6 +1058,27 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showAiModal, setShowAiModal] = useState(false);
   const [showHomeworkHistory, setShowHomeworkHistory] = useState(false);
   const [showSettingsSheet, setShowSettingsSheet] = useState(false);
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+  const [voices, setVoices] = useState<{ hindi: SpeechSynthesisVoice[], indianEnglish: SpeechSynthesisVoice[], others: SpeechSynthesisVoice[] }>({ hindi: [], indianEnglish: [], others: [] });
+  const [preferredVoiceUri, setPreferredVoiceUri] = useState<string>('');
+  const [voiceSpeed, setVoiceSpeed] = useState<number>(1.0);
+
+  useEffect(() => {
+    if (showVoiceSettings) {
+      getCategorizedVoices().then(v => {
+        // limit to 10 hindi and 10 english voices
+        v.hindi = v.hindi.slice(0, 10);
+        v.indianEnglish = v.indianEnglish.slice(0, 10);
+        setVoices(v);
+      });
+      getPreferredVoice().then(v => {
+        if (v) setPreferredVoiceUri(v.voiceURI);
+      });
+      const speed = parseFloat(localStorage.getItem('nst_voice_speed') || '1.0');
+      setVoiceSpeed(speed);
+    }
+  }, [showVoiceSettings]);
+
   const [appLang, setAppLangState] = useAppLang();
   const [desktopMode, setDesktopModeState] = useState<boolean>(() => isDesktopModeOn());
   useEffect(() => { applyDesktopModeFromStorage(); }, []);
@@ -4575,6 +4597,28 @@ export const StudentDashboard: React.FC<Props> = ({
       return (
         <PullToRefresh onRefresh={() => window.location.reload()}>
         <div className="flex flex-col gap-4 pb-4">
+          {/* EXTERNAL MCQ APP LINK BUTTON */}
+          {settings?.mcqAppUrl && (
+            <div className="order-0 px-4 mt-2">
+              <button
+                onClick={() => { hapticStrong(); setIframeUrl(settings.mcqAppUrl!); setIframeTitle(settings.mcqAppTitle || 'MCQ App'); }}
+                className="w-full relative overflow-hidden bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 rounded-3xl p-4 shadow-[0_8px_30px_rgb(245,158,11,0.3)] hover:shadow-[0_8px_30px_rgb(245,158,11,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all group flex items-center justify-between"
+              >
+                 <span className="absolute -right-6 -top-6 w-24 h-24 bg-white/20 rounded-full blur-2xl group-hover:bg-white/30 transition-colors" />
+                 <div className="flex items-center gap-3 relative z-10">
+                   <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center text-white shadow-inner">
+                     <Crown size={20} className="text-yellow-100" />
+                   </div>
+                   <div className="text-left">
+                     <span className="text-white font-black text-lg block leading-tight tracking-wide drop-shadow-sm">{settings.mcqAppTitle || 'MCQ App'}</span>
+                     <span className="text-white/90 text-[10px] font-bold uppercase tracking-widest block bg-white/20 px-2 py-0.5 rounded-full mt-1 border border-white/30 shadow-sm">Premium Feature</span>
+                   </div>
+                 </div>
+                 <ExternalLink size={20} className="text-white/50 group-hover:text-white transition-colors relative z-10" />
+              </button>
+            </div>
+          )}
+
           {/* RESUME READING — page-wise (chapters + ALL homework notes), sorted by latest activity */}
           <div className="order-1">
           {isHomeSectionVisible('home_continue_reading', settings) && (() => {
@@ -6303,6 +6347,95 @@ export const StudentDashboard: React.FC<Props> = ({
 
           </div>
 
+          {/* VOICE SETTINGS MODAL */}
+          {showVoiceSettings && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl relative">
+                <button
+                  onClick={() => setShowVoiceSettings(false)}
+                  className="absolute top-4 right-4 p-2 bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200"
+                >
+                  <X size={16} />
+                </button>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                    <Volume2 size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-800">Voice Settings</h3>
+                    <p className="text-[11px] text-slate-500 font-medium">Customize your audio experience</p>
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-2">Voice Speed ({voiceSpeed}x)</label>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="2.0"
+                      step="0.1"
+                      value={voiceSpeed}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setVoiceSpeed(v);
+                        localStorage.setItem('nst_voice_speed', v.toString());
+                      }}
+                      className="w-full accent-indigo-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-2">Hindi Voices</label>
+                    <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar pr-2">
+                      {voices.hindi.map(v => (
+                        <button
+                          key={v.voiceURI}
+                          onClick={() => {
+                            setPreferredVoiceUri(v.voiceURI);
+                            setPreferredVoice(v.voiceURI);
+                            speakText("नमस्ते, यह मेरी आवाज़ है।", v, voiceSpeed);
+                          }}
+                          className={`w-full text-left px-3 py-2 text-xs font-bold rounded-lg border transition-colors ${preferredVoiceUri === v.voiceURI ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                        >
+                          {v.name}
+                        </button>
+                      ))}
+                      {voices.hindi.length === 0 && <p className="text-[10px] text-slate-400 italic">No Hindi voices found.</p>}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-2">English Voices</label>
+                    <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar pr-2">
+                      {voices.indianEnglish.map(v => (
+                        <button
+                          key={v.voiceURI}
+                          onClick={() => {
+                            setPreferredVoiceUri(v.voiceURI);
+                            setPreferredVoice(v.voiceURI);
+                            speakText("Hello, this is my voice.", v, voiceSpeed);
+                          }}
+                          className={`w-full text-left px-3 py-2 text-xs font-bold rounded-lg border transition-colors ${preferredVoiceUri === v.voiceURI ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                        >
+                          {v.name}
+                        </button>
+                      ))}
+                      {voices.indianEnglish.length === 0 && <p className="text-[10px] text-slate-400 italic">No English voices found.</p>}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowVoiceSettings(false)}
+                  className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* SETTINGS SHEET MODAL */}
           {showSettingsSheet && (() => {
             // Read current dark theme type once per render so the labels stay in
@@ -6385,6 +6518,46 @@ export const StudentDashboard: React.FC<Props> = ({
                     <div className={`w-4 h-4 rounded-full transition-transform ${isDarkMode ? "translate-x-4 bg-indigo-500" : "bg-white shadow"}`}></div>
                   </div>
                 </button>
+
+                {/* VOICE SETTINGS */}
+                <button
+                  onClick={() => { setShowVoiceSettings(true); setShowSettingsSheet(false); setShowSidebar(false); }}
+                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${cardBg}`}
+                >
+                  <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-600'}`}>
+                    <Volume2 size={18} />
+                  </div>
+                  <div className="flex-1 text-left min-w-0">
+                    <div className={`text-sm font-bold ${sheetTextStrong}`}>Voice Settings</div>
+                    <div className={`text-[11px] font-medium ${sheetTextMuted}`}>Change voice & speed</div>
+                  </div>
+                  <ChevronRight size={16} className={sheetTextMuted} />
+                </button>
+
+                {/* DESKTOP MODE (HIDDEN IF DISABLED IN SETTINGS AND ROTATE IS OFF) */}
+                {settings?.isDesktopModeEnabled !== false && getRotateScreenPref() && (
+                <button
+                  onClick={() => {
+                    const willBeOn = !isDesktopModeOn();
+                    setDesktopMode(willBeOn);
+                    window.location.reload();
+                  }}
+                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center justify-between transition-all ${cardBg}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg ${isDesktopModeOn() ? 'bg-blue-500 text-white' : isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                      {isDesktopModeOn() ? <Monitor size={18} /> : <Smartphone size={18} />}
+                    </div>
+                    <div className="text-left">
+                      <div className={`text-sm font-bold ${sheetTextStrong}`}>{tApp(appLang, 'desktop_mode')}</div>
+                      <div className={`text-[11px] font-medium ${sheetTextMuted}`}>{isDesktopModeOn() ? tApp(appLang, 'desktop_mode_on') : tApp(appLang, 'desktop_mode_off')}</div>
+                    </div>
+                  </div>
+                  <div className={`w-10 h-6 rounded-full p-1 transition-colors ${isDesktopModeOn() ? 'bg-blue-500' : 'bg-slate-300'}`}>
+                    <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${isDesktopModeOn() ? 'translate-x-4' : 'translate-x-0'}`} />
+                  </div>
+                </button>
+                )}
 
                 {/* ROTATE SCREEN */}
                 <button
@@ -6712,6 +6885,23 @@ export const StudentDashboard: React.FC<Props> = ({
               <Crown size={14} className="fill-slate-800" /> {user.credits} CR
             </button>
             )}
+
+            <button
+              onClick={async () => {
+                const currentPref = getRotateScreenPref();
+                setRotateScreenPref(!currentPref);
+                rotateFullscreenRef.current = true;
+                const result = await rotateScreen();
+                rotateFullscreenRef.current = false;
+                if (result === null) {
+                  setRotateScreenPref(currentPref);
+                  showAlert(tApp(appLang, 'rotate_unsupported'), 'WARNING');
+                }
+              }}
+              className={`keep-light-badge flex items-center gap-1 px-2 py-1 rounded-full shadow-sm text-xs font-black hover:scale-105 transition-transform whitespace-nowrap shrink-0 ${getRotateScreenPref() ? 'bg-indigo-600 text-white' : 'bg-[#FDFBF7] text-slate-800 border border-amber-100'}`}
+            >
+              <RotateCcw size={14} className={getRotateScreenPref() ? "text-white" : "text-slate-800"} /> Rotate
+            </button>
 
             {/* Custom Page / Lightning */}
             {!(settings?.hiddenTopBarButtons || []).includes('LIGHTNING') && (
@@ -9864,7 +10054,7 @@ export const StudentDashboard: React.FC<Props> = ({
                   return d.getTime() >= today.getTime();
                 });
                 const hasMistakes = mistakeCount > 0;
-                return (hasActiveHomework || hasMistakes)
+                return true
                   ? [{ id: "HOMEWORK" as const, label: "Homework", Icon: GraduationCap,
                        isActive: !showStarredPage && currentLogicalTab === "HOMEWORK",
                        onClick: () => switchToLogicalTab("HOMEWORK") }]

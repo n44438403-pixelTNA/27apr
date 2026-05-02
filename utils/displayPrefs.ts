@@ -133,3 +133,15 @@ export const rotateScreen = async (): Promise<'portrait' | 'landscape' | null> =
     return null;
   }
 };
+
+export const setRotateScreenPref = (on: boolean): void => {
+  try {
+    localStorage.setItem('nst_rotate_pref', on ? '1' : '0');
+  } catch {}
+};
+
+export const getRotateScreenPref = (): boolean => {
+  try {
+    return localStorage.getItem('nst_rotate_pref') === '1';
+  } catch { return false; }
+};

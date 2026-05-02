@@ -371,11 +371,13 @@ export const chunkTextForTts = (raw: string, maxLen: number = MAX_CHUNK_LENGTH):
 export const speakText = async (
     text: string,
     voice?: SpeechSynthesisVoice | null,
-    rate: number = 1.0,
+    rate?: number,
     lang: string = 'en-US',
     onStart?: () => void,
     onEnd?: () => void
 ): Promise<SpeechSynthesisUtterance | null> => {
+    rate = rate ?? parseFloat(localStorage.getItem('nst_voice_speed') || '1.0');
+
     if (!('speechSynthesis' in window)) {
         console.warn('Text-to-speech not supported.');
         if (onEnd) onEnd();
