@@ -4667,6 +4667,29 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               />
                               <p className="text-[10px] text-slate-500 mt-1">This video will play in the Custom Page. (Google Drive link)</p>
                           </div>
+
+                          <div className="md:col-span-2 grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">MCQ App Title</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g. Test Series App"
+                                    value={localSettings.mcqAppTitle || ''}
+                                    onChange={(e) => setLocalSettings({...localSettings, mcqAppTitle: e.target.value})}
+                                    className="w-full p-2 bg-slate-50 border rounded-lg text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">MCQ App URL (For Home Page)</label>
+                                <input
+                                    type="text"
+                                    placeholder="Paste external app URL here"
+                                    value={localSettings.mcqAppUrl || ''}
+                                    onChange={(e) => setLocalSettings({...localSettings, mcqAppUrl: e.target.value})}
+                                    className="w-full p-2 bg-slate-50 border rounded-lg text-sm"
+                                />
+                            </div>
+                          </div>
                       </div>
                   </div>
 
@@ -6879,6 +6902,17 @@ Statement 2"
                                   placeholder="Nadim Anwar"
                               />
                               <p className="text-[10px] text-slate-500 mt-1">Loading screen aur Profile page par "Developed by …" me dikhta hai.</p>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 mt-4">
+                              <div>
+                                  <label className="text-xs font-bold uppercase text-slate-600">External MCQ App Title</label>
+                                  <input type="text" value={localSettings.mcqAppTitle || 'MCQ Maker'} onChange={e => setLocalSettings({...localSettings, mcqAppTitle: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="MCQ Maker" />
+                              </div>
+                              <div>
+                                  <label className="text-xs font-bold uppercase text-slate-600">External MCQ App URL</label>
+                                  <input type="text" value={localSettings.mcqAppUrl || ''} onChange={e => setLocalSettings({...localSettings, mcqAppUrl: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="https://mcq-app.com" />
+                              </div>
                           </div>
 
                           {/* === Custom Books — admin can add new "Sar Sangrah / Speedy" jaisi books ===
@@ -9459,7 +9493,7 @@ Statement 2"
                                           const newSettings = {...localSettings, homework: updated};
                                           setLocalSettings(newSettings);
                                           handleSaveSettings(newSettings);
-                                          setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'none', pageNo: '' });
+                                          setNewHomework({ ...newHomework, title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', pageNo: '' });
                                           setNewHomeworkMcqs([]);
                                           setNewHomeworkBulk(undefined);
                                           setAlertConfig({isOpen: true, message: '✅ Homework Added Successfully!'});

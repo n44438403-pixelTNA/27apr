@@ -3,8 +3,11 @@
 > vite
 
 
-  VITE v6.4.2  ready in 240 ms
+  VITE v6.4.2  ready in 253 ms
 
   ➜  Local:   http://localhost:5000/
   ➜  Network: http://192.168.0.2:5000/
 [BABEL] Note: The code generator has deoptimised the styling of /app/components/AdminDashboard.tsx as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of /app/components/StudentDashboard.tsx as it exceeds the max of 500KB.
+12:20:03 AM [vite] (client) hmr update /components/ChunkedNotesReader.tsx
+12:20:03 AM [vite] (client) hmr update /components/ChunkedNotesReader.tsx

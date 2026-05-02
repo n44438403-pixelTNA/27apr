@@ -813,20 +813,6 @@ button {
   color: #475569 !important;
 }
 
-/* Force landscape view for premium slides if required */
-@media screen and (orientation: portrait) {
-    .premium-slides-container iframe {
-        transform: rotate(-90deg);
-        transform-origin: center center;
-        width: 100vh !important;
-        height: 100vw !important;
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        margin-top: -50vw;
-        margin-left: -50vh;
-    }
-}
 
 /* 3D Model Viewer Styling */
 model-viewer {
@@ -958,4 +944,40 @@ model-viewer {
   .micro-slide-up {
     animation: none !important;
   }
+}
+
+/* Additional base styling for injected HTML structures so it "looks well decorated" / nicely formatted */
+.custom-html-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  border: 1px solid #e2e8f0;
+}
+.custom-html-content th, .custom-html-content td {
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+}
+.custom-html-content th {
+  background-color: #f8fafc;
+  font-weight: bold;
+}
+.dark-mode .custom-html-content th, .dark-mode-blue .custom-html-content th {
+  background-color: #1e293b;
+  border-color: #334155;
+}
+.dark-mode .custom-html-content td, .dark-mode-blue .custom-html-content td {
+  border-color: #334155;
+}
+.custom-html-content ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin: 1rem 0;
+}
+.custom-html-content ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin: 1rem 0;
+}
+.custom-html-content p {
+  margin-bottom: 0.75rem;
 }

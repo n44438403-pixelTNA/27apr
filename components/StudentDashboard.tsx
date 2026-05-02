@@ -4575,6 +4575,28 @@ export const StudentDashboard: React.FC<Props> = ({
       return (
         <PullToRefresh onRefresh={() => window.location.reload()}>
         <div className="flex flex-col gap-4 pb-4">
+          {/* EXTERNAL MCQ APP LINK BUTTON */}
+          {settings?.mcqAppUrl && (
+            <div className="order-0 px-4 mt-2">
+              <button
+                onClick={() => { hapticStrong(); setIframeUrl(settings.mcqAppUrl!); setIframeTitle(settings.mcqAppTitle || 'MCQ App'); }}
+                className="w-full relative overflow-hidden bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 rounded-3xl p-4 shadow-[0_8px_30px_rgb(245,158,11,0.3)] hover:shadow-[0_8px_30px_rgb(245,158,11,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all group flex items-center justify-between"
+              >
+                 <span className="absolute -right-6 -top-6 w-24 h-24 bg-white/20 rounded-full blur-2xl group-hover:bg-white/30 transition-colors" />
+                 <div className="flex items-center gap-3 relative z-10">
+                   <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center text-white shadow-inner">
+                     <Crown size={20} className="text-yellow-100" />
+                   </div>
+                   <div className="text-left">
+                     <span className="text-white font-black text-lg block leading-tight tracking-wide drop-shadow-sm">{settings.mcqAppTitle || 'MCQ App'}</span>
+                     <span className="text-white/90 text-[10px] font-bold uppercase tracking-widest block bg-white/20 px-2 py-0.5 rounded-full mt-1 border border-white/30 shadow-sm">Premium Feature</span>
+                   </div>
+                 </div>
+                 <ExternalLink size={20} className="text-white/50 group-hover:text-white transition-colors relative z-10" />
+              </button>
+            </div>
+          )}
+
           {/* RESUME READING — page-wise (chapters + ALL homework notes), sorted by latest activity */}
           <div className="order-1">
           {isHomeSectionVisible('home_continue_reading', settings) && (() => {
@@ -6795,6 +6817,26 @@ export const StudentDashboard: React.FC<Props> = ({
                     .toUpperCase()}
                 </span>
               )}
+            {/* ROTATE BUTTON HERE */}
+            <button onClick={async () => {
+                const isRotated = localStorage.getItem('is_screen_rotated') === 'true';
+                if (isRotated) {
+                    if (document.fullscreenElement) {
+                        try { document.exitFullscreen(); } catch (e) {}
+                    }
+                    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {}
+                    localStorage.setItem('is_screen_rotated', 'false');
+                } else {
+                    const result = await rotateScreen();
+                    if (result) {
+                        localStorage.setItem('is_screen_rotated', 'true');
+                    } else {
+                        showAlert('Screen rotation not supported on this device/browser.', 'WARNING');
+                    }
+                }
+            }} className="ml-1 p-1 bg-white/20 rounded hover:bg-white/30 text-white transition-colors" title="Rotate Screen">
+                <RotateCcw size={12} />
+            </button>
           </div>
         </div>
       </div>
@@ -6964,6 +7006,36 @@ export const StudentDashboard: React.FC<Props> = ({
             />
           </div>
         </div>
+      )}
+
+      {/* EXTERNAL MCQ APP BUTTON (Only on Home) */}
+      {activeTab === "HOME" && settings?.mcqAppUrl && (
+          <div className="px-2 mt-2">
+            <button
+              onClick={() => {
+                if (!user.isPremium) {
+                    setAlertConfig({isOpen: true, message: `🔒 Premium required to access ${settings.mcqAppTitle || 'MCQ App'}. Please upgrade.`});
+                    return;
+                }
+                setActiveExternalApp(settings.mcqAppUrl);
+              }}
+              className="w-full flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white p-4 rounded-xl shadow-lg border-2 border-indigo-400/50 transition-all hover:scale-[1.02] active:scale-95"
+            >
+              <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 rounded-lg backdrop-blur">
+                      <Layers size={20} className="text-white" />
+                  </div>
+                  <div className="text-left">
+                      <div className="flex items-center gap-1.5">
+                          <h4 className="font-black text-sm">{settings.mcqAppTitle || 'MCQ App'}</h4>
+                          <Crown size={12} className="text-amber-300" />
+                      </div>
+                      <p className="text-[10px] text-blue-100 font-medium opacity-90">Open external test portal</p>
+                  </div>
+              </div>
+              <ChevronRight size={18} className="text-white/60" />
+            </button>
+          </div>
       )}
 
       {/* DAILY GK & GLOBAL CHALLENGE (Only on Home) */}
@@ -10266,7 +10338,7 @@ export const StudentDashboard: React.FC<Props> = ({
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
               <span>Back</span>
             </button>
-            <span className="text-sm font-semibold text-slate-700">External App</span>
+            <span className="text-sm font-semibold text-slate-700">{settings?.mcqAppUrl === activeExternalApp ? (settings?.mcqAppTitle || 'External App') : 'External App'}</span>
             <button
               onClick={() => setActiveExternalApp(null)}
               className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 transition-colors"

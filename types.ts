@@ -495,6 +495,8 @@ export interface SystemSettings {
     teacherCodes?: TeacherCode[];
   appName: string; // Long Name
   activeEvents?: EventBannerConfig[]; // NEW: Event Banners
+  mcqAppUrl?: string;
+  mcqAppTitle?: string;
   mcqUnlockThreshold?: number; // NEW: Customizable unlock threshold
   mcqTestLimitFree?: number;
   mcqLimitFree?: number; // Daily Limit Free
@@ -531,7 +533,8 @@ export interface SystemSettings {
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page
   showHomeResumeFilter?: boolean; // NEW: Show subject filter chips above Home "Continue Reading" card
-  mcqAppUrl?: string; // NEW: External MCQ Maker app URL (loaded in iframe)
+  mcqAppUrl?: string;
+  mcqAppTitle?: string; // NEW: External MCQ Maker app URL (loaded in iframe)
   bannerConfig?: {
       top: BannerSettings;
       bottom: BannerSettings;

@@ -1995,7 +1995,8 @@ export const PdfView: React.FC<Props> = ({
 
            {/* 3. PREMIUM NOTES (PDF + TTS) */}
            {activeTab === 'PREMIUM' && (
-               <div className="h-[calc(100vh-140px)] flex flex-col premium-slides-container">
+               <div className="h-[calc(100vh-80px)] flex flex-col premium-slides-container">
+
                    {(() => {
                         const access = getTabAccess('PREMIUM');
 
@@ -2126,12 +2127,9 @@ export const PdfView: React.FC<Props> = ({
                                                                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups-to-escape-sandbox"
                                                                     style={
                                                                         pdfRotation === 0 ? { width: '100%', height: '100%' }
-                                                                        : pdfRotation === 180 ? { width: '100%', height: '100%', transform: 'rotate(180deg)', transformOrigin: 'center center' }
-                                                                        // 90°/270°: iframe ki visual width = container ki height bani jaati
-                                                                        // hai (aur vice-versa). Isliye iframe ko parent ke OPPOSITE dimensions
-                                                                        // de ke rotate karte hain — rotate ke baad woh container ke andar
-                                                                        // perfectly fit ho jaata hai.
-                                                                        : { width: 'var(--pdf-rot-w, 100%)', height: 'var(--pdf-rot-h, 100%)', transform: `rotate(${pdfRotation}deg)`, transformOrigin: 'center center' }
+                                                                        : pdfRotation === 180 ? { width: '100%', height: '100%', transform: 'rotate(180deg)', transformOrigin: 'center center', transformStyle: 'preserve-3d' }
+                                                                        // 90°/270°: translate and absolute positioning fixes the clipping
+                                                                        : { width: 'var(--pdf-rot-w, 100%)', height: 'var(--pdf-rot-h, 100%)', transform: `translate(-50%, -50%) rotate(${pdfRotation}deg)`, position: 'absolute', top: '50%', left: '50%', transformOrigin: 'center center', transformStyle: 'preserve-3d' }
                                                                     }
                                                                     ref={(el) => {
                                                                         if (!el) return;
@@ -2192,13 +2190,20 @@ export const PdfView: React.FC<Props> = ({
                                                                   setIsAutoPlaying(true);
                                                               }
                                                           }}
-                                                          className={`absolute top-3 ${pdfFullscreen ? 'right-[152px]' : 'right-3'} z-20 p-2 rounded-full backdrop-blur shadow-lg border border-white/20 transition-all ${isAutoPlaying ? 'bg-red-500 text-white animate-pulse' : 'bg-black/55 text-white hover:bg-indigo-600'}`}
+                                                          className={`p-2 rounded-full backdrop-blur shadow-lg border border-white/20 transition-all ${isAutoPlaying ? 'bg-red-500 text-white animate-pulse' : 'bg-black/55 text-white hover:bg-indigo-600'}`}
                                                           title={isAutoPlaying ? 'Stop reading aloud' : 'Read this PDF aloud (TTS)'}
                                                           aria-label={isAutoPlaying ? 'Stop TTS' : 'Start TTS'}
                                                       >
                                                           {isAutoPlaying ? <Pause size={16} /> : <Headphones size={16} />}
                                                       </button>
                                                    )}
+                                                   <button
+                                                       onClick={rotatePdf}
+                                                       className={`p-2 rounded-full backdrop-blur shadow-lg border border-white/20 ${pdfRotation !== 0 ? 'bg-purple-600 text-white' : 'bg-black/55 text-white'}`}
+                                                       title={`Rotate +90°  (current: ${pdfRotation}°)`}
+                                                   >
+                                                       <RotateCw size={16} />
+                                                   </button>
                                                </div>
                                            </div>
                                        );
