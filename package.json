@@ -12,6 +12,7 @@
     "@google/genai": "^1.35.0",
     "@google/generative-ai": "^0.24.1",
     "@heroicons/react": "^2.2.0",
+    "@types/jsdom": "^28.0.1",
     "clsx": "^2.1.1",
     "drizzle-zod": "^0.8.3",
     "firebase": "^12.10.0",
