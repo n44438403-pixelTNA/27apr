@@ -9470,7 +9470,7 @@ Statement 2"
                                           const newSettings = {...localSettings, homework: updated};
                                           setLocalSettings(newSettings);
                                           handleSaveSettings(newSettings);
-                                          setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'none', pageNo: '' });
+                                          setNewHomework({ ...newHomework, title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', pageNo: '' });
                                           setNewHomeworkMcqs([]);
                                           setNewHomeworkBulk(undefined);
                                           setAlertConfig({isOpen: true, message: '✅ Homework Added Successfully!'});
