@@ -813,20 +813,6 @@ button {
   color: #475569 !important;
 }
 
-/* Force landscape view for premium slides if required */
-@media screen and (orientation: portrait) {
-    .premium-slides-container iframe {
-        transform: rotate(-90deg);
-        transform-origin: center center;
-        width: 100vh !important;
-        height: 100vw !important;
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        margin-top: -50vw;
-        margin-left: -50vh;
-    }
-}
 
 /* 3D Model Viewer Styling */
 model-viewer {
