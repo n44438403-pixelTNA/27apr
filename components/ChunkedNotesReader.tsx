@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Volume2, Square, BookOpen, Star, Palette, Check, Type, RotateCcw, Search } from 'lucide-react';
-import { speakText, stopSpeech } from '../utils/textToSpeech';
+import { Volume2, Square, BookOpen, Star, Palette, Check, Type, RotateCcw, Search, FastForward } from 'lucide-react';
+import { speakText, stopSpeech, getPreferredVoice, getCategorizedVoices, setPreferredVoice } from '../utils/textToSpeech';
 import { splitIntoTopics, NotesTopic as Topic } from '../utils/notesSplitter';
 import { READING_FONTS, TOP_10_READING_FONTS, ensureReadingFontLoaded, getReadingFontById, ReadingFont } from '../utils/notesFonts';
 import { ReadingStylePopover } from './ReadingStylePopover';
@@ -117,6 +117,8 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
 
   const [activeIdx, setActiveIdx] = useState<number | null>(initialIndex ?? null);
   const [isReading, setIsReading] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState<number>(() => Number(localStorage.getItem('nst_tts_rate') || 1.0));
+  const [voice, setVoice] = useState<SpeechSynthesisVoice | undefined>(undefined);
   const isReadingRef = useRef(false);
   useEffect(() => { isReadingRef.current = isReading; }, [isReading]);
 
@@ -251,8 +253,8 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     }, 60);
     speakText(
       topics[idx].text,
-      undefined,
-      1.0,
+      voice,
+      playbackRate,
       language,
       undefined,
       () => {
@@ -536,7 +538,11 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   className="font-black text-indigo-800 uppercase tracking-wide"
                   style={{ fontSize: `${Math.min(fontSize + 2, 20)}px`, fontFamily: activeFont?.family }}
                 >
-                  {topic.text}
+                  {topic.isHtml ? (
+                    <div className="custom-html-content" dangerouslySetInnerHTML={{ __html: topic.text }} />
+                  ) : (
+                    <span dangerouslySetInnerHTML={{ __html: topic.text }} />
+                  )}
                 </p>
               </div>
             );
@@ -581,7 +587,11 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   }}
                 >
                   <span className={`font-bold mr-1.5 ${starred ? 'text-amber-400' : 'text-indigo-400'}`}>•</span>
-                  {topic.text}
+                  {topic.isHtml ? (
+                    <div className="custom-html-content w-full overflow-x-auto" dangerouslySetInnerHTML={{ __html: topic.text }} />
+                  ) : (
+                    <span dangerouslySetInnerHTML={{ __html: topic.text }} />
+                  )}
                 </p>
                 {/* Save count badge intentionally hidden here — yeh ab sirf
                     "Important / Starred Notes" ke Global tab page par dikhega taa ki
