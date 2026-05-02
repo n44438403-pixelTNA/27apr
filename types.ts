@@ -316,6 +316,7 @@ export interface BannerSettings {
     autoHideSeconds: number;
     bgColor?: string;
     textColor?: string;
+    clickUrl?: string;
 }
 
 export interface BannerItem {

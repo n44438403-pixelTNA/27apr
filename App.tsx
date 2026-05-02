@@ -1204,7 +1204,7 @@ const App: React.FC = () => {
        return;
     }
     setLogoutPending(true);
-    setLogoutTimeLeft(10);
+    setLogoutTimeLeft(3);
   };
 
   const handleMCQComplete = (score: number, answers: Record<number, number>, displayData: MCQItem[], timeTaken: number) => {
@@ -2437,12 +2437,16 @@ const App: React.FC = () => {
       {/* GLOBAL LIVE DASHBOARD 1 (TOP) */}
       {state.settings.bannerConfig?.top?.enabled && showTopBanner && (
           <div
-            className="text-[10px] font-bold py-1 overflow-hidden relative whitespace-nowrap z-50 transition-all duration-500 ease-in-out"
+            className={`text-[10px] font-bold py-1 overflow-hidden relative whitespace-nowrap z-50 transition-all duration-500 ease-in-out ${state.settings.bannerConfig.top.clickUrl ? 'cursor-pointer active:opacity-80' : ''}`}
             style={{
                 backgroundColor: state.settings.bannerConfig.top.bgColor || '#dc2626',
                 color: state.settings.bannerConfig.top.textColor || '#ffffff',
                 height: showTopBanner ? 'auto' : '0',
                 opacity: showTopBanner ? 1 : 0
+            }}
+            onClick={() => {
+                const url = state.settings.bannerConfig?.top?.clickUrl;
+                if (url) { try { window.open(url, '_blank', 'noopener,noreferrer'); } catch {} }
             }}
           >
               <div className="animate-marquee inline-block">
@@ -2601,12 +2605,16 @@ const App: React.FC = () => {
       {/* GLOBAL LIVE DASHBOARD 2 (BOTTOM) */}
       {state.settings.bannerConfig?.bottom?.enabled && showBottomBanner && (
           <div
-            className="fixed bottom-6 left-0 right-0 text-[10px] font-bold py-1 overflow-hidden relative whitespace-nowrap z-[39] transition-all duration-500 ease-in-out"
+            className={`fixed bottom-6 left-0 right-0 text-[10px] font-bold py-1 overflow-hidden relative whitespace-nowrap z-[39] transition-all duration-500 ease-in-out ${state.settings.bannerConfig.bottom.clickUrl ? 'cursor-pointer active:opacity-80' : ''}`}
             style={{
                 backgroundColor: state.settings.bannerConfig.bottom.bgColor || '#2563eb',
                 color: state.settings.bannerConfig.bottom.textColor || '#ffffff',
                 height: showBottomBanner ? 'auto' : '0',
                 opacity: showBottomBanner ? 1 : 0
+            }}
+            onClick={() => {
+                const url = state.settings.bannerConfig?.bottom?.clickUrl;
+                if (url) { try { window.open(url, '_blank', 'noopener,noreferrer'); } catch {} }
             }}
           >
               <div className="animate-marquee-reverse inline-block">

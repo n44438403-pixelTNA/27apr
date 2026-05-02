@@ -4817,7 +4817,23 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       </div>
                                   </div>
                               </div>
-                              <p className="text-[10px] text-red-400">* Set Auto-Hide to 0 to keep visible always.</p>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-600 uppercase">Click URL (External Link)</label>
+                                  <input
+                                      type="url"
+                                      value={localSettings.bannerConfig?.top?.clickUrl || ''}
+                                      onChange={(e) => setLocalSettings({
+                                          ...localSettings,
+                                          bannerConfig: {
+                                              ...(localSettings.bannerConfig || {} as any),
+                                              top: { ...(localSettings.bannerConfig?.top || {} as any), clickUrl: e.target.value }
+                                          }
+                                      })}
+                                      className="w-full p-2 rounded-lg border border-red-200 text-sm text-slate-700"
+                                      placeholder="https://... (tap karne par khulega)"
+                                  />
+                              </div>
+                              <p className="text-[10px] text-red-400">* Set Auto-Hide to 0 to keep visible always. Click URL set karne par banner tap karke external link khuega.</p>
                           </div>
                       </div>
 
@@ -4897,9 +4913,55 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       </div>
                                   </div>
                               </div>
-                              <p className="text-[10px] text-blue-400">* Set Auto-Hide to 0 to keep visible always.</p>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-600 uppercase">Click URL (External Link)</label>
+                                  <input
+                                      type="url"
+                                      value={localSettings.bannerConfig?.bottom?.clickUrl || ''}
+                                      onChange={(e) => setLocalSettings({
+                                          ...localSettings,
+                                          bannerConfig: {
+                                              ...(localSettings.bannerConfig || {} as any),
+                                              bottom: { ...(localSettings.bannerConfig?.bottom || {} as any), clickUrl: e.target.value }
+                                          }
+                                      })}
+                                      className="w-full p-2 rounded-lg border border-blue-200 text-sm text-slate-700"
+                                      placeholder="https://... (tap karne par khulega)"
+                                  />
+                              </div>
+                              <p className="text-[10px] text-blue-400">* Set Auto-Hide to 0 to keep visible always. Click URL set karne par banner tap karke external link khuega.</p>
                           </div>
                       </div>
+                  </div>
+              </div>
+
+              {/* CONTENT TYPES BOX CHART */}
+              <div className="mt-6 bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-2xl p-5">
+                  <h4 className="font-black text-indigo-900 text-sm uppercase tracking-wider mb-3 flex items-center gap-2">
+                      <LayoutGrid size={16} /> App Content Types — Box Chart
+                  </h4>
+                  <p className="text-[11px] text-indigo-700 mb-4">Yeh app neeche diye gaye sabhi types ka content student ko dikh sakta hai:</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                          { label: 'Notes (HTML)', icon: '📄', desc: 'Rich text notes with headings, bullets' },
+                          { label: 'PDF Viewer', icon: '📑', desc: 'Google Drive PDF embed viewer' },
+                          { label: 'MCQ Practice', icon: '✅', desc: 'Multiple-choice quiz with scoring' },
+                          { label: 'Audio / TTS', icon: '🎧', desc: 'Audio playlist + Text-to-Speech' },
+                          { label: 'Video', icon: '🎬', desc: 'YouTube / Drive embedded videos' },
+                          { label: 'Flashcards', icon: '🃏', desc: 'Flashcard-style MCQ review' },
+                          { label: 'Lucent / Sar Sangrah', icon: '📚', desc: 'Page-wise book notes + MCQ' },
+                          { label: 'Homework', icon: '📝', desc: 'Daily homework with notes & MCQs' },
+                          { label: 'Revision Hub', icon: '🔄', desc: 'Auto-spaced revision sessions' },
+                          { label: 'Live Banner', icon: '📢', desc: 'Scrolling top/bottom announcements' },
+                          { label: 'AI Assistant', icon: '🤖', desc: 'AI-powered Q&A and help' },
+                          { label: 'Weekly Test', icon: '🏆', desc: 'Timed weekly assessment tests' },
+                      ].map((type, i) => (
+                          <div key={i} className="bg-white border border-indigo-100 rounded-xl p-3 flex flex-col gap-1 shadow-sm">
+                              <div className="text-xl">{type.icon}</div>
+                              <div className="text-[11px] font-black text-indigo-800">{type.label}</div>
+                              <div className="text-[10px] text-slate-500">{type.desc}</div>
+                          </div>
+                      ))}
                   </div>
               </div>
 
@@ -9459,7 +9521,7 @@ Statement 2"
                                           const newSettings = {...localSettings, homework: updated};
                                           setLocalSettings(newSettings);
                                           handleSaveSettings(newSettings);
-                                          setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'none', pageNo: '' });
+                                          setNewHomework({ date: new Date().toISOString().split('T')[0], title: '', notes: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: newHomework.targetSubject, pageNo: '' });
                                           setNewHomeworkMcqs([]);
                                           setNewHomeworkBulk(undefined);
                                           setAlertConfig({isOpen: true, message: '✅ Homework Added Successfully!'});

@@ -67,6 +67,7 @@ import {
   Play,
   Pause,
   RotateCcw,
+  ExternalLink,
   MessageCircle,
   Gamepad2,
   Timer,
@@ -1060,6 +1061,9 @@ export const StudentDashboard: React.FC<Props> = ({
   const [appLang, setAppLangState] = useAppLang();
   const [desktopMode, setDesktopModeState] = useState<boolean>(() => isDesktopModeOn());
   useEffect(() => { applyDesktopModeFromStorage(); }, []);
+  const [isRotateEnabled, setIsRotateEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('nst_rotate_toggle') === '1'; } catch { return false; }
+  });
   const [homeworkSubjectView, setHomeworkSubjectView] = useState<string | null>(null);
   const [lucentCategoryView, setLucentCategoryView] = useState(false);
   // Page-wise notes viewer for admin-added Lucent lessons
@@ -6386,7 +6390,8 @@ export const StudentDashboard: React.FC<Props> = ({
                   </div>
                 </button>
 
-                {/* ROTATE SCREEN */}
+                {/* ROTATE SCREEN — only show when rotate toggle is ON */}
+                {isRotateEnabled && (
                 <button
                   onClick={async () => {
                     rotateFullscreenRef.current = true;
@@ -6407,6 +6412,31 @@ export const StudentDashboard: React.FC<Props> = ({
                   </div>
                   <ChevronRight size={16} className={sheetTextMuted} />
                 </button>
+                )}
+
+                {/* DESKTOP MODE — only show when rotate toggle is ON */}
+                {isRotateEnabled && (
+                <button
+                  onClick={() => {
+                    const next = !desktopMode;
+                    setDesktopMode(next);
+                    setDesktopModeState(next);
+                    try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
+                  }}
+                  className={`w-full p-4 rounded-xl border shadow-sm flex items-center gap-3 transition-all ${cardBg}`}
+                >
+                  <div className={`p-2 rounded-lg ${desktopMode ? (isDarkMode ? 'bg-blue-500/30 text-blue-200' : 'bg-blue-100 text-blue-700') : (isDarkMode ? 'bg-slate-600/30 text-slate-400' : 'bg-slate-100 text-slate-600')}`}>
+                    <Monitor size={18} />
+                  </div>
+                  <div className="flex-1 text-left min-w-0">
+                    <div className={`text-sm font-bold ${sheetTextStrong}`}>Desktop Mode</div>
+                    <div className={`text-[11px] font-medium ${sheetTextMuted}`}>{desktopMode ? 'Wide layout active' : 'Mobile layout active'}</div>
+                  </div>
+                  <div className={`w-10 h-6 ${desktopMode ? 'bg-blue-600' : (isDarkMode ? 'bg-slate-700' : 'bg-slate-200')} rounded-full flex items-center px-1 overflow-hidden transition-colors`}>
+                    <div className={`w-4 h-4 rounded-full transition-transform ${desktopMode ? 'translate-x-4 bg-white' : 'bg-white shadow'}`}></div>
+                  </div>
+                </button>
+                )}
 
                 {/* SETUP RECOVERY */}
                 <button
@@ -6712,6 +6742,35 @@ export const StudentDashboard: React.FC<Props> = ({
               <Crown size={14} className="fill-slate-800" /> {user.credits} CR
             </button>
             )}
+
+            {/* ROTATE TOGGLE BUTTON */}
+            <button
+              onClick={() => {
+                const next = !isRotateEnabled;
+                setIsRotateEnabled(next);
+                try { localStorage.setItem('nst_rotate_toggle', next ? '1' : '0'); } catch {}
+                if (next) {
+                  // Unlock orientation
+                  try { (screen as any).orientation?.unlock?.(); } catch {}
+                } else {
+                  // Lock to portrait when toggled off
+                  try {
+                    const so = (screen as any).orientation;
+                    if (so?.lock) so.lock('portrait').catch(() => {});
+                  } catch {}
+                  // Also turn off desktop mode if it was on
+                  if (desktopMode) { setDesktopMode(false); setDesktopModeState(false); }
+                }
+              }}
+              className={`keep-light-badge p-1.5 rounded-full transition-all shrink-0 border ${
+                isRotateEnabled
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
+                  : 'bg-[#FDFBF7] text-slate-600 border-amber-100'
+              }`}
+              title={isRotateEnabled ? 'Rotation ON — tap to lock' : 'Rotation OFF — tap to unlock'}
+            >
+              <RotateCcw size={15} className={isRotateEnabled ? 'animate-spin-slow' : ''} />
+            </button>
 
             {/* Custom Page / Lightning */}
             {!(settings?.hiddenTopBarButtons || []).includes('LIGHTNING') && (
@@ -9851,25 +9910,10 @@ export const StudentDashboard: React.FC<Props> = ({
                 isActive: !showStarredPage && currentLogicalTab === "HOME",
                 onClick: () => switchToLogicalTab("HOME"),
               },
-              // ── HOMEWORK: visible if active homework OR pending mistakes ────
-              // Daily My Mistake lives inside Homework page, so the tab persists
-              // whenever student has unresolved mistakes (even with no homework).
-              ...(() => {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const hasActiveHomework = (settings?.homework || []).some((hw) => {
-                  const d = new Date(hw.date);
-                  if (isNaN(d.getTime())) return false;
-                  d.setHours(0, 0, 0, 0);
-                  return d.getTime() >= today.getTime();
-                });
-                const hasMistakes = mistakeCount > 0;
-                return (hasActiveHomework || hasMistakes)
-                  ? [{ id: "HOMEWORK" as const, label: "Homework", Icon: GraduationCap,
-                       isActive: !showStarredPage && currentLogicalTab === "HOMEWORK",
-                       onClick: () => switchToLogicalTab("HOMEWORK") }]
-                  : [];
-              })(),
+              // ── HOMEWORK: always visible (permanent button) ────
+              { id: "HOMEWORK" as const, label: "Homework", Icon: GraduationCap,
+                isActive: !showStarredPage && currentLogicalTab === "HOMEWORK",
+                onClick: () => switchToLogicalTab("HOMEWORK") },
 
               // ── CASCADING SLOT SYSTEM ──────────────────────────────────────
               // Each item occupies its slot only if enabled.

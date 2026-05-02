@@ -8,6 +8,15 @@ import { ReadingStylePopover } from './ReadingStylePopover';
 const FONT_SIZES = [13, 15, 17, 20] as const;
 const FONT_SIZE_KEY = 'nst_reading_font_size';
 const FONT_FAMILY_KEY = 'nst_reading_font_family';
+const VOICE_SPEED_KEY = 'nst_tts_speed';
+const VOICE_SPEEDS = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0] as const;
+const SPEED_LABELS = ['0.75x', '1x', '1.25x', '1.5x', '1.75x', '2x'] as const;
+const getStoredSpeedIdx = (): number => {
+  try {
+    const v = parseInt(localStorage.getItem(VOICE_SPEED_KEY) || '1', 10);
+    return isNaN(v) || v < 0 || v > 5 ? 1 : v;
+  } catch { return 1; }
+};
 
 const getStoredFontFamilyId = (): string | null => {
   try { return localStorage.getItem(FONT_FAMILY_KEY); } catch { return null; }
@@ -119,6 +128,19 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   const [isReading, setIsReading] = useState(false);
   const isReadingRef = useRef(false);
   useEffect(() => { isReadingRef.current = isReading; }, [isReading]);
+
+  // Voice speed control
+  const [speedIdx, setSpeedIdx] = useState<number>(getStoredSpeedIdx);
+  const speedIdxRef = useRef(speedIdx);
+  useEffect(() => { speedIdxRef.current = speedIdx; }, [speedIdx]);
+  const cycleSpeed = () => {
+    setSpeedIdx(prev => {
+      const next = (prev + 1) % VOICE_SPEEDS.length;
+      try { localStorage.setItem(VOICE_SPEED_KEY, String(next)); } catch {}
+      speedIdxRef.current = next;
+      return next;
+    });
+  };
 
   // Font scaling
   const [fontIdx, setFontIdx] = useState<number>(getStoredFontIdx);
@@ -252,7 +274,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     speakText(
       topics[idx].text,
       undefined,
-      1.0,
+      VOICE_SPEEDS[speedIdxRef.current] ?? 1.0,
       language,
       undefined,
       () => {
@@ -496,6 +518,17 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   </>
                 )}
               </div>
+
+              {/* Voice Speed Button */}
+              <button
+                type="button"
+                onClick={cycleSpeed}
+                className="shrink-0 px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 transition text-[10px] font-black text-slate-700 whitespace-nowrap"
+                title="Voice speed badlein"
+                aria-label={`Speed: ${SPEED_LABELS[speedIdx]}`}
+              >
+                {SPEED_LABELS[speedIdx]}
+              </button>
 
               <button
                 onClick={() => {
