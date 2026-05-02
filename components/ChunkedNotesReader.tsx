@@ -538,11 +538,15 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   className="font-black text-indigo-800 uppercase tracking-wide"
                   style={{ fontSize: `${Math.min(fontSize + 2, 20)}px`, fontFamily: activeFont?.family }}
                 >
+
                   {topic.isHtml ? (
                     <div className="custom-html-content" dangerouslySetInnerHTML={{ __html: topic.text }} />
                   ) : (
                     <span dangerouslySetInnerHTML={{ __html: topic.text }} />
                   )}
+
+                  {topic.text}
+
                 </p>
               </div>
             );
@@ -587,11 +591,15 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   }}
                 >
                   <span className={`font-bold mr-1.5 ${starred ? 'text-amber-400' : 'text-indigo-400'}`}>•</span>
+
                   {topic.isHtml ? (
                     <div className="custom-html-content w-full overflow-x-auto" dangerouslySetInnerHTML={{ __html: topic.text }} />
                   ) : (
                     <span dangerouslySetInnerHTML={{ __html: topic.text }} />
                   )}
+
+                  {topic.text}
+
                 </p>
                 {/* Save count badge intentionally hidden here — yeh ab sirf
                     "Important / Starred Notes" ke Global tab page par dikhega taa ki

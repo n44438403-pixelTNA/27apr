@@ -32,12 +32,14 @@ function stripTrailingDots(t: string): string {
 export const splitIntoTopics = (raw: string): NotesTopic[] => {
   if (!raw) return [];
 
+
   // If the text contains markdown codeblocks for html or explicitly large HTML structures (like tables),
   // we bypass text splitting and preserve the raw HTML chunk.
   if (raw.includes('```html') || raw.includes('<table') || raw.includes('<tbody>') || (raw.includes('<div') && raw.includes('</div>'))) {
     const cleanedHtml = raw.replace(/```html\n?/gi, '').replace(/```\n?/g, '').trim();
     return [{ text: cleanedHtml, isHeading: false, isHtml: true }];
   }
+
 
   let text = raw;
   if (/[<][a-zA-Z!\/]/.test(text)) {
