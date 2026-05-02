@@ -2125,21 +2125,25 @@ export const PdfView: React.FC<Props> = ({
                                                                     allow="autoplay"
                                                                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups-to-escape-sandbox"
                                                                     style={
-                                                                        pdfRotation === 0 ? { width: '100%', height: '100%' }
-                                                                        : pdfRotation === 180 ? { width: '100%', height: '100%', transform: 'rotate(180deg)', transformOrigin: 'center center', transformStyle: 'preserve-3d' }
-                                                                        // 90°/270°: translate and absolute positioning fixes the clipping
-                                                                        : { width: 'var(--pdf-rot-w, 100%)', height: 'var(--pdf-rot-h, 100%)', transform: `translate(-50%, -50%) rotate(${pdfRotation}deg)`, position: 'absolute', top: '50%', left: '50%', transformOrigin: 'center center', transformStyle: 'preserve-3d' }
+                                                                        (pdfRotation === 90 || pdfRotation === 270)
+                                                                            ? {
+                                                                                width: '100vh',
+                                                                                height: '100vw',
+                                                                                transform: `translate(-50%, -50%) rotate(${pdfRotation}deg) scale(0.95)`,
+                                                                                position: 'absolute',
+                                                                                top: '50%',
+                                                                                left: '50%',
+                                                                                transformOrigin: 'center center',
+                                                                                maxWidth: 'none',
+                                                                                maxHeight: 'none'
+                                                                              }
+                                                                            : {
+                                                                                width: '100%',
+                                                                                height: '100%',
+                                                                                transform: `rotate(${pdfRotation}deg)`,
+                                                                                transformOrigin: 'center center'
+                                                                              }
                                                                     }
-                                                                    ref={(el) => {
-                                                                        if (!el) return;
-                                                                        if (pdfRotation === 90 || pdfRotation === 270) {
-                                                                            const parent = el.parentElement;
-                                                                            if (parent) {
-                                                                                el.style.setProperty('--pdf-rot-w', `${parent.clientHeight}px`);
-                                                                                el.style.setProperty('--pdf-rot-h', `${parent.clientWidth}px`);
-                                                                            }
-                                                                        }
-                                                                    }}
                                                                 />
                                                             </div>
                                                             {/* Invisible Header Blocker */}
